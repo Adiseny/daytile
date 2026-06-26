@@ -36,7 +36,7 @@ class PlannerRepository private constructor(
         var created = false
         inTransaction {
             val normalizedTitle = normalizeTitle(title)
-            val snappedStart = TimeSnapper.floorToSnap(startMinutes)
+            val snappedStart = TimeSnapper.floorToValidStart(startMinutes)
             val dateKey = date.toEpochDay()
             val nextStartMinutes = dao.getNextStartMinutes(dateKey, snappedStart)
             val previousDuration = dao.getLatestPreviousDurationForTitle(
@@ -85,7 +85,7 @@ class PlannerRepository private constructor(
     suspend fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int) {
         inTransaction {
             val current = dao.getBlock(id) ?: return@inTransaction
-            val snappedStartRaw = TimeSnapper.floorToSnap(startMinutes)
+            val snappedStartRaw = TimeSnapper.floorToValidStart(startMinutes)
             val snappedDuration = TimeSnapper.clampDuration(
                 startMinutes = snappedStartRaw,
                 durationMinutes = TimeSnapper.snapDurationToNearest(durationMinutes)

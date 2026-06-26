@@ -9,10 +9,14 @@ object TimeSnapper {
     const val MinutesPerHour = 60
     const val SnapMinutes = 5
     const val DefaultDurationMinutes = 60
-    const val MinimumDurationMinutes = 5
+    const val MinimumDurationMinutes = 10
 
     fun floorToSnap(minutes: Int): Int {
         return minutes.coerceIn(0, MinutesPerDay - 1) / SnapMinutes * SnapMinutes
+    }
+
+    fun floorToValidStart(minutes: Int, durationMinutes: Int = MinimumDurationMinutes): Int {
+        return clampStart(floorToSnap(minutes), durationMinutes)
     }
 
     fun snapDurationToNearest(minutes: Int): Int {

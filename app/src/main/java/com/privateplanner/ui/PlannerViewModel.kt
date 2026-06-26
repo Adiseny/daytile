@@ -106,7 +106,7 @@ class PlannerViewModel(
 
     fun openCreate(startMinutes: Int) {
         createError.value = null
-        sheet.value = PlannerSheet.CreateBlock(TimeSnapper.floorToSnap(startMinutes))
+        sheet.value = PlannerSheet.CreateBlock(TimeSnapper.floorToValidStart(startMinutes))
     }
 
     fun openActions(blockId: Long) {

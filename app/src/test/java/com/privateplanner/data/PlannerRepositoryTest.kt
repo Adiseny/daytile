@@ -133,6 +133,22 @@ class PlannerRepositoryTest {
     }
 
     @Test
+    fun createBlockInFinalFiveMinutesUsesLatestValidStart() = runBlocking {
+        val dao = FakePlannerBlockDao(emptyList())
+        val repository = PlannerRepository(dao)
+
+        val created = repository.createBlock(
+            date = LocalDate.of(2026, 5, 29),
+            startMinutes = 23 * 60 + 55,
+            title = "Late note"
+        )
+
+        assertTrue(created)
+        assertEquals(23 * 60 + 50, dao.inserted.single().startMinutes)
+        assertEquals(10, dao.inserted.single().durationMinutes)
+    }
+
+    @Test
     fun deletedOnlyMatchingTitleDoesNotLeaveDurationHistory() = runBlocking {
         val date = LocalDate.of(2026, 5, 28)
         val dao = FakePlannerBlockDao(
@@ -186,6 +202,25 @@ class PlannerRepositoryTest {
         val block = dao.getBlock(20)!!
         assertEquals(10 * 60, block.startMinutes)
         assertEquals(60, block.durationMinutes)
+    }
+
+    @Test
+    fun updateTimeInFinalFiveMinutesUsesLatestValidStart() = runBlocking {
+        val date = "2026-05-29"
+        val dao = FakePlannerBlockDao(
+            listOf(entity(1, date, "Move me", 22 * 60, 60))
+        )
+        val repository = PlannerRepository(dao)
+
+        repository.updateTime(
+            id = 1,
+            startMinutes = 23 * 60 + 55,
+            durationMinutes = 60
+        )
+
+        val block = dao.getBlock(1)!!
+        assertEquals(23 * 60 + 50, block.startMinutes)
+        assertEquals(10, block.durationMinutes)
     }
 
     @Test

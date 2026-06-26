@@ -15,13 +15,18 @@ class TimeSnapperTest {
     @Test
     fun defaultDurationCapsAtMidnight() {
         assertEquals(60, TimeSnapper.defaultDurationForStart(22 * 60, null))
-        assertEquals(5, TimeSnapper.defaultDurationForStart(23 * 60 + 55, null))
+        assertEquals(10, TimeSnapper.defaultDurationForStart(23 * 60 + 50, null))
+    }
+
+    @Test
+    fun newBlockStartClampsToLastTenMinuteSlot() {
+        assertEquals(23 * 60 + 50, TimeSnapper.floorToValidStart(23 * 60 + 55))
     }
 
     @Test
     fun durationNeverRunsPastMidnight() {
         assertEquals(30, TimeSnapper.clampDuration(23 * 60 + 30, 60))
-        assertEquals(5, TimeSnapper.clampDuration(10 * 60, 1))
+        assertEquals(10, TimeSnapper.clampDuration(10 * 60, 1))
     }
 
     @Test
