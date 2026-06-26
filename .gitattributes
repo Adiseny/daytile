@@ -1,0 +1,31 @@
+# Normalize all text files to LF in the repository.
+# Git auto-detects text vs binary; text is stored and checked out as LF.
+* text=auto eol=lf
+
+# Windows batch scripts must keep CRLF to run correctly.
+*.bat text eol=crlf
+
+# Unix shell scripts and the Gradle wrapper must be LF (CRLF breaks the
+# shebang on macOS/Linux/CI).
+gradlew    text eol=lf
+*.sh       text eol=lf
+
+# Treat known binary assets as binary so Git never touches their bytes.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.webp     binary
+*.ico      binary
+*.jar      binary
+*.keystore binary
+*.jks      binary
+*.p12      binary
+*.pem      binary
+*.ttf      binary
+*.otf      binary
+*.woff     binary
+*.woff2    binary
+*.aab      binary
+*.apk      binary
+*.so       binary

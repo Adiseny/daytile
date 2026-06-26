@@ -5,51 +5,82 @@ data class BlockLayout(
     val columnCount: Int
 )
 
+private val BlockLayoutOrder = compareBy<PlannerBlock> { it.startMinutes }.thenBy { it.endMinutes }
+
 object OverlapLayoutCalculator {
     fun calculate(blocks: List<PlannerBlock>): Map<Long, BlockLayout> {
         if (blocks.isEmpty()) return emptyMap()
 
-        val sorted = blocks.sortedWith(compareBy<PlannerBlock> { it.startMinutes }.thenBy { it.endMinutes })
-        val result = mutableMapOf<Long, BlockLayout>()
+        val sorted = blocks.sortedWith(BlockLayoutOrder)
+        val result = HashMap<Long, BlockLayout>(blocks.size)
         var index = 0
 
         while (index < sorted.size) {
-            val cluster = mutableListOf<PlannerBlock>()
+            val clusterStart = index
             var clusterEnd = sorted[index].endMinutes
 
-            while (index < sorted.size && (cluster.isEmpty() || sorted[index].startMinutes < clusterEnd)) {
+            while (index < sorted.size && (index == clusterStart || sorted[index].startMinutes < clusterEnd)) {
                 val block = sorted[index]
-                cluster += block
                 clusterEnd = maxOf(clusterEnd, block.endMinutes)
                 index += 1
             }
 
-            assignCluster(cluster, result)
+            assignCluster(sorted, clusterStart, index, result)
         }
 
         return result
     }
 
     private fun assignCluster(
-        cluster: List<PlannerBlock>,
+        sorted: List<PlannerBlock>,
+        startIndex: Int,
+        endIndex: Int,
         result: MutableMap<Long, BlockLayout>
     ) {
-        val active = mutableListOf<Pair<Int, PlannerBlock>>()
-        val assignments = mutableMapOf<Long, Int>()
+        val size = endIndex - startIndex
+        val activeColumns = IntArray(size)
+        val activeEnds = IntArray(size)
+        val usedColumns = IntArray(size)
+        val assignedColumns = IntArray(size)
+        var activeCount = 0
         var maxActive = 1
+        var marker = 1
 
-        cluster.forEach { block ->
-            active.removeAll { (_, activeBlock) -> activeBlock.endMinutes <= block.startMinutes }
-            val usedColumns = active.map { it.first }.toSet()
-            val column = generateSequence(0) { it + 1 }.first { it !in usedColumns }
-            assignments[block.id] = column
-            active += column to block
-            maxActive = maxOf(maxActive, active.size)
+        for (blockIndex in startIndex until endIndex) {
+            val localIndex = blockIndex - startIndex
+            val block = sorted[blockIndex]
+            var kept = 0
+            for (activeIndex in 0 until activeCount) {
+                if (activeEnds[activeIndex] > block.startMinutes) {
+                    activeColumns[kept] = activeColumns[activeIndex]
+                    activeEnds[kept] = activeEnds[activeIndex]
+                    kept += 1
+                }
+            }
+            activeCount = kept
+
+            for (activeIndex in 0 until activeCount) {
+                usedColumns[activeColumns[activeIndex]] = marker
+            }
+
+            var column = 0
+            while (usedColumns[column] == marker) {
+                column += 1
+            }
+            marker += 1
+
+            assignedColumns[localIndex] = column
+            activeColumns[activeCount] = column
+            activeEnds[activeCount] = block.endMinutes
+            activeCount += 1
+            maxActive = maxOf(maxActive, activeCount)
         }
 
-        cluster.forEach { block ->
+        for (blockIndex in startIndex until endIndex) {
+            val localIndex = blockIndex - startIndex
+            val block = sorted[blockIndex]
             result[block.id] = BlockLayout(
-                columnIndex = assignments.getValue(block.id),
+                columnIndex = assignedColumns[localIndex],
                 columnCount = maxActive
             )
         }

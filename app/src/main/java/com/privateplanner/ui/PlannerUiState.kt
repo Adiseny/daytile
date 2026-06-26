@@ -26,7 +26,16 @@ sealed interface PlannerSheet {
     data object DateJump : PlannerSheet
 }
 
-data class PlannerSnackbar(
-    val id: Long,
-    val deletedBlock: PlannerBlock
-)
+sealed interface PlannerSnackbar {
+    val id: Long
+
+    data class Deleted(
+        override val id: Long,
+        val deletedBlock: PlannerBlock
+    ) : PlannerSnackbar
+
+    data class Message(
+        override val id: Long,
+        val message: String
+    ) : PlannerSnackbar
+}

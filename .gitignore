@@ -8,6 +8,7 @@ gradle-build-output/
 planner-gradle-home/
 planner-gradle-project-cache/
 planner-*.png
+app/src.zip
 local.properties
 *.iml
 *.apk

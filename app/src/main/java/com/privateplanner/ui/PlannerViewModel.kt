@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.privateplanner.data.PlannerRepository
-import com.privateplanner.domain.OverlapPolicy
+import com.privateplanner.data.PlannerWriteResult
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.PlannerBlockOrder
 import com.privateplanner.domain.TimeSnapper
@@ -33,6 +33,7 @@ class PlannerViewModel(
     private val scrollTargetMinutes = MutableStateFlow<Int?>(openingScrollTarget())
     private val pendingTimeUpdates = mutableMapOf<Long, PendingTimeUpdate>()
     private val timeWriteJobs = mutableMapOf<Long, Job>()
+    private val prefetchJobs = mutableMapOf<LocalDate, Job>()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val selectedDateBlocks = selectedDate
@@ -134,15 +135,17 @@ class PlannerViewModel(
         if (title.isBlank()) return
         createError.value = null
         viewModelScope.launch {
-            val created = repository.createBlock(
+            when (repository.createBlock(
                 date = selectedDate.value,
                 startMinutes = currentSheet.startMinutes,
                 title = title
-            )
-            if (created) {
-                sheet.value = null
-            } else {
-                createError.value = "No space here"
+            )) {
+                PlannerWriteResult.Success -> sheet.value = null
+                PlannerWriteResult.NoSpace,
+                PlannerWriteResult.RejectedOverlap -> createError.value = "No space here"
+                PlannerWriteResult.InvalidInput -> createError.value = "Title is too long"
+                PlannerWriteResult.MissingBlock,
+                is PlannerWriteResult.Failed -> createError.value = "Could not save"
             }
         }
     }
@@ -152,8 +155,14 @@ class PlannerViewModel(
         if (title.isBlank()) return
         createError.value = null
         viewModelScope.launch {
-            repository.updateTitle(currentSheet.blockId, title)
-            sheet.value = null
+            when (repository.updateTitle(currentSheet.blockId, title)) {
+                PlannerWriteResult.Success -> sheet.value = null
+                PlannerWriteResult.InvalidInput -> createError.value = "Title is too long"
+                PlannerWriteResult.MissingBlock,
+                PlannerWriteResult.NoSpace,
+                PlannerWriteResult.RejectedOverlap,
+                is PlannerWriteResult.Failed -> createError.value = "Could not save"
+            }
         }
     }
 
@@ -163,21 +172,35 @@ class PlannerViewModel(
             val block = cached ?: repository.getBlock(blockId) ?: return@launch
             timeWriteJobs.remove(blockId)?.cancel()
             pendingTimeUpdates.remove(blockId)
-            repository.deleteBlock(block.id)
-            sheet.value = null
-            snackbar.value = PlannerSnackbar(
-                id = System.nanoTime(),
-                deletedBlock = block
-            )
+            when (repository.deleteBlock(block.id)) {
+                PlannerWriteResult.Success -> {
+                    sheet.value = null
+                    snackbar.value = PlannerSnackbar.Deleted(
+                        id = System.nanoTime(),
+                        deletedBlock = block
+                    )
+                }
+                PlannerWriteResult.MissingBlock,
+                PlannerWriteResult.NoSpace,
+                PlannerWriteResult.RejectedOverlap,
+                PlannerWriteResult.InvalidInput,
+                is PlannerWriteResult.Failed -> showMessage("Could not delete")
+            }
         }
     }
 
     fun undoDelete(snackbarId: Long) {
-        val message = snackbar.value ?: return
+        val message = snackbar.value as? PlannerSnackbar.Deleted ?: return
         if (message.id != snackbarId) return
         viewModelScope.launch {
-            repository.restoreBlock(message.deletedBlock)
-            snackbar.value = null
+            when (repository.restoreBlock(message.deletedBlock)) {
+                PlannerWriteResult.Success -> snackbar.value = null
+                PlannerWriteResult.RejectedOverlap -> showMessage("Could not restore; that time is no longer available")
+                PlannerWriteResult.MissingBlock,
+                PlannerWriteResult.NoSpace,
+                PlannerWriteResult.InvalidInput,
+                is PlannerWriteResult.Failed -> showMessage("Could not restore")
+            }
         }
     }
 
@@ -191,24 +214,10 @@ class PlannerViewModel(
     fun moveBlock(blockId: Long, startMinutes: Int): Boolean {
         val block = cachedBlock(blockId) ?: return false
         val snappedStart = snappedStart(block, startMinutes)
-        val candidate = block.copy(startMinutes = snappedStart)
-        if (!OverlapPolicy.canPlace(cachedBlocksForSelectedDate(), candidate)) return false
         if (snappedStart == block.startMinutes) return true
         updateCachedTime(blockId, snappedStart, block.durationMinutes)
-        scheduleTimeWrite(blockId, snappedStart, block.durationMinutes)
+        scheduleTimeWrite(blockId, block.date, snappedStart, block.durationMinutes)
         return true
-    }
-
-    fun movePlacement(blockId: Long, startMinutes: Int): MovePlacement {
-        val blocks = cachedBlocksForSelectedDate()
-        val block = blocks.firstOrNull { block -> block.id == blockId } ?: return MovePlacement.Invalid
-        val candidate = block.copy(startMinutes = snappedStart(block, startMinutes))
-        val maxOverlap = OverlapPolicy.maxOverlap(blocks, candidate)
-        return when {
-            maxOverlap <= OverlapPolicy.MaxSavedOverlap -> MovePlacement.Savable
-            maxOverlap <= OverlapPolicy.MaxTransientOverlap -> MovePlacement.TransientOnly
-            else -> MovePlacement.Invalid
-        }
     }
 
     fun resizeBlock(blockId: Long, durationMinutes: Int): Boolean {
@@ -217,29 +226,10 @@ class PlannerViewModel(
             block.startMinutes,
             TimeSnapper.snapDurationToNearest(durationMinutes)
         )
-        val fittedDuration = OverlapPolicy.largestValidDuration(
-            blocks = cachedBlocksForSelectedDate(),
-            candidate = block,
-            preferredDurationMinutes = requestedDuration
-        ) ?: return false
-        if (fittedDuration == block.durationMinutes) return false
-        updateCachedTime(blockId, block.startMinutes, fittedDuration)
-        scheduleTimeWrite(blockId, block.startMinutes, fittedDuration)
+        if (requestedDuration == block.durationMinutes) return false
+        updateCachedTime(blockId, block.startMinutes, requestedDuration)
+        scheduleTimeWrite(blockId, block.date, block.startMinutes, requestedDuration)
         return true
-    }
-
-    fun canResizeBlock(
-        blockId: Long,
-        durationMinutes: Int,
-        maxOverlap: Int = OverlapPolicy.MaxSavedOverlap
-    ): Boolean {
-        val block = cachedBlock(blockId) ?: return false
-        val snappedDuration = TimeSnapper.clampDuration(
-            block.startMinutes,
-            TimeSnapper.snapDurationToNearest(durationMinutes)
-        )
-        val candidate = block.copy(durationMinutes = snappedDuration)
-        return OverlapPolicy.canPlace(cachedBlocksForSelectedDate(), candidate, maxOverlap)
     }
 
     fun consumeScrollTarget() {
@@ -253,14 +243,21 @@ class PlannerViewModel(
     }
 
     private fun prefetchAdjacent(date: LocalDate) {
-        listOf(date.minusDays(1), date.plusDays(1))
-            .filterNot { day -> blockCache.value.containsKey(day) }
-            .forEach { day ->
-                viewModelScope.launch {
-                    val blocks = repository.getBlocksForDate(day)
-                    blockCache.value = blockCache.value + (day to blocks)
-                }
+        prefetchDate(date.minusDays(1))
+        prefetchDate(date.plusDays(1))
+    }
+
+    private fun prefetchDate(date: LocalDate) {
+        if (blockCache.value.containsKey(date)) return
+        if (prefetchJobs.containsKey(date)) return
+        prefetchJobs[date] = viewModelScope.launch {
+            try {
+                val blocks = repository.getBlocksForDate(date)
+                blockCache.value = blockCache.value + (date to blocks)
+            } finally {
+                prefetchJobs.remove(date)
             }
+        }
     }
 
     private fun cachedBlock(blockId: Long): PlannerBlock? {
@@ -285,17 +282,37 @@ class PlannerViewModel(
         blockCache.value = blockCache.value + (date to updatedBlocks)
     }
 
-    private fun scheduleTimeWrite(blockId: Long, startMinutes: Int, durationMinutes: Int) {
+    private fun scheduleTimeWrite(
+        blockId: Long,
+        date: LocalDate,
+        startMinutes: Int,
+        durationMinutes: Int
+    ) {
         val pending = PendingTimeUpdate(startMinutes, durationMinutes)
         pendingTimeUpdates[blockId] = pending
         timeWriteJobs.remove(blockId)?.cancel()
         timeWriteJobs[blockId] = viewModelScope.launch {
-            repository.updateTime(blockId, startMinutes, durationMinutes)
-            if (pendingTimeUpdates[blockId] == pending) {
-                pendingTimeUpdates.remove(blockId)
-                timeWriteJobs.remove(blockId)
+            val result = repository.updateTime(blockId, startMinutes, durationMinutes)
+            if (pendingTimeUpdates[blockId] != pending) return@launch
+            pendingTimeUpdates.remove(blockId)
+            timeWriteJobs.remove(blockId)
+            when (result) {
+                PlannerWriteResult.Success -> Unit
+                PlannerWriteResult.MissingBlock,
+                PlannerWriteResult.NoSpace,
+                PlannerWriteResult.RejectedOverlap,
+                PlannerWriteResult.InvalidInput,
+                is PlannerWriteResult.Failed -> {
+                    reloadDate(date)
+                    showMessage("Could not save")
+                }
             }
         }
+    }
+
+    private suspend fun reloadDate(date: LocalDate) {
+        val blocks = repository.getBlocksForDate(date)
+        blockCache.value = blockCache.value + (date to mergePendingTimeUpdates(blocks))
     }
 
     private fun mergePendingTimeUpdates(blocks: List<PlannerBlock>): List<PlannerBlock> {
@@ -320,8 +337,21 @@ class PlannerViewModel(
     }
 
     private fun trimCache(date: LocalDate, previousDate: LocalDate) {
-        val keep = setOf(previousDate, date.minusDays(1), date, date.plusDays(1))
-        blockCache.value = blockCache.value.filterKeys { cachedDate -> cachedDate in keep }
+        val previousDay = date.minusDays(1)
+        val nextDay = date.plusDays(1)
+        blockCache.value = blockCache.value.filterKeys { cachedDate ->
+            cachedDate == previousDate ||
+                cachedDate == previousDay ||
+                cachedDate == date ||
+                cachedDate == nextDay
+        }
+    }
+
+    private fun showMessage(message: String) {
+        snackbar.value = PlannerSnackbar.Message(
+            id = System.nanoTime(),
+            message = message
+        )
     }
 
     companion object {

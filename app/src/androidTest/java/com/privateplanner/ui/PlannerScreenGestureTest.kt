@@ -6,13 +6,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -24,11 +25,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.privateplanner.data.PlannerBlockEntity
 import com.privateplanner.data.PlannerDatabase
 import com.privateplanner.data.PlannerRepository
+import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
 import java.time.LocalTime
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -51,7 +54,7 @@ class PlannerScreenGestureTest {
     fun tapEmptyTimeCreatesBlockAndOpensActions() {
         setPlannerContent()
 
-        compose.onNodeWithTag(PlannerTestTags.Root)
+        compose.onRoot()
             .performTouchInput {
                 down(center)
                 up()
@@ -70,9 +73,9 @@ class PlannerScreenGestureTest {
         setPlannerContent()
 
         compose.onNodeWithText("Today").assertExists()
-        compose.onNodeWithTag(PlannerTestTags.Root).performTouchInput { swipeLeft() }
+        compose.onRoot().performTouchInput { swipeLeft() }
         compose.waitUntilNodeWithText("Tomorrow")
-        compose.onNodeWithTag(PlannerTestTags.Root).performTouchInput { swipeRight() }
+        compose.onRoot().performTouchInput { swipeRight() }
         compose.waitUntilNodeWithText("Today")
     }
 
@@ -82,27 +85,27 @@ class PlannerScreenGestureTest {
             insertVisibleBlock(title = "Move me")
         }
 
-        compose.waitUntilBlockExists()
-        compose.onNodeWithTag(PlannerTestTags.TimeBlock).performTouchInput {
+        compose.waitUntilBlockExists("Move me")
+        compose.onNode(hasContentDescription("Move me", substring = true)).performTouchInput {
             down(center)
             advanceEventTime(450)
             moveBy(Offset(0f, 80f))
             up()
         }
 
-        compose.waitUntilBlockExists()
-        compose.onNodeWithTag(PlannerTestTags.TimeBlock).performTouchInput {
+        compose.waitUntilBlockExists("Move me")
+        compose.onNode(hasContentDescription("Move me", substring = true)).performTouchInput {
             down(Offset(centerX, bottom - 4f))
             moveBy(Offset(0f, 80f))
             up()
         }
 
-        compose.waitUntilBlockExists()
-        val actions = compose.onNodeWithTag(PlannerTestTags.TimeBlock)
+        compose.waitUntilBlockExists("Move me")
+        val actions = compose.onNode(hasContentDescription("Move me", substring = true))
             .fetchSemanticsNode()
             .config[SemanticsActions.CustomActions]
         assertTrue(actions.first { it.label == "Lengthen 5 minutes" }.action())
-        compose.waitUntilBlockExists()
+        compose.waitUntilBlockExists("Move me")
     }
 
     @Test
@@ -111,7 +114,7 @@ class PlannerScreenGestureTest {
             setPlannerContent {
                 seedCrowdedVisibleDay()
             }
-            compose.waitUntilBlockExists(timeoutMillis = 5_000)
+            compose.waitUntilBlockExists(title = "Load", timeoutMillis = 5_000)
         }
 
         assertTrue("Crowded timeline composed in ${elapsedMs}ms", elapsedMs < 5_000)
@@ -121,7 +124,7 @@ class PlannerScreenGestureTest {
     fun largeFontCreateAndActionFlowRemainReachable() {
         setPlannerContent(fontScale = 1.6f)
 
-        compose.onNodeWithTag(PlannerTestTags.Root)
+        compose.onRoot()
             .performTouchInput {
                 down(center)
                 up()
@@ -132,6 +135,27 @@ class PlannerScreenGestureTest {
         compose.waitUntilNodeWithText("Large font task")
         compose.onNodeWithText("Large font task").performClick()
         compose.onNodeWithText("Delete").assertExists()
+    }
+
+    @Test
+    fun createTitleInputCapsLongTitleBeforeSaving() {
+        val cappedTitle = "A".repeat(MaxTitleLength)
+        setPlannerContent()
+
+        compose.onRoot()
+            .performTouchInput {
+                down(center)
+                up()
+            }
+        val titleInput = compose.onNode(hasSetTextAction())
+        titleInput.performTextInput(cappedTitle + "overflow")
+
+        assertEquals(
+            cappedTitle,
+            titleInput.fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+        )
+        compose.onNodeWithText("Add").performClick()
+        compose.waitUntilBlockExists(cappedTitle)
     }
 
     private fun setPlannerContent(
@@ -226,10 +250,11 @@ class PlannerScreenGestureTest {
     }
 
     private fun androidx.compose.ui.test.junit4.ComposeTestRule.waitUntilBlockExists(
+        title: String,
         timeoutMillis: Long = 3_000
     ) {
         waitUntil(timeoutMillis) {
-            onAllNodesWithTag(PlannerTestTags.TimeBlock).fetchSemanticsNodes().isNotEmpty()
+            onAllNodes(hasContentDescription(title, substring = true)).fetchSemanticsNodes().isNotEmpty()
         }
     }
 

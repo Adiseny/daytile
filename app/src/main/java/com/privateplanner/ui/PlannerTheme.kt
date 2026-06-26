@@ -60,9 +60,9 @@ private val LightPalette = PlannerPalette(
     PrimaryText = Color(0xFF1A1814),
     MutedText = Color(0xFF6F675F),
     TimeText = Color(0xFF3F3932),
-    HourLine = Color(0xFFCFC4B6),
-    HalfHourLine = Color(0xFFD8CFC3),
-    QuarterTick = Color(0xFFE0D8CD),
+    HourLine = Color(0xFFB8AA98),
+    HalfHourLine = Color(0xFFC7BAA8),
+    QuarterTick = Color(0xFFD2C8B9),
     AddButton = Color(0xFF1A1814),
     AddButtonDisabled = Color(0xFFE0D8CD),
     Delete = Color(0xFF9B4F45),
@@ -87,6 +87,9 @@ private val DarkPalette = PlannerPalette(
 )
 
 private val LocalPlannerColors = staticCompositionLocalOf { LightPalette }
+internal val LocalCurrentMinuteOfDay = staticCompositionLocalOf {
+    TimeSnapper.minuteOfDay(LocalTime.now())
+}
 
 /** Composition-aware palette accessor; resolves to the current day/night + time-of-day tint. */
 val PlannerColors: PlannerPalette
@@ -249,6 +252,7 @@ fun PlannerTheme(content: @Composable () -> Unit) {
         typography = plannerTypography
     ) {
         CompositionLocalProvider(
+            LocalCurrentMinuteOfDay provides currentMinute,
             LocalPlannerColors provides palette,
             LocalContentColor provides palette.PrimaryText
         ) {

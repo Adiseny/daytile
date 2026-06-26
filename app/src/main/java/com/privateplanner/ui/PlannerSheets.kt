@@ -1,8 +1,5 @@
 package com.privateplanner.ui
 
-import android.graphics.Rect
-import android.os.Build
-import android.view.WindowManager
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -52,10 +49,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
@@ -68,6 +63,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import java.time.DayOfWeek
@@ -95,7 +91,7 @@ fun BlockInputSheet(
                 )
             )
         }
-        val canSubmit = value.text.isNotBlank()
+        val canSubmit = value.text.isNotBlank() && value.text.length <= MaxTitleLength
 
         fun submit() {
             if (canSubmit) {
@@ -130,7 +126,17 @@ fun BlockInputSheet(
 
                 TextField(
                     value = value,
-                    onValueChange = { value = it },
+                    onValueChange = { incoming ->
+                        value = if (incoming.text.length <= MaxTitleLength) {
+                            incoming
+                        } else {
+                            val capped = incoming.text.take(MaxTitleLength)
+                            TextFieldValue(
+                                text = capped,
+                                selection = TextRange(capped.length)
+                            )
+                        }
+                    },
                     singleLine = true,
                     placeholder = { Text("What's happening?") },
                     isError = errorText != null,
@@ -321,10 +327,6 @@ private fun PlannerSheetSurface(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
 
-    // While a sheet is open the screen is dimmed by the scrim, so drive the system bars to the same
-    // dimmed shade (with light icons) for as long as it's shown, and restore the time-of-day style
-    // on dismiss. Without this the status bar kept its pre-dim background shade while everything
-    // below it darkened, leaving the top strip looking like a different colour.
     val view = LocalView.current
     val paperArgb = PlannerColors.Paper.toArgb()
     val dimmedArgb = PlannerColors.Scrim.compositeOver(PlannerColors.Paper).toArgb()
@@ -348,15 +350,18 @@ private fun PlannerSheetSurface(
         }
     }
 
-    val keyboardBottomOffset = keyboardBottomOffset()
     val density = LocalDensity.current
-    val contentBottomPadding = with(density) {
+    val sheetBottomPadding = with(density) {
         val imeBottom = WindowInsets.ime.getBottom(this)
         if (imeBottom > 0) {
-            8.dp
+            imeBottom.toDp()
         } else {
-            WindowInsets.navigationBars.getBottom(this).toDp()
+            0.dp
         }
+    }
+    val contentBottomPadding = with(density) {
+        val imeBottom = WindowInsets.ime.getBottom(this)
+        if (imeBottom > 0) 8.dp else WindowInsets.navigationBars.getBottom(this).toDp()
     }
 
     Box(
@@ -375,7 +380,7 @@ private fun PlannerSheetSurface(
             shadowElevation = 8.dp,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = keyboardBottomOffset)
+                .padding(bottom = sheetBottomPadding)
                 .fillMaxWidth()
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -388,35 +393,6 @@ private fun PlannerSheetSurface(
             }
         }
     }
-}
-
-@Composable
-private fun keyboardBottomOffset(): androidx.compose.ui.unit.Dp {
-    val context = LocalContext.current
-    val density = LocalDensity.current
-    val resources = LocalResources.current
-    val view = LocalView.current
-    val visibleFrame = remember { Rect() }
-    val imeBottomPx = WindowInsets.ime.getBottom(density)
-    if (imeBottomPx <= 0) return 0.dp
-
-    view.getWindowVisibleDisplayFrame(visibleFrame)
-    val fullWindowHeightPx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        context.getSystemService(WindowManager::class.java).currentWindowMetrics.bounds.height()
-    } else {
-        @Suppress("DEPRECATION")
-        resources.displayMetrics.heightPixels
-    }
-    val alreadyResized = view.height <= fullWindowHeightPx - imeBottomPx / 2
-    if (alreadyResized) return 0.dp
-
-    val visibleFrameOverlap = (view.rootView.height - visibleFrame.bottom).coerceAtLeast(0)
-    val keyboardOverlapPx = if (visibleFrameOverlap > 0) {
-        minOf(imeBottomPx, visibleFrameOverlap)
-    } else {
-        imeBottomPx
-    }
-    return with(density) { keyboardOverlapPx.toDp() }
 }
 
 @Composable
@@ -445,15 +421,17 @@ private fun MonthChevron(
 @Composable
 private fun WeekdayRow() {
     val locale = LocalLocale.current.platformLocale
-    val labels = listOf(
-        DayOfWeek.MONDAY,
-        DayOfWeek.TUESDAY,
-        DayOfWeek.WEDNESDAY,
-        DayOfWeek.THURSDAY,
-        DayOfWeek.FRIDAY,
-        DayOfWeek.SATURDAY,
-        DayOfWeek.SUNDAY
-    ).map { it.getDisplayName(java.time.format.TextStyle.NARROW, locale) }
+    val labels = remember(locale) {
+        listOf(
+            DayOfWeek.MONDAY,
+            DayOfWeek.TUESDAY,
+            DayOfWeek.WEDNESDAY,
+            DayOfWeek.THURSDAY,
+            DayOfWeek.FRIDAY,
+            DayOfWeek.SATURDAY,
+            DayOfWeek.SUNDAY
+        ).map { day -> day.getDisplayName(java.time.format.TextStyle.NARROW, locale) }
+    }
 
     Row(modifier = Modifier.fillMaxWidth()) {
         labels.forEach { label ->

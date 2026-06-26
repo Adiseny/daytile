@@ -10,19 +10,27 @@ import org.junit.Test
 
 class TimelineGeometryTest {
     @Test
-    fun blockBoundsExpandShortBlocksToMinimumTouchTarget() {
-        val bounds = TimelineGeometry.blockBounds(
-            block = block(startMinutes = 9 * 60, durationMinutes = 5),
-            layout = BlockLayout(columnIndex = 0, columnCount = 1),
-            timelineWidthPx = 400f,
-            gutterPx = 72f,
-            hourHeightPx = 120f,
-            minimumTouchTargetPx = 48f
-        )
+    fun hitTestExpandsShortBlocksToMinimumTouchTarget() {
+        val shortBlock = block(startMinutes = 9 * 60, durationMinutes = 5)
+        val blocks = listOf(shortBlock)
+        val layouts = mapOf(1L to BlockLayout(columnIndex = 0, columnCount = 1))
+        fun hit(y: Float): Boolean {
+            return TimelineGeometry.hitTestBlock(
+                x = 100f,
+                y = y,
+                blocks = blocks,
+                layoutById = layouts,
+                timelineWidthPx = 400f,
+                gutterPx = 72f,
+                hourHeightPx = 120f,
+                minimumTouchTargetPx = 48f
+            )
+        }
 
-        assertEquals(10f, bounds.visualHeight, 0.001f)
-        assertEquals(48f, bounds.touchBottom - bounds.touchTop, 0.001f)
-        assertEquals(9 * 120f - 19f, bounds.touchTop, 0.001f)
+        assertFalse(hit(9 * 120f - 20f))
+        assertTrue(hit(9 * 120f - 18f))
+        assertTrue(hit(9 * 120f + 28f))
+        assertFalse(hit(9 * 120f + 30f))
     }
 
     @Test
@@ -99,6 +107,43 @@ class TimelineGeometryTest {
                 laneFraction = 0.24f,
                 minimumTouchTargetPx = 48f,
                 quickResizeMaxDurationMinutes = 30
+            )
+        )
+    }
+
+    @Test
+    fun resizeHandleHitAreaIsSmallCenteredAndNearVisibleBar() {
+        assertTrue(
+            TimelineGeometry.isInResizeHandle(
+                x = 50f,
+                yInVisual = 115f,
+                blockWidthPx = 100f,
+                visualHeightPx = 120f,
+                handleHitWidthPx = 44f,
+                handleHitHeightPx = 18f,
+                handleBottomPaddingPx = 3f
+            )
+        )
+        assertFalse(
+            TimelineGeometry.isInResizeHandle(
+                x = 20f,
+                yInVisual = 115f,
+                blockWidthPx = 100f,
+                visualHeightPx = 120f,
+                handleHitWidthPx = 44f,
+                handleHitHeightPx = 18f,
+                handleBottomPaddingPx = 3f
+            )
+        )
+        assertFalse(
+            TimelineGeometry.isInResizeHandle(
+                x = 50f,
+                yInVisual = 95f,
+                blockWidthPx = 100f,
+                visualHeightPx = 120f,
+                handleHitWidthPx = 44f,
+                handleHitHeightPx = 18f,
+                handleBottomPaddingPx = 3f
             )
         )
     }

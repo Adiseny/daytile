@@ -1,12 +1,14 @@
 package com.privateplanner.benchmark
 
+import android.graphics.Rect
 import androidx.benchmark.macro.CompilationMode
+import androidx.benchmark.macro.ExperimentalMetricApi
 import androidx.benchmark.macro.FrameTimingMetric
 import androidx.benchmark.macro.MacrobenchmarkScope
+import androidx.benchmark.macro.MemoryUsageMetric
 import androidx.benchmark.macro.StartupMode
 import androidx.benchmark.macro.StartupTimingMetric
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
-import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Until
@@ -15,6 +17,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@OptIn(ExperimentalMetricApi::class)
 class PlannerMacrobenchmark {
     @get:Rule
     val benchmarkRule = MacrobenchmarkRule()
@@ -37,7 +40,7 @@ class PlannerMacrobenchmark {
     @Test
     fun timelineScrollFrames() = benchmarkRule.measureRepeated(
         packageName = TargetPackage,
-        metrics = listOf(FrameTimingMetric()),
+        metrics = frameAndMemoryMetrics(),
         compilationMode = CompilationMode.None(),
         startupMode = StartupMode.WARM,
         iterations = BenchmarkIterations,
@@ -61,7 +64,7 @@ class PlannerMacrobenchmark {
     @Test
     fun timeBlockDragFrames() = benchmarkRule.measureRepeated(
         packageName = TargetPackage,
-        metrics = listOf(FrameTimingMetric()),
+        metrics = frameAndMemoryMetrics(),
         compilationMode = CompilationMode.None(),
         startupMode = StartupMode.WARM,
         iterations = BenchmarkIterations,
@@ -88,6 +91,34 @@ class PlannerMacrobenchmark {
     }
 
     @Test
+    fun timeBlockResizeFrames() = benchmarkRule.measureRepeated(
+        packageName = TargetPackage,
+        metrics = frameAndMemoryMetrics(),
+        compilationMode = CompilationMode.None(),
+        startupMode = StartupMode.WARM,
+        iterations = BenchmarkIterations,
+        setupBlock = {
+            device.executeShellCommand("pm clear $TargetPackage")
+            pressHome()
+            startActivityAndWait()
+            createBenchmarkBlock()
+        }
+    ) {
+        val bounds = benchmarkBlockBounds()
+        val startX = bounds.centerX()
+        val startY = bounds.bottom - ResizeStartInsetPx
+        val endY = dragEndY(startY)
+
+        device.executeShellCommand("input touchscreen motionevent DOWN $startX $startY")
+        try {
+            performDragMove(startX, startY, endY)
+        } finally {
+            device.executeShellCommand("input touchscreen motionevent UP $startX $endY")
+        }
+        device.waitForIdle()
+    }
+
+    @Test
     fun heldTimeBlockDragFrames() {
         var startX = 0
         var startY = 0
@@ -95,7 +126,7 @@ class PlannerMacrobenchmark {
 
         benchmarkRule.measureRepeated(
             packageName = TargetPackage,
-            metrics = listOf(FrameTimingMetric()),
+            metrics = frameAndMemoryMetrics(),
             compilationMode = CompilationMode.None(),
             startupMode = StartupMode.WARM,
             iterations = BenchmarkIterations,
@@ -122,6 +153,12 @@ class PlannerMacrobenchmark {
         }
     }
 }
+
+@OptIn(ExperimentalMetricApi::class)
+private fun frameAndMemoryMetrics() = listOf(
+    FrameTimingMetric(),
+    MemoryUsageMetric(MemoryUsageMetric.Mode.Max)
+)
 
 private fun MacrobenchmarkScope.createBenchmarkBlock() {
     device.wait(Until.hasObject(By.textContains("Today")), UiWaitMillis)
@@ -167,3 +204,4 @@ private const val HeldDragSetupHoldMillis = 450L
 private const val DragSteps = 36
 private const val DragStepDelayMillis = 8L
 private const val DragBottomMarginPx = 240
+private const val ResizeStartInsetPx = 8

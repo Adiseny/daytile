@@ -1,7 +1,9 @@
 package com.privateplanner.domain
 
+import androidx.compose.runtime.Immutable
 import java.time.LocalDate
 
+@Immutable
 data class PlannerBlock(
     val id: Long,
     val date: LocalDate,

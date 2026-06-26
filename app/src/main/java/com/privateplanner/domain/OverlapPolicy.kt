@@ -9,14 +9,15 @@ object OverlapPolicy {
         candidate: PlannerBlock,
         maxOverlap: Int = MaxSavedOverlap
     ): Boolean {
-        return maxOverlap(blocks, candidate) <= maxOverlap
+        return maxOverlapIncluding(blocks, candidate, stopAbove = maxOverlap) <= maxOverlap
     }
 
     fun maxOverlap(
         blocks: List<PlannerBlock>,
-        candidate: PlannerBlock
+        candidate: PlannerBlock,
+        stopAbove: Int = Int.MAX_VALUE
     ): Int {
-        return maxOverlapIncluding(blocks, candidate)
+        return maxOverlapIncluding(blocks, candidate, stopAbove)
     }
 
     fun largestValidDuration(
@@ -43,14 +44,18 @@ object OverlapPolicy {
 
     private fun maxOverlapIncluding(
         blocks: List<PlannerBlock>,
-        candidate: PlannerBlock
+        candidate: PlannerBlock,
+        stopAbove: Int
     ): Int {
         val changes = overlapChanges(blocks, candidate)
         var active = 0
         var max = 0
         for (offset in 0 until candidate.durationMinutes) {
             active += changes[offset]
-            if (active > max) max = active
+            if (active > max) {
+                max = active
+                if (max > stopAbove) return max
+            }
         }
         return max
     }

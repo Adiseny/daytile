@@ -3,45 +3,7 @@ package com.privateplanner.ui
 import com.privateplanner.domain.BlockLayout
 import com.privateplanner.domain.PlannerBlock
 
-internal data class TimelineBlockBounds(
-    val left: Float,
-    val right: Float,
-    val visualTop: Float,
-    val visualHeight: Float,
-    val touchTop: Float,
-    val touchBottom: Float
-)
-
 internal object TimelineGeometry {
-    fun blockBounds(
-        block: PlannerBlock,
-        layout: BlockLayout,
-        timelineWidthPx: Float,
-        gutterPx: Float,
-        hourHeightPx: Float,
-        minimumTouchTargetPx: Float
-    ): TimelineBlockBounds {
-        val blockAreaWidth = (timelineWidthPx - gutterPx - 10f).coerceAtLeast(1f)
-        val columnCount = layout.columnCount.coerceAtLeast(1)
-        val columnWidth = blockAreaWidth / columnCount
-        val left = gutterPx + columnWidth * layout.columnIndex
-        val right = left + columnWidth
-        val visualTop = block.startMinutes / 60f * hourHeightPx
-        val visualHeight = block.durationMinutes / 60f * hourHeightPx
-        val touchHeight = maxOf(visualHeight, minimumTouchTargetPx)
-        val dayHeight = 24f * hourHeightPx
-        val touchTop = (visualTop - (touchHeight - visualHeight) / 2f)
-            .coerceIn(0f, (dayHeight - touchHeight).coerceAtLeast(0f))
-        return TimelineBlockBounds(
-            left = left,
-            right = right,
-            visualTop = visualTop,
-            visualHeight = visualHeight,
-            touchTop = touchTop,
-            touchBottom = touchTop + touchHeight
-        )
-    }
-
     fun hitTestBlock(
         x: Float,
         y: Float,
@@ -52,20 +14,25 @@ internal object TimelineGeometry {
         hourHeightPx: Float,
         minimumTouchTargetPx: Float
     ): Boolean {
+        val blockAreaWidth = (timelineWidthPx - gutterPx - 10f).coerceAtLeast(1f)
+        val dayHeight = 24f * hourHeightPx
         return blocks.any { block ->
-            val bounds = blockBounds(
-                block = block,
-                layout = layoutById[block.id] ?: BlockLayout(0, 1),
-                timelineWidthPx = timelineWidthPx,
-                gutterPx = gutterPx,
-                hourHeightPx = hourHeightPx,
-                minimumTouchTargetPx = minimumTouchTargetPx
-            )
-            x in bounds.left..bounds.right && y in bounds.touchTop..bounds.touchBottom
+            val layout = layoutById[block.id] ?: BlockLayout(0, 1)
+            val columnWidth = blockAreaWidth / layout.columnCount.coerceAtLeast(1)
+            val left = gutterPx + columnWidth * layout.columnIndex
+            val right = left + columnWidth
+            if (x !in left..right) return@any false
+
+            val visualTop = block.startMinutes / 60f * hourHeightPx
+            val visualHeight = block.durationMinutes / 60f * hourHeightPx
+            val touchHeight = maxOf(visualHeight, minimumTouchTargetPx)
+            val touchTop = (visualTop - (touchHeight - visualHeight) / 2f)
+                .coerceIn(0f, (dayHeight - touchHeight).coerceAtLeast(0f))
+            y in touchTop..(touchTop + touchHeight)
         }
     }
 
-    fun resizeLaneWidth(
+    private fun resizeLaneWidth(
         blockWidthPx: Float,
         laneFraction: Float,
         minimumTouchTargetPx: Float
@@ -90,6 +57,23 @@ internal object TimelineGeometry {
         return inLane &&
             (durationMinutes <= quickResizeMaxDurationMinutes ||
                 yInVisual >= visualHeightPx - minimumTouchTargetPx)
+    }
+
+    fun isInResizeHandle(
+        x: Float,
+        yInVisual: Float,
+        blockWidthPx: Float,
+        visualHeightPx: Float,
+        handleHitWidthPx: Float,
+        handleHitHeightPx: Float,
+        handleBottomPaddingPx: Float
+    ): Boolean {
+        val hitWidth = handleHitWidthPx.coerceAtMost(blockWidthPx)
+        val left = (blockWidthPx - hitWidth) / 2f
+        val right = left + hitWidth
+        val bottom = visualHeightPx - handleBottomPaddingPx
+        val top = (bottom - handleHitHeightPx).coerceAtLeast(0f)
+        return x in left..right && yInVisual in top..bottom
     }
 
     fun edgeAutoScrollDelta(
