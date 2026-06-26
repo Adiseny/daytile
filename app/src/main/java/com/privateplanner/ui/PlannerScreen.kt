@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -72,6 +71,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.inset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedback
@@ -124,7 +124,6 @@ import java.time.LocalTime
 
 private val HourHeight = HourHeightDp.dp
 private val DayHeight = HourHeight * 24
-private val ShortReadableFloor = ShortReadableFloorDp.dp
 private val LongTitlePinMinHeight = LongTitlePinMinHeightDp.dp
 private val TimelineTopClearance = 86.dp
 private val TimelineHeaderHeight = 104.dp
@@ -139,16 +138,6 @@ private const val ResizeLaneFraction = 0.24f
 private val HoldStillTolerance = 14.dp
 private val QuickResizeDragThreshold = 10.dp
 private val ResizeHandleVisibleHeight = 42.dp
-private val BlockAccentPalette = listOf(
-    Color(0xFF596F3F),
-    Color(0xFF9A5239),
-    Color(0xFF386F89),
-    Color(0xFF77518B),
-    Color(0xFF806A2F),
-    Color(0xFF70574E),
-    Color(0xFF4F686B)
-)
-
 @Composable
 private fun rememberReduceMotion(): Boolean {
     val context = LocalContext.current
@@ -460,10 +449,9 @@ private fun Timeline(
     val layoutById = remember(blocks) {
         OverlapLayoutCalculator.calculate(blocks)
     }
-    val renderItems = remember(blocks) {
-        TilePolicy.renderItems(blocks)
+    val sortedBlocks = remember(blocks) {
+        blocks.sortedWith(PlannerBlockOrder)
     }
-    var expandedShortOverlayIds by remember(selectedDate) { mutableStateOf<List<Long>?>(null) }
     var currentDate by remember { mutableStateOf(LocalDate.now()) }
     val currentTimeMinutes = remember { mutableIntStateOf(currentMinuteOfDay()) }
     var viewportHeightPx by remember { mutableIntStateOf(0) }
@@ -533,83 +521,32 @@ private fun Timeline(
                     TimeLabels(modifier = Modifier.fillMaxSize())
                 }
 
-                renderItems.forEach { item ->
-                    when (item) {
-                        is TileRenderItem.Single -> {
-                            val block = item.block
-                            val layout = layoutById[block.id] ?: BlockLayout(0, 1)
-                            key(block.id) {
-                                if (item.treatment == SingleTileTreatment.CompactChip) {
-                                    ShortClusterTile(
-                                        blocks = listOf(block),
-                                        layout = layout,
-                                        selected = selectedBlockId == block.id,
-                                        timelineWidth = timelineMaxWidth,
-                                        onTap = {
-                                            expandedShortOverlayIds = listOf(block.id)
-                                        }
-                                    )
-                                } else {
-                                    TimeBlock(
-                                        block = block,
-                                        treatment = item.treatment,
-                                        selected = selectedBlockId == block.id,
-                                        layout = layout,
-                                        timelineWidth = timelineMaxWidth,
-                                        scrollState = scrollState,
-                                        viewportHeightPx = viewportHeightPx,
-                                        hourHeightPx = hourHeightPx,
-                                        onTap = { onBlockTap(block.id) },
-                                        onRename = { onBlockRename(block.id) },
-                                        onDelete = { onBlockDelete(block.id) },
-                                        onMovePlacement = { start -> onBlockMovePlacement(block.id, start) },
-                                        onMove = { start -> onBlockMove(block.id, start) },
-                                        onCanResize = { duration, maxOverlap ->
-                                            onBlockCanResize(block.id, duration, maxOverlap)
-                                        },
-                                        onResize = { onBlockResize(block.id, it) }
-                                    )
-                                }
-                            }
-                        }
-                        is TileRenderItem.DenseShortCluster -> {
-                            val firstBlock = item.blocks.minWith(
-                                PlannerBlockOrder
-                            )
-                            val layout = layoutById[firstBlock.id] ?: BlockLayout(0, 1)
-                            key("cluster-${item.blocks.joinToString(separator = "-") { it.id.toString() }}") {
-                                ShortClusterTile(
-                                    blocks = item.blocks,
-                                    layout = layout,
-                                    selected = item.blocks.any { block -> block.id == selectedBlockId },
-                                    timelineWidth = timelineMaxWidth,
-                                    onTap = {
-                                        expandedShortOverlayIds = item.blocks.map { block -> block.id }
-                                    }
-                                )
-                            }
-                        }
+                sortedBlocks.forEach { block ->
+                    val layout = layoutById[block.id] ?: BlockLayout(0, 1)
+                    key(block.id) {
+                        TimeBlock(
+                            block = block,
+                            selected = selectedBlockId == block.id,
+                            layout = layout,
+                            timelineWidth = timelineMaxWidth,
+                            scrollState = scrollState,
+                            viewportHeightPx = viewportHeightPx,
+                            hourHeightPx = hourHeightPx,
+                            onTap = { onBlockTap(block.id) },
+                            onRename = { onBlockRename(block.id) },
+                            onDelete = { onBlockDelete(block.id) },
+                            onMovePlacement = { start -> onBlockMovePlacement(block.id, start) },
+                            onMove = { start -> onBlockMove(block.id, start) },
+                            onCanResize = { duration, maxOverlap ->
+                                onBlockCanResize(block.id, duration, maxOverlap)
+                            },
+                            onResize = { onBlockResize(block.id, it) }
+                        )
                     }
                 }
 
                 if (isToday) {
                     CurrentTimeIndicator(currentTimeMinutes)
-                }
-
-                val overlayBlocks = expandedShortOverlayIds
-                    ?.mapNotNull { id -> blocks.firstOrNull { block -> block.id == id } }
-                    ?.sortedWith(PlannerBlockOrder)
-                    .orEmpty()
-                if (overlayBlocks.isNotEmpty()) {
-                    ShortTaskOverlay(
-                        blocks = overlayBlocks,
-                        timelineWidth = timelineMaxWidth,
-                        onBlockTap = { id ->
-                            expandedShortOverlayIds = null
-                            onBlockTap(id)
-                        },
-                        modifier = Modifier.zIndex(7f)
-                    )
                 }
             }
         }
@@ -822,7 +759,6 @@ private inline fun DrawScope.drawTimelineLabels(
 @Composable
 private fun TimeBlock(
     block: PlannerBlock,
-    treatment: SingleTileTreatment,
     selected: Boolean,
     layout: BlockLayout,
     timelineWidth: Dp,
@@ -858,13 +794,13 @@ private fun TimeBlock(
     val (left, width) = tileColumnMetrics(timelineWidth, layout)
     val baseTop = heightForMinutes(block.startMinutes)
     val baseTrueHeight = heightForMinutes(block.durationMinutes)
-    val baseVisibleHeight = visibleTileHeight(baseTrueHeight, treatment)
+    val baseVisibleHeight = baseTrueHeight
     val baseTouchHeight = baseVisibleHeight.coerceAtLeast(MinimumTouchTarget)
     val touchTop = centeredTouchTop(baseTop, baseVisibleHeight)
     val snappedTop = heightForMinutes(displayedStartMinutes)
     val snappedTrueVisualHeight = heightForMinutes(displayedDurationMinutes)
     val trueVisualHeight = snappedTrueVisualHeight
-    val visualHeight = visibleTileHeight(trueVisualHeight, treatment)
+    val visualHeight = trueVisualHeight
     val snappedVisualOffset = snappedTop - touchTop
     val visualOffset = snappedVisualOffset
     val touchHeight = maxOf(baseTouchHeight, visualOffset + visualHeight)
@@ -879,9 +815,6 @@ private fun TimeBlock(
     }
     val blockCornerRadius = if (compact) 13.dp else 16.dp
     val blockShape = RoundedCornerShape(blockCornerRadius)
-    val accentColor = remember(block.id, compact) {
-        blockAccentColor(block.id).copy(alpha = if (compact) 0.64f else 0.54f)
-    }
     val resizeLaneWidth = (width * ResizeLaneFraction).coerceAtLeast(MinimumTouchTarget).coerceAtMost(width)
     val resizeTouchOffset = (visualOffset + visualHeight - MinimumTouchTarget)
         .coerceIn(0.dp, (touchHeight - MinimumTouchTarget).coerceAtLeast(0.dp))
@@ -979,11 +912,7 @@ private fun TimeBlock(
                 .liftedGlassLayer(blockShape, lifted)
                 .clip(blockShape)
         ) {
-            // The dragged tile draws NO backdrop of its own — no GPU lens, no re-rendered copies of
-            // the tiles behind. Those copies (faded or not) were what left the faint inner rectangle
-            // and cut off the task underneath. It is now only a clean tinted glass pane painted with
-            // full-surface gradients + a thin edge lip (TimeBlockForeground); the real tiles behind
-            // show straight through it at their own full size. Rested tiles keep the grid backdrop.
+            // Dragged tiles draw no backdrop; rested tiles keep the refracted grid behind the glass.
             if (!movingGlass) {
                 TimelineGlassBackdrop(
                     timelineWidth = timelineWidth,
@@ -1001,9 +930,6 @@ private fun TimeBlock(
                 compact = compact,
                 movingGlass = movingGlass,
                 selected = selected,
-                accentColor = accentColor,
-                trueVisualHeight = trueVisualHeight,
-                treatment = treatment,
                 title = block.title,
                 rangeText = rangeText,
                 durationText = durationText,
@@ -1035,9 +961,6 @@ private fun BoxScope.TimeBlockForeground(
     compact: Boolean,
     movingGlass: Boolean,
     selected: Boolean,
-    accentColor: Color,
-    trueVisualHeight: Dp,
-    treatment: SingleTileTreatment,
     title: String,
     rangeText: String,
     durationText: String,
@@ -1061,14 +984,6 @@ private fun BoxScope.TimeBlockForeground(
                 }
             )
     ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .height(spineHeight(trueVisualHeight, treatment))
-                .width(if (compact) 3.dp else 4.dp)
-                .background(accentColor)
-        )
-
         BlockContent(
             title = title,
             rangeText = rangeText,
@@ -1091,177 +1006,6 @@ private fun BoxScope.TimeBlockForeground(
     }
 }
 
-@Composable
-private fun ShortClusterTile(
-    blocks: List<PlannerBlock>,
-    layout: BlockLayout,
-    selected: Boolean,
-    timelineWidth: Dp,
-    onTap: () -> Unit
-) {
-    val firstBlock = blocks.minWith(PlannerBlockOrder)
-    val startMinutes = blocks.minOf { it.startMinutes }
-    val endMinutes = blocks.maxOf { it.endMinutes }
-    val trueHeight = heightForMinutes(endMinutes - startMinutes)
-    val touchHeight = trueHeight.coerceAtLeast(MinimumTouchTarget)
-    val top = heightForMinutes(startMinutes)
-    val touchTop = centeredTouchTop(top, trueHeight)
-    val visualOffset = top - touchTop
-    val (left, width) = tileColumnMetrics(timelineWidth, layout)
-    val shape = RoundedCornerShape(12.dp)
-    val background = Color(TimeOfDayColourMapper.backgroundArgb(startMinutes, layout.columnIndex))
-    val accentColor = blockAccentColor(firstBlock.id).copy(alpha = 0.62f)
-    val title = if (blocks.size == 1) {
-        firstBlock.title
-    } else {
-        "${blocks.size} tasks"
-    }
-
-    Box(
-        modifier = Modifier
-            .offset(x = left, y = touchTop)
-            .width(width)
-            .height(touchHeight)
-            .testTag(PlannerTestTags.ShortCluster)
-            .zIndex(0.9f)
-            .semantics {
-                contentDescription = "$title, ${TimeFormatter.time(startMinutes)} to ${TimeFormatter.time(endMinutes)}"
-                onClick(label = "Open short tasks") {
-                    onTap()
-                    true
-                }
-            }
-            .clickable(onClick = onTap)
-    ) {
-        Box(
-            modifier = Modifier
-                .offset(y = visualOffset)
-                .fillMaxWidth()
-                .height(trueHeight)
-                .liftedGlassLayer(shape, lifted = false)
-                .clip(shape)
-                .liquidGlassTileSurface(
-                    tint = background,
-                    shade = PlannerColors.GlassShade,
-                    cornerRadius = 12.dp,
-                    compact = true,
-                    selectionColor = if (selected) {
-                        PlannerColors.PrimaryText.copy(alpha = 0.52f)
-                    } else {
-                        Color.Transparent
-                    }
-                )
-        ) {
-            TimelineGlassBackdrop(
-                timelineWidth = timelineWidth,
-                tileLeft = left,
-                tileTop = top,
-                shape = shape,
-                compact = true
-            )
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .width(4.dp)
-                    .height(trueHeight.coerceAtLeast(TrueDurationMarkerMinDp.dp))
-                    .background(accentColor)
-            )
-            if (trueHeight >= 14.dp) {
-                Text(
-                    text = title,
-                    color = PlannerColors.PrimaryText,
-                    fontFamily = DaytileFontFamily,
-                    fontSize = 10.sp,
-                    lineHeight = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = 10.dp, end = 8.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShortTaskOverlay(
-    blocks: List<PlannerBlock>,
-    timelineWidth: Dp,
-    onBlockTap: (Long) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val startMinutes = blocks.minOf { it.startMinutes }
-    val overlayWidth = (timelineWidth - TimelineGutter - 20.dp).coerceAtLeast(180.dp)
-    val overlayTop = (heightForMinutes(startMinutes))
-        .coerceIn(0.dp, (DayHeight - ShortReadableFloor * blocks.size.toFloat()).coerceAtLeast(0.dp))
-    val shape = RoundedCornerShape(12.dp)
-
-    Box(
-        modifier = modifier
-            .offset(x = TimelineGutter + 10.dp, y = overlayTop)
-            .width(overlayWidth)
-            .liftedGlassLayer(shape, lifted = true)
-            .clip(shape)
-            .liquidGlassTileSurface(
-                tint = PlannerColors.Sheet,
-                shade = PlannerColors.GlassShade,
-                cornerRadius = 12.dp,
-                compact = false
-            )
-            .testTag(PlannerTestTags.ShortTaskOverlay)
-    ) {
-        TimelineGlassBackdrop(
-            timelineWidth = timelineWidth,
-            tileLeft = TimelineGutter + 10.dp,
-            tileTop = overlayTop,
-            shape = shape,
-            compact = false,
-            lifted = true
-        )
-
-        Column(modifier = Modifier.fillMaxWidth()) {
-            blocks.forEach { block ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(ShortReadableFloor)
-                        .clickable { onBlockTap(block.id) }
-                        .padding(start = 10.dp, end = 8.dp)
-                        .semantics {
-                            contentDescription = "${block.title}, ${TimeFormatter.spokenRange(block.startMinutes, block.durationMinutes)}"
-                        }
-                ) {
-                    Text(
-                        text = block.title,
-                        color = PlannerColors.PrimaryText,
-                        fontFamily = DaytileFontFamily,
-                        fontSize = 12.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "${TimeFormatter.time(block.startMinutes)} ${TimeFormatter.duration(block.durationMinutes)}",
-                        color = PlannerColors.MutedText,
-                        fontFamily = DaytileFontFamily,
-                        fontSize = 11.sp,
-                        lineHeight = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Clip,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
 private data class TileColumnMetrics(val left: Dp, val width: Dp)
 
 private fun heightForMinutes(minutes: Int): Dp = HourHeight * (minutes / 60f)
@@ -1280,28 +1024,6 @@ private fun tileColumnMetrics(timelineWidth: Dp, layout: BlockLayout): TileColum
     return TileColumnMetrics(left, width)
 }
 
-private fun visibleTileHeight(
-    trueHeight: Dp,
-    treatment: SingleTileTreatment
-): Dp {
-    return when (treatment) {
-        SingleTileTreatment.ReadableFloor -> trueHeight.coerceAtLeast(ShortReadableFloor)
-        SingleTileTreatment.Normal,
-        SingleTileTreatment.CompactChip -> trueHeight
-    }
-}
-
-private fun spineHeight(
-    trueHeight: Dp,
-    treatment: SingleTileTreatment
-): Dp {
-    return when (treatment) {
-        SingleTileTreatment.ReadableFloor -> trueHeight.coerceAtLeast(TrueDurationMarkerMinDp.dp)
-        SingleTileTreatment.Normal,
-        SingleTileTreatment.CompactChip -> trueHeight
-    }
-}
-
 private fun Density.titleFollowOffsetPx(
     scrollPx: Int,
     blockTop: Dp,
@@ -1318,11 +1040,8 @@ private fun Modifier.liftedGlassLayer(
     lifted: Boolean
 ): Modifier {
     return graphicsLayer {
-        scaleX = if (lifted) 1.025f else 1f
-        scaleY = if (lifted) 1.025f else 1f
-        // A translucent tile shows its OWN elevation shadow THROUGH itself (the shadow pools toward the
-        // bottom) — that was the faint "rectangle" that appeared on every layer. So a lifted glass tile
-        // casts no elevation shadow; the lift is read from the slight scale-up and the bright edge rim.
+        // No scale/pop on drag — the tile stays put so the drop position is easy to read. A lifted
+        // (translucent) tile also casts no elevation shadow, which would otherwise bleed through it.
         shadowElevation = if (lifted) 0f else 4.dp.toPx()
         this.shape = shape
         clip = false
@@ -1612,83 +1331,40 @@ private fun Modifier.liquidGlassTileSurface(
     selectionColor: Color = Color.Transparent
 ): Modifier {
     return drawWithCache {
-        val radiusPx = cornerRadius.toPx()
-        val corner = CornerRadius(radiusPx, radiusPx)
-        val restedTint = lerp(tint, shade, 0.06f)
-        val glassTint = if (lifted) {
-            lerp(tint, Color.White, 0.16f)
-        } else {
-            lerp(restedTint, Color.White, 0.025f)
-        }
-        // While lifted, the tint is a translucent wash over the whole rounded shape: enough to read
-        // clearly as a tinted pane of glass with its own crisp text, but translucent so the tiles
-        // behind it stay visible at their OWN full size and colour through the glass. Nothing is
-        // redrawn behind it, so underlying tasks are never shrunk or stripped of their text.
+        val corner = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
+        // Light warm-tinted cards: lightened toward a warm white so tints harmonise with the paper and
+        // dark text stays legible; dragging lightens further and turns see-through for a clear drop.
+        val warmWhite = Color(0xFFFFFBF4)
+        val glassTint = if (lifted) lerp(tint, warmWhite, 0.55f) else lerp(tint, warmWhite, 0.45f)
         val bodyAlpha = when {
-            lifted -> 0.52f
+            lifted -> 0.60f
             compact -> 0.90f
             else -> 0.94f
         }
-        val milkAlpha = when {
-            lifted -> 0.03f
-            compact -> 0.014f
-            else -> 0.018f
-        }
-        // ONE continuous top-to-bottom wash for EVERY tile (brighter when lifted, subtler at rest):
-        // a bright crown fading to a deeper foot, with NO transparent gap and NO pass that stops
-        // short of an edge. Because every pixel is covered evenly there is no plain centre framed by
-        // where edge highlights die — and that framed centre, showing through a dragged tile, was the
-        // "rectangle". This applies to rested tiles too (the one behind the dragged tile), which is
-        // why the rectangle persisted before. A lifted tile adds a thin bright lip on the edge.
-        val luminanceBrush = Brush.verticalGradient(
-            colors = listOf(
-                Color.White.copy(alpha = if (lifted) 0.38f else 0.07f),
-                Color.White.copy(alpha = if (lifted) 0.10f else 0.02f),
-                shade.copy(alpha = if (lifted) 0.07f else 0.04f),
-                shade.copy(alpha = if (lifted) 0.22f else 0.09f)
-            ),
-            startY = 0f,
-            endY = size.height
-        )
-        val liftedRimBrush = if (lifted) {
-            Brush.verticalGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.62f),
-                    Color.White.copy(alpha = 0.20f),
-                    Color.White.copy(alpha = 0.08f)
-                ),
-                startY = 0f,
-                endY = size.height
-            )
-        } else {
-            null
-        }
+        // A thin border in a deeper shade of the tile's own colour: defines each card and separates
+        // same-colour neighbours, and thickens slightly when the tile is picked up.
+        val borderColor = lerp(tint, shade, 0.32f)
         onDrawWithContent {
-            drawRoundRect(
-                color = glassTint.copy(alpha = bodyAlpha),
-                cornerRadius = corner
-            )
-            if (milkAlpha > 0f) {
+            // Flat tile: one even tinted fill, then the thin border. No gradient or shading.
+            drawRoundRect(color = glassTint.copy(alpha = bodyAlpha), cornerRadius = corner)
+            val bw = (if (lifted) 2.dp else 1.dp).toPx()
+            inset(bw / 2f) {
                 drawRoundRect(
-                    color = Color.White.copy(alpha = milkAlpha),
-                    cornerRadius = corner
+                    color = borderColor.copy(alpha = if (lifted) 0.85f else 0.60f),
+                    cornerRadius = CornerRadius(
+                        (corner.x - bw / 2f).coerceAtLeast(0f),
+                        (corner.y - bw / 2f).coerceAtLeast(0f)
+                    ),
+                    style = Stroke(bw)
                 )
             }
-            drawRoundRect(brush = luminanceBrush, cornerRadius = corner)
             if (selectionColor.alpha > 0f) {
                 drawRoundRect(
-                    color = selectionColor.copy(alpha = selectionColor.alpha * if (lifted) 0.12f else 0.16f),
+                    color = selectionColor.copy(alpha = selectionColor.alpha * 0.16f),
                     cornerRadius = corner
                 )
             }
             drawContent()
-            liftedRimBrush?.let {
-                drawRoundRect(
-                    brush = it,
-                    cornerRadius = corner,
-                    style = Stroke(width = 1.5.dp.toPx())
-                )
-            }
             if (selectionColor.alpha > 0f) {
                 drawRoundRect(
                     color = selectionColor,
@@ -1747,6 +1423,7 @@ private fun BlockContent(
                 rangeText = rangeText,
                 titleFontSize = if (height < 64.dp) 12.sp else 14.sp,
                 titleLineHeight = if (height < 64.dp) 14.sp else 18.sp,
+                titleMaxLines = if (height < 80.dp) 1 else 2,
                 metaFontSize = if (height < 64.dp) 10.sp else 12.sp,
                 metaLineHeight = if (height < 64.dp) 12.sp else 16.sp,
                 modifier = Modifier.padding(
@@ -1775,8 +1452,8 @@ private fun BlockContent(
 @Composable
 private fun BlockOneLineContent(
     title: String,
-    titleFontSize: androidx.compose.ui.unit.TextUnit,
-    titleLineHeight: androidx.compose.ui.unit.TextUnit,
+    titleFontSize: TextUnit,
+    titleLineHeight: TextUnit,
     modifier: Modifier
 ) {
     Box(
@@ -1801,10 +1478,11 @@ private fun BlockOneLineContent(
 private fun BlockTwoLineContent(
     title: String,
     rangeText: String,
-    titleFontSize: androidx.compose.ui.unit.TextUnit,
-    titleLineHeight: androidx.compose.ui.unit.TextUnit,
-    metaFontSize: androidx.compose.ui.unit.TextUnit,
-    metaLineHeight: androidx.compose.ui.unit.TextUnit,
+    titleFontSize: TextUnit,
+    titleLineHeight: TextUnit,
+    titleMaxLines: Int,
+    metaFontSize: TextUnit,
+    metaLineHeight: TextUnit,
     modifier: Modifier,
     titleFollowOffset: Density.() -> Int
 ) {
@@ -1820,24 +1498,19 @@ private fun BlockTwoLineContent(
             fontSize = titleFontSize,
             lineHeight = titleLineHeight,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            maxLines = titleMaxLines,
             overflow = TextOverflow.Ellipsis
         )
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Text(
+            text = rangeText,
+            color = PlannerColors.PrimaryText.copy(alpha = 0.82f),
+            fontFamily = DaytileFontFamily,
+            fontSize = metaFontSize,
+            lineHeight = metaLineHeight,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = rangeText,
-                color = PlannerColors.PrimaryText.copy(alpha = 0.72f),
-                fontFamily = DaytileFontFamily,
-                fontSize = metaFontSize,
-                lineHeight = metaLineHeight,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        )
     }
 }
 
@@ -1882,11 +1555,6 @@ private fun durationLabelStyle(height: Dp, compact: Boolean): DurationLabelStyle
         textAlpha = if (compact) 0.80f else 0.86f,
         fontWeight = if (height >= 64.dp) FontWeight.Bold else FontWeight.SemiBold
     )
-}
-
-private fun blockAccentColor(blockId: Long): Color {
-    val hash = (blockId xor (blockId ushr 32)).toInt() and Int.MAX_VALUE
-    return BlockAccentPalette[hash % BlockAccentPalette.size]
 }
 
 private fun Modifier.timelineTapInput(

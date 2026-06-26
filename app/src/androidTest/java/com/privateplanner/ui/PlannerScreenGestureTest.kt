@@ -11,7 +11,6 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -133,49 +132,6 @@ class PlannerScreenGestureTest {
         compose.waitUntilNodeWithText("Large font task")
         compose.onNodeWithText("Large font task").performClick()
         compose.onNodeWithText("Delete").assertExists()
-    }
-
-    @Test
-    fun denseShortClusterOpensReadableOverlayRows() {
-        setPlannerContent {
-            val start = visibleStartMinutes()
-            insertBlock(title = "First short", startMinutes = start, durationMinutes = 5)
-            insertBlock(title = "Second short", startMinutes = start + 5, durationMinutes = 5)
-        }
-
-        compose.waitUntil(timeoutMillis = 3_000) {
-            compose.onAllNodesWithTag(PlannerTestTags.ShortCluster).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag(PlannerTestTags.ShortCluster).performClick()
-        compose.onNodeWithTag(PlannerTestTags.ShortTaskOverlay).assertExists()
-        compose.onNodeWithText("First short").assertExists()
-        compose.onNodeWithText("Second short").assertExists()
-        compose.onNodeWithText("First short").performClick()
-        compose.onNodeWithText("Delete").assertExists()
-        compose.onNodeWithText("Earlier").assertDoesNotExist()
-        compose.onNodeWithText("Later").assertDoesNotExist()
-    }
-
-    @Test
-    fun compactShortChipBeforeMeetingOpensOverlayWithoutMovingMeeting() {
-        setPlannerContent {
-            val start = visibleStartMinutes()
-            insertBlock(title = "Quick prep", startMinutes = start, durationMinutes = 5)
-            insertBlock(title = "Meeting", startMinutes = start + 5, durationMinutes = 60)
-        }
-
-        compose.waitUntilNodeWithText("Meeting")
-        compose.onNodeWithContentDescription("Quick prep", substring = true)
-            .performTouchInput {
-                down(Offset(centerX, height * 0.1f))
-                up()
-            }
-        compose.waitUntil(timeoutMillis = 3_000) {
-            compose.onAllNodesWithTag(PlannerTestTags.ShortTaskOverlay).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag(PlannerTestTags.ShortTaskOverlay).assertExists()
-        compose.onNodeWithText("Quick prep").assertExists()
-        compose.onNodeWithText("Meeting").assertExists()
     }
 
     private fun setPlannerContent(
