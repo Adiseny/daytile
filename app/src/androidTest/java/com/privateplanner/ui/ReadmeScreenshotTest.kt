@@ -53,13 +53,13 @@ class ReadmeScreenshotTest {
 
         val today = LocalDate.now()
         setPlannerContent()
-        compose.waitUntilNodeWithText("School run")
+        compose.waitUntilNodeWithText("Pack school bags")
         captureRoot(outputDir.resolve("daytile-timeline.png"))
 
         compose.runOnUiThread {
             viewModel.jumpTo(today.plusDays(1))
         }
-        compose.waitUntilNodeWithText("Economics lecture")
+        compose.waitUntilNodeWithText("Review lecture notes")
         compose.runOnUiThread {
             viewModel.openCreate(10 * 60 + 45)
         }
@@ -71,7 +71,7 @@ class ReadmeScreenshotTest {
         compose.runOnUiThread {
             viewModel.jumpTo(today.plusDays(2))
         }
-        compose.waitUntilNodeWithText("Client fitting")
+        compose.waitUntilNodeWithText("Fit client dress")
         compose.runOnUiThread {
             viewModel.openActions(302L)
         }
@@ -109,22 +109,22 @@ class ReadmeScreenshotTest {
     private suspend fun PlannerDatabase.seedReadmeBlocks() {
         val today = LocalDate.now()
         val blocks = listOf(
-            block(101, today, "School run", 8 * 60, 30),
-            block(102, today, "Builder arrival window", 9 * 60, 120),
-            block(103, today, "Dentist appointment", 9 * 60 + 30, 45),
+            block(101, today, "Pack school bags", 8 * 60, 30),
+            block(102, today, "Clear kitchen for builder", 9 * 60, 120),
+            block(103, today, "Drive to dentist", 9 * 60 + 30, 45),
             block(104, today, "Call plumber", 11 * 60 + 45, 15),
-            block(105, today, "Lunch with Mum", 12 * 60 + 30, 45),
-            block(106, today, "Football practice", 16 * 60, 60),
-            block(201, today.plusDays(1), "Economics lecture", 8 * 60 + 30, 90),
-            block(202, today.plusDays(1), "Seminar prep", 10 * 60 + 15, 30),
-            block(203, today.plusDays(1), "Group presentation", 11 * 60 + 15, 45),
-            block(204, today.plusDays(1), "Library shift", 13 * 60, 120),
-            block(205, today.plusDays(1), "Train home", 16 * 60 + 30, 35),
-            block(301, today.plusDays(2), "Open studio", 8 * 60, 45),
-            block(302, today.plusDays(2), "Client fitting", 9 * 60 + 15, 75),
-            block(303, today.plusDays(2), "Supplier delivery", 10 * 60, 60),
-            block(304, today.plusDays(2), "Post orders", 11 * 60 + 30, 45),
-            block(305, today.plusDays(2), "Staff rota", 12 * 60 + 45, 25)
+            block(105, today, "Cook lunch with Mum", 12 * 60 + 30, 45),
+            block(106, today, "Take kit to football", 16 * 60, 60),
+            block(201, today.plusDays(1), "Review lecture notes", 8 * 60 + 30, 90),
+            block(202, today.plusDays(1), "Draft seminar answer", 10 * 60 + 15, 30),
+            block(203, today.plusDays(1), "Rehearse group slides", 11 * 60 + 15, 45),
+            block(204, today.plusDays(1), "Work library desk", 13 * 60, 120),
+            block(205, today.plusDays(1), "Catch train home", 16 * 60 + 30, 35),
+            block(301, today.plusDays(2), "Set up studio", 8 * 60, 45),
+            block(302, today.plusDays(2), "Fit client dress", 9 * 60 + 15, 75),
+            block(303, today.plusDays(2), "Check supplier delivery", 10 * 60, 60),
+            block(304, today.plusDays(2), "Pack online orders", 11 * 60 + 30, 45),
+            block(305, today.plusDays(2), "Write staff rota", 12 * 60 + 45, 25)
         )
         blocks.forEach { block ->
             blockDao().insertBlock(block)
