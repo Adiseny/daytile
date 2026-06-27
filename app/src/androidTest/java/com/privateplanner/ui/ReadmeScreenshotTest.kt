@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -50,20 +51,29 @@ class ReadmeScreenshotTest {
         outputDir.deleteRecursively()
         outputDir.mkdirs()
 
+        val today = LocalDate.now()
         setPlannerContent()
-        compose.waitUntilNodeWithText("Deep work")
+        compose.waitUntilNodeWithText("School run")
         captureRoot(outputDir.resolve("daytile-timeline.png"))
 
+        compose.runOnUiThread {
+            viewModel.jumpTo(today.plusDays(1))
+        }
+        compose.waitUntilNodeWithText("Economics lecture")
         compose.runOnUiThread {
             viewModel.openCreate(10 * 60 + 45)
         }
         compose.waitUntilHasTextField()
+        compose.onNode(hasSetTextAction()).performTextInput("Book study room")
         hideKeyboard()
         captureRoot(outputDir.resolve("daytile-create.png"))
 
         compose.runOnUiThread {
-            viewModel.dismissSheet()
-            viewModel.openActions(2L)
+            viewModel.jumpTo(today.plusDays(2))
+        }
+        compose.waitUntilNodeWithText("Client fitting")
+        compose.runOnUiThread {
+            viewModel.openActions(302L)
         }
         compose.onNodeWithText("Delete").assertExists()
         captureRoot(outputDir.resolve("daytile-actions.png"))
@@ -97,15 +107,24 @@ class ReadmeScreenshotTest {
     }
 
     private suspend fun PlannerDatabase.seedReadmeBlocks() {
-        val today = LocalDate.now().toEpochDay()
+        val today = LocalDate.now()
         val blocks = listOf(
-            block(1, today, "Morning plan", 8 * 60, 35),
-            block(2, today, "Deep work", 9 * 60, 120),
-            block(3, today, "Design review", 9 * 60 + 30, 45),
-            block(4, today, "Admin", 11 * 60 + 45, 15),
-            block(5, today, "Lunch", 12 * 60 + 30, 45),
-            block(6, today, "Build release", 14 * 60, 90),
-            block(7, today, "Walk", 15 * 60 + 45, 30)
+            block(101, today, "School run", 8 * 60, 30),
+            block(102, today, "Builder arrival window", 9 * 60, 120),
+            block(103, today, "Dentist appointment", 9 * 60 + 30, 45),
+            block(104, today, "Call plumber", 11 * 60 + 45, 15),
+            block(105, today, "Lunch with Mum", 12 * 60 + 30, 45),
+            block(106, today, "Football practice", 16 * 60, 60),
+            block(201, today.plusDays(1), "Economics lecture", 8 * 60 + 30, 90),
+            block(202, today.plusDays(1), "Seminar prep", 10 * 60 + 15, 30),
+            block(203, today.plusDays(1), "Group presentation", 11 * 60 + 15, 45),
+            block(204, today.plusDays(1), "Library shift", 13 * 60, 120),
+            block(205, today.plusDays(1), "Train home", 16 * 60 + 30, 35),
+            block(301, today.plusDays(2), "Open studio", 8 * 60, 45),
+            block(302, today.plusDays(2), "Client fitting", 9 * 60 + 15, 75),
+            block(303, today.plusDays(2), "Supplier delivery", 10 * 60, 60),
+            block(304, today.plusDays(2), "Post orders", 11 * 60 + 30, 45),
+            block(305, today.plusDays(2), "Staff rota", 12 * 60 + 45, 25)
         )
         blocks.forEach { block ->
             blockDao().insertBlock(block)
@@ -114,14 +133,14 @@ class ReadmeScreenshotTest {
 
     private fun block(
         id: Long,
-        dateEpochDay: Long,
+        date: LocalDate,
         title: String,
         startMinutes: Int,
         durationMinutes: Int
     ): PlannerBlockEntity {
         return PlannerBlockEntity(
             id = id,
-            dateEpochDay = dateEpochDay,
+            dateEpochDay = date.toEpochDay(),
             title = title,
             startMinutes = startMinutes,
             durationMinutes = durationMinutes
@@ -130,13 +149,32 @@ class ReadmeScreenshotTest {
 
     private fun captureRoot(outputFile: File) {
         val source = compose.onRoot().captureToImage().asAndroidBitmap()
+        val topCropPx = screenshotTopCropPx(source)
+        val cropped = Bitmap.createBitmap(
+            source,
+            0,
+            topCropPx,
+            source.width,
+            source.height - topCropPx
+        )
         val targetWidth = 540
-        val targetHeight = (source.height * targetWidth / source.width.toFloat()).roundToInt()
-        val scaled = Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true)
+        val targetHeight = (cropped.height * targetWidth / cropped.width.toFloat()).roundToInt()
+        val scaled = Bitmap.createScaledBitmap(cropped, targetWidth, targetHeight, true)
         outputFile.parentFile?.mkdirs()
         FileOutputStream(outputFile).use { stream ->
             scaled.compress(Bitmap.CompressFormat.PNG, 100, stream)
         }
+    }
+
+    private fun screenshotTopCropPx(source: Bitmap): Int {
+        val resources = compose.activity.resources
+        val statusBarResourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        val statusBarHeight = if (statusBarResourceId > 0) {
+            resources.getDimensionPixelSize(statusBarResourceId)
+        } else {
+            0
+        }
+        return statusBarHeight.coerceIn(0, source.height / 8)
     }
 
     private fun screenshotOutputDir(): File {
