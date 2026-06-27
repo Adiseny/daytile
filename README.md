@@ -1,24 +1,23 @@
 # Daytile
 
-Daytile is a private offline Android timeline planner.
+Daytile is an offline Android app for planning your day as blocks on a 24-hour timeline.
 
-## Screenshots
-
-<p>
-  <img src="docs/readme/daytile-timeline.png" alt="Daytile family timeline with planned tasks" width="240">
-  <img src="docs/readme/daytile-create.png" alt="Daytile student plan with create task sheet" width="240">
-  <img src="docs/readme/daytile-actions.png" alt="Daytile small business plan with block actions sheet" width="240">
+<p align="center">
+  <img src="docs/readme/daytile-timeline.png" width="240" alt="Daytile 24-hour timeline with planned tasks">
+  <img src="docs/readme/daytile-create.png" width="240" alt="Creating a task">
+  <img src="docs/readme/daytile-actions.png" width="240" alt="Block actions for a task">
 </p>
 
-Daytile has no account system, no network permission, no analytics, and stores planner data only in a local Room database. Backup and device-transfer extraction are disabled.
+## Privacy
 
-```powershell
-.\gradlew.bat :app:testDebugUnitTest
-.\gradlew.bat :app:lintDebug
-.\gradlew.bat :app:verifyPrivacy
-.\gradlew.bat :app:assembleRelease
+No account, no network, no analytics, no logging. Zero Android permissions, not even `INTERNET`. System backup and device transfer are disabled, and data is stored only in a local on-device database.
+
+This is enforced, not just promised. The `verifyPrivacy` Gradle task fails the release build if a permission, networking or analytics dependency, or logging call is added.
+
+```bash
+./gradlew :app:verifyPrivacy
 ```
 
-See [docs/release.md](docs/release.md) for signing, connected tests, and benchmark checks.
+## License
 
-Proprietary. All rights reserved.
+Proprietary, all rights reserved. The source is public so the privacy claims above can be verified, not reused. See [LICENSE](LICENSE).
