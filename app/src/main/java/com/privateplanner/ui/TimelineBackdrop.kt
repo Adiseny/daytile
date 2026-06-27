@@ -37,10 +37,10 @@ internal fun BoxScope.TimelineGlassBackdrop(
     compact: Boolean
 ) {
     val density = LocalDensity.current
-    val paper = PlannerColors.Paper
-    val hourLine = PlannerColors.HourLine
-    val halfHourLine = PlannerColors.HalfHourLine
-    val quarterTick = PlannerColors.QuarterTick
+    val paper = PlannerColours.Paper
+    val hourLine = PlannerColours.HourLine
+    val halfHourLine = PlannerColours.HalfHourLine
+    val quarterTick = PlannerColours.QuarterTick
     var tileSize by remember { mutableStateOf(IntSize.Zero) }
     val blurRadiusPx = with(density) {
         (if (compact) 2.8.dp else 4.8.dp).toPx()
@@ -271,11 +271,11 @@ float2 roundedRectNormal(float2 p, float2 halfSize, float radius) {
 }
 
 half4 main(float2 p) {
-    float2 center = size * 0.5;
+    float2 centre = size * 0.5;
     float2 halfSize = size * 0.5;
     float radius = max(cornerRadius, 1.0);
     float rimWidth = max(radius * 2.05, 10.0);
-    float2 local = p - center;
+    float2 local = p - centre;
 
     float distance = roundedRectSdf(local, halfSize, radius);
     float innerDepth = max(-distance, 0.0);

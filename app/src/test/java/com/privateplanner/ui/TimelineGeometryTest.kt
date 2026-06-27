@@ -72,7 +72,7 @@ class TimelineGeometryTest {
     }
 
     @Test
-    fun resizeZoneUsesCenteredLaneAndBottomAreaForLongBlocks() {
+    fun resizeZoneUsesCentredLaneAndBottomAreaForLongBlocks() {
         assertTrue(
             TimelineGeometry.isInResizeZone(
                 x = 50f,
@@ -112,7 +112,7 @@ class TimelineGeometryTest {
     }
 
     @Test
-    fun resizeHandleHitAreaIsSmallCenteredAndNearVisibleBar() {
+    fun resizeHandleHitAreaIsSmallCentredAndNearVisibleBar() {
         assertTrue(
             TimelineGeometry.isInResizeHandle(
                 x = 50f,

@@ -34,9 +34,9 @@ import kotlin.math.roundToInt
 
 @Composable
 internal fun TimelineGrid(modifier: Modifier = Modifier) {
-    val hourLine = PlannerColors.HourLine
-    val halfHourLine = PlannerColors.HalfHourLine
-    val quarterTick = PlannerColors.QuarterTick
+    val hourLine = PlannerColours.HourLine
+    val halfHourLine = PlannerColours.HalfHourLine
+    val quarterTick = PlannerColours.QuarterTick
     Box(
         modifier = modifier.drawWithCache {
             val hourHeight = HourHeight.toPx()
@@ -70,13 +70,13 @@ internal fun TimelineGrid(modifier: Modifier = Modifier) {
                 }
             }
 
-            val fiveMinTickColor = quarterTick.copy(alpha = 0.72f)
+            val fiveMinTickColour = quarterTick.copy(alpha = 0.72f)
             val stroke = Stroke(width = strokePx)
             onDrawBehind {
                 drawPath(hourPath, hourLine, style = stroke)
                 drawPath(halfHourPath, halfHourLine, style = stroke)
                 drawPath(quarterPath, quarterTick, style = stroke)
-                drawPath(fiveMinutePath, fiveMinTickColor, style = stroke)
+                drawPath(fiveMinutePath, fiveMinTickColour, style = stroke)
             }
         }
     )
@@ -90,7 +90,7 @@ internal fun Path.line(startX: Float, startY: Float, endX: Float, endY: Float) {
 @Composable
 internal fun CurrentTimeIndicator(minutes: Int) {
     val timeText = remember(minutes) { TimeFormatter.time(minutes) }
-    val indicatorColor = PlannerColors.Delete
+    val indicatorColour = PlannerColours.Delete
     val y = HourHeight * (minutes / 60f)
     val labelTop = (y - HourLabelHeight / 2).coerceAtLeast(0.dp)
     val labelShape = RoundedCornerShape(7.dp)
@@ -103,13 +103,13 @@ internal fun CurrentTimeIndicator(minutes: Int) {
         val yPx = (minutes / 60f * HourHeight.toPx()).roundToInt().toFloat()
         val gutter = TimelineGutter.toPx()
         drawLine(
-            color = indicatorColor,
+            color = indicatorColour,
             start = Offset(gutter, yPx),
             end = Offset(size.width, yPx),
             strokeWidth = 2.dp.toPx()
         )
         drawCircle(
-            color = indicatorColor,
+            color = indicatorColour,
             radius = 4.dp.toPx(),
             center = Offset(gutter, yPx)
         )
@@ -123,15 +123,15 @@ internal fun CurrentTimeIndicator(minutes: Int) {
             .height(HourLabelHeight)
             .zIndex(4f)
             .clip(labelShape)
-            .background(PlannerColors.Sheet)
-            .border(1.dp, indicatorColor.copy(alpha = 0.35f), labelShape)
+            .background(PlannerColours.Sheet)
+            .border(1.dp, indicatorColour.copy(alpha = 0.35f), labelShape)
             .semantics {
                 contentDescription = "Current time, $timeText"
             }
     ) {
         androidx.compose.material3.Text(
             text = timeText,
-            color = indicatorColor,
+            color = indicatorColour,
             fontFamily = DaytileFontFamily,
             fontSize = 13.sp,
             lineHeight = 15.sp,
@@ -180,8 +180,8 @@ internal fun TimeLabels(modifier: Modifier = Modifier) {
             )
         }
     }
-    val hourColor = PlannerColors.TimeText
-    val halfHourColor = PlannerColors.MutedText.copy(alpha = 0.9f)
+    val hourColour = PlannerColours.TimeText
+    val halfHourColour = PlannerColours.MutedText.copy(alpha = 0.9f)
     val labelWidth = TimelineGutter - 8.dp
 
     Canvas(modifier = modifier) {
@@ -191,7 +191,7 @@ internal fun TimeLabels(modifier: Modifier = Modifier) {
         val halfHourLabelHeightPx = HalfHourLabelHeight.toPx()
         drawTimelineLabels(
             layouts = hourLayouts,
-            color = hourColor,
+            colour = hourColour,
             labelWidthPx = labelWidthPx,
             labelHeightPx = hourLabelHeightPx
         ) { hour ->
@@ -199,7 +199,7 @@ internal fun TimeLabels(modifier: Modifier = Modifier) {
         }
         drawTimelineLabels(
             layouts = halfHourLayouts,
-            color = halfHourColor,
+            colour = halfHourColour,
             labelWidthPx = labelWidthPx,
             labelHeightPx = halfHourLabelHeightPx
         ) { hour ->
@@ -210,7 +210,7 @@ internal fun TimeLabels(modifier: Modifier = Modifier) {
 
 private inline fun DrawScope.drawTimelineLabels(
     layouts: List<androidx.compose.ui.text.TextLayoutResult>,
-    color: Color,
+    colour: Color,
     labelWidthPx: Float,
     labelHeightPx: Float,
     topForHour: (Int) -> Float
@@ -218,7 +218,7 @@ private inline fun DrawScope.drawTimelineLabels(
     layouts.forEachIndexed { hour, layout ->
         drawText(
             textLayoutResult = layout,
-            color = color,
+            color = colour,
             topLeft = Offset(
                 x = labelWidthPx - layout.size.width,
                 y = topForHour(hour) + (labelHeightPx - layout.size.height) / 2f

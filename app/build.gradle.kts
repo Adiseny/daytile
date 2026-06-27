@@ -182,8 +182,8 @@ tasks.register("verifyPrivacy") {
             .getByName("releaseRuntimeClasspath")
             .resolvedConfiguration
             .resolvedArtifacts
-            .joinToString(separator = "\n") { artifact ->
-                "${artifact.moduleVersion.id.group}:${artifact.name}:${artifact.moduleVersion.id.version}"
+            .joinToString(separator = "\n") { dependency ->
+                "${dependency.moduleVersion.id.group}:${dependency.name}:${dependency.moduleVersion.id.version}"
                     .lowercase(Locale.US)
             }
 

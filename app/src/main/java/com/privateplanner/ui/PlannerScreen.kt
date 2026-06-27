@@ -162,7 +162,7 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(PlannerColors.Paper)
+            .background(PlannerColours.Paper)
             .axisLockedDaySwipe(
                 enabled = uiState.sheet == null,
                 onPrevious = viewModel::previousDay,
@@ -289,13 +289,13 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
 private fun PlannerSnackbar(data: SnackbarData) {
     val shape = RoundedCornerShape(18.dp)
     Surface(
-        color = PlannerColors.Sheet.copy(alpha = 0.96f),
-        contentColor = PlannerColors.PrimaryText,
+        color = PlannerColours.Sheet.copy(alpha = 0.96f),
+        contentColor = PlannerColours.PrimaryText,
         shape = shape,
         shadowElevation = 8.dp,
         modifier = Modifier.border(
             width = 1.dp,
-            color = PlannerColors.HourLine.copy(alpha = 0.72f),
+            color = PlannerColours.HourLine.copy(alpha = 0.72f),
             shape = shape
         )
     ) {
@@ -307,7 +307,7 @@ private fun PlannerSnackbar(data: SnackbarData) {
         ) {
             Text(
                 text = data.visuals.message,
-                color = PlannerColors.PrimaryText,
+                color = PlannerColours.PrimaryText,
                 fontFamily = DaytileFontFamily,
                 fontSize = 14.sp,
                 lineHeight = 18.sp,
@@ -324,13 +324,13 @@ private fun PlannerSnackbar(data: SnackbarData) {
                         .padding(start = 12.dp)
                         .height(34.dp)
                         .clip(RoundedCornerShape(11.dp))
-                        .background(PlannerColors.Delete.copy(alpha = 0.10f))
+                        .background(PlannerColours.Delete.copy(alpha = 0.10f))
                         .clickable(onClick = data::performAction)
                         .padding(horizontal = 12.dp)
                 ) {
                     Text(
                         text = actionLabel,
-                        color = PlannerColors.Delete,
+                        color = PlannerColours.Delete,
                         fontFamily = DaytileFontFamily,
                         fontSize = 14.sp,
                         lineHeight = 18.sp,
@@ -358,10 +358,10 @@ private fun TimelineHeader(
             .background(
                 Brush.verticalGradient(
                     colorStops = arrayOf(
-                        0f to PlannerColors.Paper,
-                        0.72f to PlannerColors.Paper,
-                        0.9f to PlannerColors.Paper.copy(alpha = 0.72f),
-                        1f to PlannerColors.Paper.copy(alpha = 0f)
+                        0f to PlannerColours.Paper,
+                        0.72f to PlannerColours.Paper,
+                        0.9f to PlannerColours.Paper.copy(alpha = 0.72f),
+                        1f to PlannerColours.Paper.copy(alpha = 0f)
                     )
                 )
             )
@@ -391,7 +391,7 @@ private fun TimelineHeader(
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    color = PlannerColors.MutedText,
+                    color = PlannerColours.MutedText,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 12.sp,
                         lineHeight = 15.sp
@@ -468,7 +468,7 @@ private fun Timeline(
             modifier = Modifier
                 .height(TimelineTopClearance + DayHeight)
                 .fillMaxWidth()
-                .background(PlannerColors.Paper)
+                .background(PlannerColours.Paper)
         ) {
             val timelineMaxWidth = maxWidth
             val timelineWidthPx = with(density) { maxWidth.toPx() }
@@ -478,7 +478,7 @@ private fun Timeline(
                     .offset(y = TimelineTopClearance)
                     .height(DayHeight)
                     .fillMaxWidth()
-                    .background(PlannerColors.Paper)
+                    .background(PlannerColours.Paper)
                     .timelineTapInput(
                         blocks = blocks,
                         layoutById = layoutById,
@@ -571,7 +571,7 @@ private fun TimeBlock(
     val baseTop = heightForMinutes(block.startMinutes)
     val baseHeight = heightForMinutes(block.durationMinutes)
     val baseTouchHeight = baseHeight.coerceAtLeast(MinimumTouchTarget)
-    val touchTop = centeredTouchTop(baseTop, baseHeight)
+    val touchTop = centredTouchTop(baseTop, baseHeight)
     val snappedTop = heightForMinutes(displayedStartMinutes)
     val visualHeight = heightForMinutes(displayedDurationMinutes)
     val baseVisualOffset = baseTop - touchTop

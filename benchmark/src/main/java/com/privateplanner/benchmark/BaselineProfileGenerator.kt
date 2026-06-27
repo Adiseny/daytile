@@ -19,14 +19,14 @@ class BaselineProfileGenerator {
         pressHome()
         startActivityAndWait()
 
-        val centerX = device.displayWidth / 2
+        val centreX = device.displayWidth / 2
         val topY = device.displayHeight / 4
         val bottomY = device.displayHeight * 3 / 4
 
         repeat(2) {
-            device.swipe(centerX, bottomY, centerX, topY, 24)
+            device.swipe(centreX, bottomY, centreX, topY, 24)
             device.waitForIdle()
-            device.swipe(centerX, topY, centerX, bottomY, 24)
+            device.swipe(centreX, topY, centreX, bottomY, 24)
             device.waitForIdle()
         }
     }

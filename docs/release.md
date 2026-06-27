@@ -23,7 +23,7 @@ $env:DAYTILE_RELEASE_KEY_ALIAS='...'
 $env:DAYTILE_RELEASE_KEY_PASSWORD='...'
 ```
 
-Without those variables, Gradle still builds the release artifact but leaves it unsigned. The debug key is only used by `debug`, `benchmark`, and generated local benchmark/profile builds.
+Without those variables, Gradle still builds the release artefact but leaves it unsigned. The debug key is only used by `debug`, `benchmark`, and generated local benchmark/profile builds.
 
 ## Performance Check
 

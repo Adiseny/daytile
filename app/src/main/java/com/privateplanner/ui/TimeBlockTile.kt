@@ -53,12 +53,12 @@ internal fun BoxScope.TimeBlockForeground(
             .matchParentSize()
             .liquidGlassTileSurface(
                 tint = background,
-                shade = PlannerColors.GlassShade,
+                shade = PlannerColours.GlassShade,
                 cornerRadius = blockCornerRadius,
                 compact = compact,
                 lifted = movingGlass,
-                selectionColor = if (selected) {
-                    PlannerColors.PrimaryText.copy(alpha = 0.52f)
+                selectionColour = if (selected) {
+                    PlannerColours.PrimaryText.copy(alpha = 0.52f)
                 } else {
                     Color.Transparent
                 }
@@ -80,14 +80,14 @@ internal fun BoxScope.TimeBlockForeground(
                 .width(ResizeHandleWidth)
                 .height(ResizeHandleHeight)
                 .clip(RoundedCornerShape(ResizeHandleHeight))
-                .background(PlannerColors.PrimaryText.copy(alpha = 0.18f))
+                .background(PlannerColours.PrimaryText.copy(alpha = 0.18f))
         )
     }
 }
 
 internal fun heightForMinutes(minutes: Int): Dp = HourHeight * (minutes / 60f)
 
-internal fun centeredTouchTop(top: Dp, contentHeight: Dp): Dp {
+internal fun centredTouchTop(top: Dp, contentHeight: Dp): Dp {
     val touchHeight = contentHeight.coerceAtLeast(MinimumTouchTarget)
     return (top - (touchHeight - contentHeight) / 2)
         .coerceIn(0.dp, (DayHeight - touchHeight).coerceAtLeast(0.dp))
@@ -133,7 +133,7 @@ private fun Modifier.liquidGlassTileSurface(
     cornerRadius: Dp,
     compact: Boolean,
     lifted: Boolean = false,
-    selectionColor: Color = Color.Transparent
+    selectionColour: Color = Color.Transparent
 ): Modifier {
     return drawWithCache {
         val corner = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
@@ -144,14 +144,14 @@ private fun Modifier.liquidGlassTileSurface(
             compact -> 0.90f
             else -> 0.94f
         }
-        val borderColor = lerp(tint, shade, 0.32f)
+        val borderColour = lerp(tint, shade, 0.32f)
         val borderWidthPx = (if (lifted) 2.dp else 1.dp).toPx()
-        val selectionFill = selectionColor.copy(alpha = selectionColor.alpha * 0.16f)
+        val selectionFill = selectionColour.copy(alpha = selectionColour.alpha * 0.16f)
         onDrawWithContent {
             drawRoundRect(color = glassTint.copy(alpha = bodyAlpha), cornerRadius = corner)
             inset(borderWidthPx / 2f) {
                 drawRoundRect(
-                    color = borderColor.copy(alpha = if (lifted) 0.85f else 0.60f),
+                    color = borderColour.copy(alpha = if (lifted) 0.85f else 0.60f),
                     cornerRadius = CornerRadius(
                         (corner.x - borderWidthPx / 2f).coerceAtLeast(0f),
                         (corner.y - borderWidthPx / 2f).coerceAtLeast(0f)
@@ -159,16 +159,16 @@ private fun Modifier.liquidGlassTileSurface(
                     style = Stroke(borderWidthPx)
                 )
             }
-            if (selectionColor.alpha > 0f) {
+            if (selectionColour.alpha > 0f) {
                 drawRoundRect(
                     color = selectionFill,
                     cornerRadius = corner
                 )
             }
             drawContent()
-            if (selectionColor.alpha > 0f) {
+            if (selectionColour.alpha > 0f) {
                 drawRoundRect(
-                    color = selectionColor,
+                    color = selectionColour,
                     cornerRadius = corner,
                     style = Stroke(width = 2.dp.toPx())
                 )
@@ -275,7 +275,7 @@ private fun BlockOneLineContent(
     ) {
         Text(
             text = title,
-            color = PlannerColors.PrimaryText,
+            color = PlannerColours.PrimaryText,
             fontFamily = DaytileFontFamily,
             fontSize = titleFontSize,
             lineHeight = titleLineHeight,
@@ -306,7 +306,7 @@ private fun BlockTwoLineContent(
     ) {
         Text(
             text = title,
-            color = PlannerColors.PrimaryText,
+            color = PlannerColours.PrimaryText,
             fontFamily = DaytileFontFamily,
             fontSize = titleFontSize,
             lineHeight = titleLineHeight,
@@ -316,7 +316,7 @@ private fun BlockTwoLineContent(
         )
         Text(
             text = rangeText,
-            color = PlannerColors.PrimaryText.copy(alpha = 0.82f),
+            color = PlannerColours.PrimaryText.copy(alpha = 0.82f),
             fontFamily = DaytileFontFamily,
             fontSize = metaFontSize,
             lineHeight = metaLineHeight,
@@ -339,7 +339,7 @@ private fun DurationLabel(
 ) {
     Text(
         text = text,
-        color = PlannerColors.PrimaryText.copy(alpha = textAlpha),
+        color = PlannerColours.PrimaryText.copy(alpha = textAlpha),
         fontFamily = DaytileFontFamily,
         fontSize = fontSize,
         lineHeight = lineHeight,

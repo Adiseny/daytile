@@ -120,7 +120,7 @@ fun BlockInputSheet(
                         text = "\u00D7",
                         fontFamily = DaytileFontFamily,
                         fontSize = 24.sp,
-                        color = PlannerColors.MutedText
+                        color = PlannerColours.MutedText
                     )
                 }
 
@@ -153,7 +153,7 @@ fun BlockInputSheet(
                         unfocusedIndicatorColor = Color.Transparent,
                         disabledIndicatorColor = Color.Transparent,
                         errorIndicatorColor = Color.Transparent,
-                        cursorColor = PlannerColors.PrimaryText
+                        cursorColor = PlannerColours.PrimaryText
                     ),
                     textStyle = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier
@@ -167,16 +167,16 @@ fun BlockInputSheet(
                     onClick = { submit() },
                     enabled = canSubmit,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PlannerColors.AddButton,
-                        contentColor = PlannerColors.Sheet,
-                        disabledContainerColor = PlannerColors.AddButtonDisabled,
-                        disabledContentColor = PlannerColors.MutedText
+                        containerColor = PlannerColours.AddButton,
+                        contentColor = PlannerColours.Sheet,
+                        disabledContainerColor = PlannerColours.AddButtonDisabled,
+                        disabledContentColor = PlannerColours.MutedText
                     ),
                     modifier = Modifier.height(48.dp)
                 ) {
                     Text(
                         text = buttonLabel,
-                        color = if (canSubmit) PlannerColors.Sheet else PlannerColors.MutedText
+                        color = if (canSubmit) PlannerColours.Sheet else PlannerColours.MutedText
                     )
                 }
             }
@@ -184,7 +184,7 @@ fun BlockInputSheet(
             if (errorText != null) {
                 Text(
                     text = errorText,
-                    color = PlannerColors.Delete,
+                    color = PlannerColours.Delete,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(start = 58.dp, top = 2.dp, end = 8.dp)
                 )
@@ -226,7 +226,7 @@ fun BlockActionSheet(
                 )
                 Text(
                     text = "${TimeFormatter.range(block.startMinutes, block.durationMinutes)} \u00B7 ${TimeFormatter.duration(block.durationMinutes)}",
-                    color = PlannerColors.MutedText,
+                    color = PlannerColours.MutedText,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -244,7 +244,7 @@ fun BlockActionSheet(
             ) {
                 Text(
                     text = "Delete",
-                    color = PlannerColors.Delete,
+                    color = PlannerColours.Delete,
                     style = MaterialTheme.typography.labelLarge
                 )
             }
@@ -310,10 +310,10 @@ fun DateJumpSheet(
                     .padding(top = 8.dp)
             ) {
                 TextButton(onClick = { onSelect(today) }) {
-                    Text("Today", color = PlannerColors.PrimaryText)
+                    Text("Today", color = PlannerColours.PrimaryText)
                 }
                 TextButton(onClick = onDismiss) {
-                    Text("Cancel", color = PlannerColors.MutedText)
+                    Text("Cancel", color = PlannerColours.MutedText)
                 }
             }
         }
@@ -328,9 +328,9 @@ private fun PlannerSheetSurface(
     val interactionSource = remember { MutableInteractionSource() }
 
     val view = LocalView.current
-    val paperArgb = PlannerColors.Paper.toArgb()
-    val dimmedArgb = PlannerColors.Scrim.compositeOver(PlannerColors.Paper).toArgb()
-    val lightBackground = PlannerColors.Paper.luminance() > 0.5f
+    val paperArgb = PlannerColours.Paper.toArgb()
+    val dimmedArgb = PlannerColours.Scrim.compositeOver(PlannerColours.Paper).toArgb()
+    val lightBackground = PlannerColours.Paper.luminance() > 0.5f
     DisposableEffect(view, dimmedArgb, lightBackground) {
         val activity = view.context.findComponentActivity()
         activity?.enableEdgeToEdge(
@@ -367,7 +367,7 @@ private fun PlannerSheetSurface(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(PlannerColors.Scrim)
+            .background(PlannerColours.Scrim)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -375,7 +375,7 @@ private fun PlannerSheetSurface(
             )
     ) {
         Surface(
-            color = PlannerColors.Sheet,
+            color = PlannerColours.Sheet,
             shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
             shadowElevation = 8.dp,
             modifier = Modifier
@@ -411,7 +411,7 @@ private fun MonthChevron(
     ) {
         Text(
             text = text,
-            color = PlannerColors.PrimaryText,
+            color = PlannerColours.PrimaryText,
             fontFamily = DaytileFontFamily,
             fontSize = 28.sp
         )
@@ -437,7 +437,7 @@ private fun WeekdayRow() {
         labels.forEach { label ->
             Text(
                 text = label,
-                color = PlannerColors.MutedText,
+                color = PlannerColours.MutedText,
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
@@ -493,10 +493,10 @@ private fun DateCell(
     modifier: Modifier = Modifier
 ) {
     val shape = CircleShape
-    val background = if (isSelected) PlannerColors.PrimaryText else Color.Transparent
-    val textColor = if (isSelected) PlannerColors.Sheet else PlannerColors.PrimaryText
+    val background = if (isSelected) PlannerColours.PrimaryText else Color.Transparent
+    val textColour = if (isSelected) PlannerColours.Sheet else PlannerColours.PrimaryText
     val borderModifier = if (isToday && !isSelected) {
-        Modifier.border(1.dp, PlannerColors.HourLine, shape)
+        Modifier.border(1.dp, PlannerColours.HourLine, shape)
     } else {
         Modifier
     }
@@ -516,7 +516,7 @@ private fun DateCell(
     ) {
         Text(
             text = date.dayOfMonth.toString(),
-            color = textColor,
+            color = textColour,
             style = MaterialTheme.typography.bodyMedium
         )
     }

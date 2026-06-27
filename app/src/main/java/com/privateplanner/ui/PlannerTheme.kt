@@ -86,16 +86,16 @@ private val DarkPalette = PlannerPalette(
     GlassShade = Color(0xFF050403)
 )
 
-private val LocalPlannerColors = staticCompositionLocalOf { LightPalette }
+private val LocalPlannerColours = staticCompositionLocalOf { LightPalette }
 internal val LocalCurrentMinuteOfDay = staticCompositionLocalOf {
     TimeSnapper.minuteOfDay(LocalTime.now())
 }
 
 /** Composition-aware palette accessor; resolves to the current day/night + time-of-day tint. */
-val PlannerColors: PlannerPalette
+val PlannerColours: PlannerPalette
     @Composable
     @ReadOnlyComposable
-    get() = LocalPlannerColors.current
+    get() = LocalPlannerColours.current
 
 private val DawnWarmth = Color(0xFFFFC980)
 private val DayPaper = Color(0xFFF7F1E7)
@@ -245,15 +245,15 @@ fun PlannerTheme(content: @Composable () -> Unit) {
     val daylight = daylightFactor(currentMinute)
     val palette = paletteForTime(currentMinute)
     val lightBackground = daylight >= LightInkThreshold
-    val colorScheme = if (lightBackground) lightSchemeFrom(palette) else darkSchemeFrom(palette)
+    val colourScheme = if (lightBackground) lightSchemeFrom(palette) else darkSchemeFrom(palette)
     TimeAwareSystemBars(palette, lightBackground)
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = colourScheme,
         typography = plannerTypography
     ) {
         CompositionLocalProvider(
             LocalCurrentMinuteOfDay provides currentMinute,
-            LocalPlannerColors provides palette,
+            LocalPlannerColours provides palette,
             LocalContentColor provides palette.PrimaryText
         ) {
             content()
