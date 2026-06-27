@@ -23,15 +23,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class PlannerViewModel(
-    private val repository: PlannerRepository,
-    initialScrollTargetMinutes: Int? = openingScrollTarget()
+    private val repository: PlannerRepository
 ) : ViewModel() {
     private val selectedDate = MutableStateFlow(LocalDate.now())
     private val blockCache = MutableStateFlow<Map<LocalDate, List<PlannerBlock>>>(emptyMap())
     private val sheet = MutableStateFlow<PlannerSheet?>(null)
     private val snackbar = MutableStateFlow<PlannerSnackbar?>(null)
     private val createError = MutableStateFlow<String?>(null)
-    private val scrollTargetMinutes = MutableStateFlow(initialScrollTargetMinutes)
+    private val scrollTargetMinutes = MutableStateFlow<Int?>(openingScrollTarget())
     private val pendingTimeUpdates = mutableMapOf<Long, PendingTimeUpdate>()
     private val timeWriteJobs = mutableMapOf<Long, Job>()
     private val prefetchJobs = mutableMapOf<LocalDate, Job>()

@@ -240,11 +240,8 @@ private fun darkSchemeFrom(c: PlannerPalette) = darkColorScheme(
 )
 
 @Composable
-fun PlannerTheme(
-    currentMinuteOverride: Int? = null,
-    content: @Composable () -> Unit
-) {
-    val currentMinute = currentMinuteOverride ?: rememberCurrentMinuteOfDay()
+fun PlannerTheme(content: @Composable () -> Unit) {
+    val currentMinute = rememberCurrentMinuteOfDay()
     val daylight = daylightFactor(currentMinute)
     val palette = paletteForTime(currentMinute)
     val lightBackground = daylight >= LightInkThreshold
