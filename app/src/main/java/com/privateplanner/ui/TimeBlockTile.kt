@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,7 +43,7 @@ internal fun BoxScope.TimeBlockForeground(
     movingGlass: Boolean,
     selected: Boolean,
     title: String,
-    rangeText: String,
+    rangeText: () -> String,
     durationText: String,
     tileWidth: Dp,
     visualHeight: Dp,
@@ -104,20 +105,21 @@ internal fun Density.titleFollowOffsetPx(
     return (desiredTitleTop - normalTitleTop).coerceIn(0f, maxOffset).roundToInt()
 }
 
-internal fun Modifier.snappedMoveLayer(offset: Dp): Modifier {
-    if (offset == 0.dp) return this
+internal fun Modifier.snappedMoveLayer(useDragOffset: Boolean, dragOffsetPx: FloatState): Modifier {
+    if (!useDragOffset) return this
     return graphicsLayer {
-        translationY = offset.toPx()
+        translationY = dragOffsetPx.floatValue
     }
 }
 
 internal fun Modifier.liftedGlassLayer(
     shape: RoundedCornerShape,
     lifted: Boolean,
-    offset: Dp
+    useDragOffset: Boolean,
+    dragOffsetPx: FloatState
 ): Modifier {
     return graphicsLayer {
-        translationY = offset.toPx()
+        translationY = if (useDragOffset) dragOffsetPx.floatValue else 0f
         shadowElevation = if (lifted) 0f else 4.dp.toPx()
         this.shape = shape
         clip = false
@@ -180,7 +182,7 @@ private fun Modifier.liquidGlassTileSurface(
 @Composable
 private fun BlockContent(
     title: String,
-    rangeText: String,
+    rangeText: () -> String,
     durationText: String,
     tileWidth: Dp,
     height: Dp,
@@ -290,7 +292,7 @@ private fun BlockOneLineContent(
 @Composable
 private fun BlockTwoLineContent(
     title: String,
-    rangeText: String,
+    rangeText: () -> String,
     titleFontSize: TextUnit,
     titleLineHeight: TextUnit,
     titleMaxLines: Int,
@@ -315,7 +317,7 @@ private fun BlockTwoLineContent(
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = rangeText,
+            text = rangeText(),
             color = PlannerColours.PrimaryText.copy(alpha = 0.82f),
             fontFamily = DaytileFontFamily,
             fontSize = metaFontSize,

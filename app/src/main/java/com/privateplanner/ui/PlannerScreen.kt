@@ -43,7 +43,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -547,6 +549,8 @@ private fun TimeBlock(
     val latestValidator by rememberUpdatedState(validator)
     var previewStartMinutes by remember(block.id) { mutableIntStateOf(NoPreviewMinutes) }
     var previewDurationMinutes by remember(block.id) { mutableIntStateOf(NoPreviewMinutes) }
+    // Read by graphicsLayer so snapped moves can update without recomposing the tile body.
+    val moveOffsetPx = remember(block.id) { mutableFloatStateOf(0f) }
     var moveActive by remember(block.id) { mutableStateOf(false) }
     var resizeActive by remember(block.id) { mutableStateOf(false) }
     LaunchedEffect(block.startMinutes, moveActive) {
@@ -559,9 +563,12 @@ private fun TimeBlock(
             previewDurationMinutes = NoPreviewMinutes
         }
     }
-    val hasMovePreview = previewStartMinutes != NoPreviewMinutes
-    val hasResizePreview = previewDurationMinutes != NoPreviewMinutes
-    val displayedStartMinutes = if (hasMovePreview) previewStartMinutes else block.startMinutes
+    val hasMovePreview by remember(block.id) {
+        derivedStateOf { previewStartMinutes != NoPreviewMinutes }
+    }
+    val hasResizePreview by remember(block.id) {
+        derivedStateOf { previewDurationMinutes != NoPreviewMinutes }
+    }
     val displayedDurationMinutes = if (hasResizePreview) previewDurationMinutes else block.durationMinutes
 
     val columnWidth = (timelineWidth - TimelineGutter - 10.dp).coerceAtLeast(1.dp) /
@@ -572,13 +579,11 @@ private fun TimeBlock(
     val baseHeight = heightForMinutes(block.durationMinutes)
     val baseTouchHeight = baseHeight.coerceAtLeast(MinimumTouchTarget)
     val touchTop = centredTouchTop(baseTop, baseHeight)
-    val snappedTop = heightForMinutes(displayedStartMinutes)
     val visualHeight = heightForMinutes(displayedDurationMinutes)
     val baseVisualOffset = baseTop - touchTop
-    val snappedMoveOffset = snappedTop - baseTop
     val touchHeight = maxOf(baseTouchHeight, baseVisualOffset + visualHeight)
         .coerceAtMost((DayHeight - touchTop).coerceAtLeast(MinimumTouchTarget))
-    val latestVisualOffset by rememberUpdatedState(baseVisualOffset + snappedMoveOffset)
+    val latestVisualOffset by rememberUpdatedState(baseVisualOffset)
     val compact = displayedDurationMinutes <= QuickResizeMaxDurationMinutes
     val background = remember(block.startMinutes, layout.columnIndex) {
         Color(TimeOfDayColourMapper.backgroundArgb(block.startMinutes, layout.columnIndex))
@@ -588,8 +593,11 @@ private fun TimeBlock(
     val resizeLaneWidth = (width * ResizeLaneFraction).coerceAtLeast(MinimumTouchTarget).coerceAtMost(width)
     val resizeTouchOffset = (baseVisualOffset + visualHeight - MinimumTouchTarget)
         .coerceIn(0.dp, (touchHeight - MinimumTouchTarget).coerceAtLeast(0.dp))
-    val rangeText = remember(displayedStartMinutes, displayedDurationMinutes) {
-        TimeFormatter.range(displayedStartMinutes, displayedDurationMinutes)
+    val rangeTextProvider: () -> String = {
+        val labelStart = if (previewStartMinutes != NoPreviewMinutes) previewStartMinutes else block.startMinutes
+        val labelDuration =
+            if (previewDurationMinutes != NoPreviewMinutes) previewDurationMinutes else block.durationMinutes
+        TimeFormatter.range(labelStart, labelDuration)
     }
     val durationText = remember(displayedDurationMinutes) {
         TimeFormatter.duration(displayedDurationMinutes)
@@ -598,7 +606,11 @@ private fun TimeBlock(
     val titleFollowOffset: Density.() -> Int = if (visualHeight < LongTitlePinMinHeight) {
         { 0 }
     } else {
-        { titleFollowOffsetPx(scrollState.value, snappedTop, visualHeight) }
+        {
+            val followStart =
+                if (previewStartMinutes != NoPreviewMinutes) previewStartMinutes else block.startMinutes
+            titleFollowOffsetPx(scrollState.value, heightForMinutes(followStart), visualHeight)
+        }
     }
 
     fun moveBy(deltaMinutes: Int): Boolean {
@@ -628,7 +640,7 @@ private fun TimeBlock(
             .height(touchHeight)
             .zIndex(if (movingGlass) 2f else 1f)
             .semantics(mergeDescendants = true) {
-                contentDescription = "${block.title}, ${TimeFormatter.spokenRange(displayedStartMinutes, displayedDurationMinutes)}, $durationText. Actions: Rename, Delete."
+                contentDescription = "${block.title}, ${TimeFormatter.spokenRange(block.startMinutes, displayedDurationMinutes)}, $durationText. Actions: Rename, Delete."
                 onClick(label = "Open actions") {
                     onTap()
                     true
@@ -668,6 +680,7 @@ private fun TimeBlock(
                 onTap = onTap,
                 onMoveActiveChange = { moveActive = it },
                 onMovePreview = { previewStartMinutes = it ?: NoPreviewMinutes },
+                onMoveVisualOffsetPx = { moveOffsetPx.floatValue = it },
                 onMove = onMove,
                 onResizeActiveChange = { resizeActive = it },
                 onResizePreview = {
@@ -681,14 +694,14 @@ private fun TimeBlock(
                 .offset(y = baseVisualOffset)
                 .fillMaxWidth()
                 .height(visualHeight)
-                .liftedGlassLayer(blockShape, movingGlass, snappedMoveOffset)
+                .liftedGlassLayer(blockShape, movingGlass, moveActive, moveOffsetPx)
                 .clip(blockShape)
         ) {
             if (!movingGlass) {
                 TimelineGlassBackdrop(
                     timelineWidth = timelineWidth,
                     tileLeft = left,
-                    tileTop = snappedTop,
+                    tileTop = baseTop,
                     shape = blockShape,
                     compact = compact
                 )
@@ -701,7 +714,7 @@ private fun TimeBlock(
                 movingGlass = movingGlass,
                 selected = selected,
                 title = block.title,
-                rangeText = rangeText,
+                rangeText = rangeTextProvider,
                 durationText = durationText,
                 tileWidth = width,
                 visualHeight = visualHeight,
@@ -713,7 +726,7 @@ private fun TimeBlock(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .offset(y = resizeTouchOffset)
-                .snappedMoveLayer(snappedMoveOffset)
+                .snappedMoveLayer(moveActive, moveOffsetPx)
                 .width(resizeLaneWidth)
                 .height(MinimumTouchTarget)
                 .semantics {
@@ -763,6 +776,7 @@ private fun Modifier.blockMoveInput(
     onTap: () -> Unit,
     onMoveActiveChange: (Boolean) -> Unit,
     onMovePreview: (Int?) -> Unit,
+    onMoveVisualOffsetPx: (Float) -> Unit,
     onMove: (Int) -> Boolean,
     onResizeActiveChange: (Boolean) -> Unit,
     onResizePreview: (Int?) -> Unit,
@@ -902,6 +916,7 @@ private fun Modifier.blockMoveInput(
                     initial.startMinutes + TimeSnapper.deltaMinutesFromY(effectiveDy, hourHeightPx),
                     initial.durationMinutes
                 )
+                onMoveVisualOffsetPx((snapped - initial.startMinutes) / 60f * hourHeightPx)
                 if (snapped != lastSnappedStart) {
                     lastSnappedStart = snapped
                     onMovePreview(snapped)
@@ -963,6 +978,7 @@ private fun Modifier.blockMoveInput(
                 }
                 onMoveActiveChange(false)
                 onMovePreview(null)
+                onMoveVisualOffsetPx(0f)
             }
             }
         }

@@ -206,8 +206,16 @@ tasks.register("verifyPrivacy") {
     }
 }
 
+// Gate every task that can produce a distributable release artefact. App bundle tasks do not
+// depend on assembleRelease, so the privacy check must also sit on the package tasks.
+val releaseDistributionTasks = setOf(
+    "assembleRelease",
+    "bundleRelease",
+    "packageRelease",
+    "packageReleaseBundle"
+)
 tasks.configureEach {
-    if (name == "assembleRelease") {
+    if (name in releaseDistributionTasks) {
         dependsOn("verifyPrivacy")
     }
 }
