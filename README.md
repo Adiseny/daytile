@@ -10,9 +10,7 @@ Daytile is an offline Android app for planning your day as blocks on a 24-hour t
 
 ## Download
 
-Download the APK from the [latest GitHub release](https://github.com/Adiseny/daytile/releases/latest). Daytile requires Android 8.0 or newer.
-
-The unavailable v1.0.x signing key means v1.1.0 starts a new signing lineage. If v1.0.x is installed, it must be uninstalled before v1.1.0 can be installed. Uninstalling removes its local plans because Daytile deliberately has no backup or transfer access.
+Download the APK from the [latest GitHub release](https://github.com/Adiseny/daytile/releases/latest).
 
 ## Use
 
