@@ -188,6 +188,26 @@ class PlannerRepositoryTest {
     }
 
     @Test
+    fun deletingLatestMatchingTitleFallsBackToPreviousDuration() = runBlocking {
+        val dao = FakePlannerBlockDao(
+            listOf(
+                entity(1, "2026-05-27", "Focus", 9 * 60, 25),
+                entity(2, "2026-05-28", "Focus", 9 * 60, 40)
+            )
+        )
+        val repository = PlannerRepository(dao)
+
+        repository.deleteBlock(2)
+        repository.createBlock(
+            date = LocalDate.of(2026, 5, 29),
+            startMinutes = 9 * 60,
+            title = "focus"
+        )
+
+        assertEquals(25, dao.inserted.single().durationMinutes)
+    }
+
+    @Test
     fun createBlockReturnsNoSpaceWhenNoValidDurationFits() = runBlocking {
         val date = "2026-05-29"
         val dao = FakePlannerBlockDao(

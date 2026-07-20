@@ -12,6 +12,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
@@ -260,7 +261,7 @@ internal fun PlannerSystemBarsEffect(dimmed: Boolean) {
     val dimmedArgb = palette.Scrim.compositeOver(paper).toArgb()
     val lightBackground = palette.LightBackground
     val activity = remember(view) { view.context.findComponentActivity() }
-    LaunchedEffect(activity, dimmed, baseArgb, dimmedArgb, lightBackground) {
+    DisposableEffect(activity, dimmed, baseArgb, dimmedArgb, lightBackground) {
         val style = when {
             dimmed -> SystemBarStyle.dark(dimmedArgb)
             lightBackground -> SystemBarStyle.light(baseArgb, PaperBackgroundDarkArgb)
@@ -270,6 +271,7 @@ internal fun PlannerSystemBarsEffect(dimmed: Boolean) {
             statusBarStyle = style,
             navigationBarStyle = style
         )
+        onDispose { }
     }
 }
 

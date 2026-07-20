@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1 — 20 July 2026
+
+### Interface and interaction
+
+- Added a visible outline to placed blocks and increased its thickness while moving or resizing.
+- Restored the timeline header's fade into the planner background.
+- Made create and rename text bold and removed the redundant close button from those sheets.
+- Positioned scrolling labels for long blocks from the measured header edge so they remain visible below it across display and font sizes.
+- Synchronised sheet scrims with status- and navigation-bar dimming so the full window changes in one frame.
+
 ## 1.1.0 — 20 July 2026
 
 ### Interface and interaction

@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -110,6 +111,7 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
         selectedBlocks.firstOrNull { it.id == blockId }
     }
     val timelineScrollState = rememberScrollState()
+    var headerHeightPx by remember { mutableIntStateOf(0) }
     val today = LocalCurrentDate.current
     val backgroundSemantics = if (uiState.sheet == null) {
         Modifier
@@ -182,6 +184,7 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
                 selectedDate = uiState.selectedDate,
                 blocks = selectedBlocks,
                 scrollState = timelineScrollState,
+                headerHeightPx = headerHeightPx,
                 scrollTargetMinutes = uiState.scrollTargetMinutes,
                 onEmptyTimeTap = viewModel::openCreate,
                 onBlockTap = viewModel::openActions,
@@ -195,7 +198,9 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
             TimelineHeader(
                 selectedDate = uiState.selectedDate,
                 onDateClick = viewModel::openDateJump,
-                modifier = Modifier.align(Alignment.TopCenter)
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .onSizeChanged { headerHeightPx = it.height }
             )
         }
 
@@ -335,10 +340,21 @@ private fun TimelineHeader(
     val subtitleStyle = remember(typography) {
         typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp)
     }
+    val paper = PlannerColours.Paper
+    val background = remember(paper) {
+        Brush.verticalGradient(
+            colorStops = arrayOf(
+                0f to paper,
+                0.72f to paper,
+                0.9f to paper.copy(alpha = 0.72f),
+                1f to paper.copy(alpha = 0f)
+            )
+        )
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(PlannerColours.Paper)
+            .background(background)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -377,6 +393,7 @@ private fun Timeline(
     selectedDate: LocalDate,
     blocks: List<PlannerBlock>,
     scrollState: ScrollState,
+    headerHeightPx: Int,
     scrollTargetMinutes: Int?,
     onEmptyTimeTap: (Int) -> Unit,
     onBlockTap: (Long) -> Unit,
@@ -489,6 +506,7 @@ private fun Timeline(
                             layout = layout,
                             timelineWidth = timelineWidth,
                             scrollState = scrollState,
+                            headerHeightPx = headerHeightPx,
                             viewportHeightPx = viewportHeightPx,
                             hourHeightPx = hourHeightPx,
                             onTap = { onBlockTap(block.id) },
@@ -515,6 +533,7 @@ private fun TimeBlock(
     layout: BlockLayout,
     timelineWidth: Dp,
     scrollState: ScrollState,
+    headerHeightPx: Int,
     viewportHeightPx: Int,
     hourHeightPx: Float,
     onTap: () -> Unit,
@@ -572,7 +591,12 @@ private fun TimeBlock(
         {
             val followStart =
                 if (previewStartMinutes != NoPreviewMinutes) previewStartMinutes else block.startMinutes
-            titleFollowOffsetPx(scrollState.value, heightForMinutes(followStart), visualHeight)
+            titleFollowOffsetPx(
+                scrollPx = scrollState.value,
+                blockTop = heightForMinutes(followStart),
+                visualHeight = visualHeight,
+                headerBottomPx = headerHeightPx
+            )
         }
     }
 

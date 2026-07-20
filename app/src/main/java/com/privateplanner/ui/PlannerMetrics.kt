@@ -6,7 +6,6 @@ internal val HourHeight = 120.dp
 internal val DayHeight = HourHeight * 24
 internal val LongTitlePinMinHeight = 240.dp
 internal val TimelineTopClearance = 86.dp
-internal val TimelineHeaderHeight = 104.dp
 internal val TimelineGutter = 72.dp
 internal val TimelineEndPadding = 10.dp
 internal val BlockColumnGap = 4.dp

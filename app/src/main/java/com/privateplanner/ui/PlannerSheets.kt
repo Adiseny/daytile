@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
@@ -112,20 +113,6 @@ internal fun BlockInputSheet(
                 .padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .semantics { contentDescription = "Cancel" }
-                ) {
-                    Text(
-                        text = "\u00D7",
-                        fontFamily = DaytileFontFamily,
-                        fontSize = 24.sp,
-                        color = PlannerColours.MutedText
-                    )
-                }
-
                 TextField(
                     value = value,
                     onValueChange = { incoming ->
@@ -162,7 +149,9 @@ internal fun BlockInputSheet(
                         errorIndicatorColor = Color.Transparent,
                         cursorColor = PlannerColours.PrimaryText
                     ),
-                    textStyle = MaterialTheme.typography.bodyLarge,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester)
@@ -192,7 +181,7 @@ internal fun BlockInputSheet(
                     text = errorText,
                     color = PlannerColours.Delete,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(start = 58.dp, top = 2.dp, end = 8.dp)
+                    modifier = Modifier.padding(start = 16.dp, top = 2.dp, end = 8.dp)
                 )
             }
         }

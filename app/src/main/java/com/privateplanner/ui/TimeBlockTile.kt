@@ -79,12 +79,10 @@ internal fun TimeBlockForeground(
                 color = background.copy(alpha = if (active) ActiveTileAlpha else IdleTileAlpha),
                 shape = shape
             )
-            .then(
-                if (active) {
-                    Modifier.border(1.dp, ink.copy(alpha = 0.30f), shape)
-                } else {
-                    Modifier
-                }
+            .border(
+                width = if (active) 1.5.dp else 1.dp,
+                color = ink.copy(alpha = 0.30f),
+                shape = shape
             )
             .drawWithContent {
                 drawContent()
@@ -125,9 +123,12 @@ internal fun centredTouchTop(top: Dp, contentHeight: Dp): Dp {
 internal fun Density.titleFollowOffsetPx(
     scrollPx: Int,
     blockTop: Dp,
-    visualHeight: Dp
+    visualHeight: Dp,
+    headerBottomPx: Int
 ): Int {
-    val desiredTitleTop = scrollPx + (TimelineHeaderHeight + 6.dp - TimelineTopClearance - blockTop).toPx()
+    if (headerBottomPx <= 0) return 0
+    val desiredTitleTop = scrollPx + headerBottomPx + 6.dp.toPx() -
+        TimelineTopClearance.toPx() - blockTop.toPx()
     val normalTitleTop = 8.dp.toPx()
     val maxOffset = (visualHeight - 56.dp).coerceAtLeast(0.dp).toPx()
     return (desiredTitleTop - normalTitleTop).coerceIn(0f, maxOffset).roundToInt()
