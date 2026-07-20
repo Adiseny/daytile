@@ -16,7 +16,7 @@ internal fun Modifier.axisLockedDaySwipe(
     onNext: () -> Unit
 ): Modifier {
     if (!enabled) return this
-    return pointerInput(enabled, onPrevious, onNext) {
+    return pointerInput(onPrevious, onNext) {
         val swipeThreshold = 72.dp.toPx()
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -32,7 +32,11 @@ internal fun Modifier.axisLockedDaySwipe(
                 val delta = change.positionChange()
                 total += delta
 
-                if (!horizontal && !vertical && total.getDistance() > touchSlop) {
+                if (
+                    !horizontal &&
+                    !vertical &&
+                    total.getDistanceSquared() > touchSlop * touchSlop
+                ) {
                     if (abs(total.x) > abs(total.y)) {
                         horizontal = true
                     } else {

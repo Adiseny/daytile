@@ -1,11 +1,13 @@
 package com.privateplanner.domain
 
-data class BlockLayout(
+class BlockLayout(
     val columnIndex: Int,
     val columnCount: Int
 )
 
-private val BlockLayoutOrder = compareBy<PlannerBlock> { it.startMinutes }.thenBy { it.endMinutes }
+private val BlockLayoutOrder = compareBy<PlannerBlock> { it.startMinutes }
+    .thenBy { it.endMinutes }
+    .thenBy { it.id }
 
 object OverlapLayoutCalculator {
     fun calculate(blocks: List<PlannerBlock>): Map<Long, BlockLayout> {
@@ -18,8 +20,9 @@ object OverlapLayoutCalculator {
         while (index < sorted.size) {
             val clusterStart = index
             var clusterEnd = sorted[index].endMinutes
+            index += 1
 
-            while (index < sorted.size && (index == clusterStart || sorted[index].startMinutes < clusterEnd)) {
+            while (index < sorted.size && sorted[index].startMinutes < clusterEnd) {
                 val block = sorted[index]
                 clusterEnd = maxOf(clusterEnd, block.endMinutes)
                 index += 1
@@ -38,42 +41,23 @@ object OverlapLayoutCalculator {
         result: MutableMap<Long, BlockLayout>
     ) {
         val size = endIndex - startIndex
-        val activeColumns = IntArray(size)
-        val activeEnds = IntArray(size)
-        val usedColumns = IntArray(size)
         val assignedColumns = IntArray(size)
-        var activeCount = 0
-        var maxActive = 1
-        var marker = 1
+        val columnEnds = IntArray(size)
+        var columnCount = 0
 
         for (blockIndex in startIndex until endIndex) {
             val localIndex = blockIndex - startIndex
             val block = sorted[blockIndex]
-            var kept = 0
-            for (activeIndex in 0 until activeCount) {
-                if (activeEnds[activeIndex] > block.startMinutes) {
-                    activeColumns[kept] = activeColumns[activeIndex]
-                    activeEnds[kept] = activeEnds[activeIndex]
-                    kept += 1
-                }
-            }
-            activeCount = kept
-
-            for (activeIndex in 0 until activeCount) {
-                usedColumns[activeColumns[activeIndex]] = marker
-            }
-
             var column = 0
-            while (usedColumns[column] == marker) {
+            while (column < columnCount && columnEnds[column] > block.startMinutes) {
                 column += 1
             }
-            marker += 1
+            if (column == columnCount) {
+                columnCount += 1
+            }
 
             assignedColumns[localIndex] = column
-            activeColumns[activeCount] = column
-            activeEnds[activeCount] = block.endMinutes
-            activeCount += 1
-            maxActive = maxOf(maxActive, activeCount)
+            columnEnds[column] = block.endMinutes
         }
 
         for (blockIndex in startIndex until endIndex) {
@@ -81,7 +65,7 @@ object OverlapLayoutCalculator {
             val block = sorted[blockIndex]
             result[block.id] = BlockLayout(
                 columnIndex = assignedColumns[localIndex],
-                columnCount = maxActive
+                columnCount = columnCount
             )
         }
     }

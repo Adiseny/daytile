@@ -15,8 +15,8 @@ object TimeSnapper {
         return minutes.coerceIn(0, MinutesPerDay - 1) / SnapMinutes * SnapMinutes
     }
 
-    fun floorToValidStart(minutes: Int, durationMinutes: Int = MinimumDurationMinutes): Int {
-        return clampStart(floorToSnap(minutes), durationMinutes)
+    fun floorToValidStart(minutes: Int): Int {
+        return clampStart(floorToSnap(minutes), MinimumDurationMinutes)
     }
 
     fun snapDurationToNearest(minutes: Int): Int {
@@ -38,11 +38,19 @@ object TimeSnapper {
     fun defaultDurationForStart(startMinutes: Int, nextStartMinutes: Int?): Int {
         val remaining = MinutesPerDay - startMinutes
         val defaultDuration = DefaultDurationMinutes.coerceAtMost(remaining).coerceAtLeast(MinimumDurationMinutes)
+        return capDurationAtNextStart(startMinutes, defaultDuration, nextStartMinutes)
+    }
+
+    fun capDurationAtNextStart(
+        startMinutes: Int,
+        durationMinutes: Int,
+        nextStartMinutes: Int?
+    ): Int {
         val gapToNext = nextStartMinutes
             ?.takeIf { it > startMinutes }
             ?.let { it - startMinutes }
-            ?: return defaultDuration
-        return gapToNext.coerceAtMost(defaultDuration).coerceAtLeast(MinimumDurationMinutes)
+            ?: return durationMinutes
+        return durationMinutes.coerceAtMost(gapToNext.coerceAtLeast(MinimumDurationMinutes))
     }
 
     fun clampStart(startMinutes: Int, durationMinutes: Int): Int {

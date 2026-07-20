@@ -1,106 +1,114 @@
 package com.privateplanner.domain
 
-object OverlapPolicy {
-    const val MaxSavedOverlap = 7
-    const val MaxTransientOverlap = 8
+enum class MovePlacement {
+    Invalid,
+    TransientOnly,
+    Savable
+}
 
-    fun canPlace(
-        blocks: List<PlannerBlock>,
-        candidate: PlannerBlock,
-        maxOverlap: Int = MaxSavedOverlap
-    ): Boolean {
-        return maxOverlapIncluding(blocks, candidate, stopAbove = maxOverlap) <= maxOverlap
+class OverlapPolicy private constructor(
+    private val counts: IntArray,
+    private val minutesPerSlot: Int
+) {
+    fun placement(startMinutes: Int, durationMinutes: Int): MovePlacement {
+        val maxOverlap = maxIncludingCandidate(startMinutes, durationMinutes)
+            ?: return MovePlacement.Invalid
+        return when {
+            maxOverlap <= MaxSavedOverlap -> MovePlacement.Savable
+            maxOverlap <= MaxTransientOverlap -> MovePlacement.TransientOnly
+            else -> MovePlacement.Invalid
+        }
     }
 
-    fun maxOverlap(
-        blocks: List<PlannerBlock>,
-        candidate: PlannerBlock,
-        stopAbove: Int = Int.MAX_VALUE
-    ): Int {
-        return maxOverlapIncluding(blocks, candidate, stopAbove)
+    fun canPlace(startMinutes: Int, durationMinutes: Int): Boolean {
+        return placement(startMinutes, durationMinutes) == MovePlacement.Savable
     }
 
-    fun largestValidDuration(
-        blocks: List<PlannerBlock>,
-        candidate: PlannerBlock,
-        preferredDurationMinutes: Int,
-        maxOverlap: Int = MaxSavedOverlap
-    ): Int? {
-        val maxDuration = TimeSnapper.clampDuration(
-            candidate.startMinutes,
+    fun largestValidDuration(startMinutes: Int, preferredDurationMinutes: Int): Int? {
+        val duration = TimeSnapper.clampDuration(
+            startMinutes,
             TimeSnapper.snapDurationToNearest(preferredDurationMinutes)
         )
-        val minDuration = TimeSnapper.MinimumDurationMinutes
-        if (maxDuration < minDuration) return null
+        if (!isValidCandidate(startMinutes, duration)) return null
 
-        val invalidOffset = firstInvalidOffset(
-            blocks = blocks,
-            candidate = candidate.copy(durationMinutes = maxDuration),
-            maxOverlap = maxOverlap
-        ) ?: return maxDuration
-        val validDuration = invalidOffset / TimeSnapper.SnapMinutes * TimeSnapper.SnapMinutes
-        return validDuration.takeIf { it >= minDuration }
-    }
-
-    private fun maxOverlapIncluding(
-        blocks: List<PlannerBlock>,
-        candidate: PlannerBlock,
-        stopAbove: Int
-    ): Int {
-        val changes = overlapChanges(blocks, candidate)
-        var active = 0
-        var max = 0
-        for (offset in 0 until candidate.durationMinutes) {
-            active += changes[offset]
-            if (active > max) {
-                max = active
-                if (max > stopAbove) return max
+        val startSlot = startMinutes / minutesPerSlot
+        val endSlot = (startMinutes + duration) / minutesPerSlot
+        for (slot in startSlot until endSlot) {
+            if (counts[slot] >= MaxSavedOverlap) {
+                val validDuration = (slot * minutesPerSlot - startMinutes) /
+                    TimeSnapper.SnapMinutes * TimeSnapper.SnapMinutes
+                return validDuration.takeIf { it >= TimeSnapper.MinimumDurationMinutes }
             }
         }
-        return max
+        return duration
     }
 
-    private fun firstInvalidOffset(
-        blocks: List<PlannerBlock>,
-        candidate: PlannerBlock,
-        maxOverlap: Int
-    ): Int? {
-        val changes = overlapChanges(blocks, candidate)
-        var active = 0
-        for (offset in 0 until candidate.durationMinutes) {
-            active += changes[offset]
-            if (active > maxOverlap) return offset
+    private fun maxIncludingCandidate(startMinutes: Int, durationMinutes: Int): Int? {
+        if (!isValidCandidate(startMinutes, durationMinutes)) return null
+        val startSlot = startMinutes / minutesPerSlot
+        val endSlot = (startMinutes + durationMinutes) / minutesPerSlot
+        var maxOverlap = 1
+        for (slot in startSlot until endSlot) {
+            maxOverlap = maxOf(maxOverlap, counts[slot] + 1)
         }
-        return null
+        return maxOverlap
     }
 
-    private fun overlapChanges(
-        blocks: List<PlannerBlock>,
-        candidate: PlannerBlock
-    ): IntArray {
-        val changes = IntArray(candidate.durationMinutes + 1)
+    companion object {
+        const val MaxSavedOverlap = 7
+        const val MaxTransientOverlap = 8
 
-        fun add(startMinutes: Int, endMinutes: Int) {
-            val start = maxOf(startMinutes, candidate.startMinutes)
-            val end = minOf(endMinutes, candidate.endMinutes)
-            if (start < end) {
-                changes[start - candidate.startMinutes] += 1
-                changes[end - candidate.startMinutes] -= 1
+        fun from(
+            blocks: List<PlannerBlock>,
+            excludedBlockId: Long
+        ): OverlapPolicy {
+            var minutesPerSlot = TimeSnapper.SnapMinutes
+            for (block in blocks) {
+                if (
+                    block.id != excludedBlockId &&
+                    !isSnappedValidBlock(block)
+                ) {
+                    minutesPerSlot = 1
+                    break
+                }
             }
+
+            val slotCount = TimeSnapper.MinutesPerDay / minutesPerSlot
+            val counts = IntArray(slotCount)
+            for (block in blocks) {
+                if (block.id == excludedBlockId) continue
+                val start = block.startMinutes.coerceIn(0, TimeSnapper.MinutesPerDay)
+                val end = block.endMinutes.coerceIn(0, TimeSnapper.MinutesPerDay)
+                if (start >= end) continue
+                counts[start / minutesPerSlot] += 1
+                val endSlot = end / minutesPerSlot
+                if (endSlot < slotCount) {
+                    counts[endSlot] -= 1
+                }
+            }
+
+            var active = 0
+            for (slot in counts.indices) {
+                active += counts[slot]
+                counts[slot] = active
+            }
+            return OverlapPolicy(counts, minutesPerSlot)
         }
 
-        for (block in blocks) {
-            if (
-                block.id != candidate.id &&
-                block.date == candidate.date &&
-                block.startMinutes < candidate.endMinutes &&
-                candidate.startMinutes < block.endMinutes
-            ) {
-                add(block.startMinutes, block.endMinutes)
-            }
+        private fun isValidCandidate(startMinutes: Int, durationMinutes: Int): Boolean {
+            return startMinutes >= 0 &&
+                durationMinutes >= TimeSnapper.MinimumDurationMinutes &&
+                startMinutes + durationMinutes <= TimeSnapper.MinutesPerDay &&
+                startMinutes % TimeSnapper.SnapMinutes == 0 &&
+                durationMinutes % TimeSnapper.SnapMinutes == 0
         }
 
-        add(candidate.startMinutes, candidate.endMinutes)
-        return changes
+        private fun isSnappedValidBlock(block: PlannerBlock): Boolean {
+            return block.startMinutes >= 0 &&
+                block.durationMinutes > 0 &&
+                block.endMinutes <= TimeSnapper.MinutesPerDay &&
+                block.startMinutes % TimeSnapper.SnapMinutes == 0 &&
+                block.durationMinutes % TimeSnapper.SnapMinutes == 0
+        }
     }
 }

@@ -56,6 +56,25 @@ class PlannerRepositoryTest {
     }
 
     @Test
+    fun matchingHistoryAtTheSameTimeUsesTheMostRecentlyInsertedBlock() = runBlocking {
+        val dao = FakePlannerBlockDao(
+            listOf(
+                entity(1, "2026-05-28", "Focus", 10 * 60, 25),
+                entity(2, "2026-05-28", "Focus", 10 * 60, 40)
+            )
+        )
+        val repository = PlannerRepository(dao)
+
+        repository.createBlock(
+            date = LocalDate.of(2026, 5, 29),
+            startMinutes = 11 * 60,
+            title = "Focus"
+        )
+
+        assertEquals(40, dao.inserted.single().durationMinutes)
+    }
+
+    @Test
     fun createBlockCapsPreviousMatchingDurationAtNextStart() = runBlocking {
         val dao = FakePlannerBlockDao(
             listOf(
@@ -386,34 +405,12 @@ class PlannerRepositoryTest {
         assertEquals("Existing", dao.getBlock(1)!!.title)
     }
 
-    @Test
-    fun restoreBlockReturnsFailedWhenInsertReportsConflict() = runBlocking {
-        val date = LocalDate.of(2026, 5, 29)
-        val dao = FakePlannerBlockDao(emptyList())
-        dao.nextInsertResult = -1L
-        val repository = PlannerRepository(dao)
-
-        val result = repository.restoreBlock(
-            PlannerBlock(
-                id = 99,
-                date = date,
-                title = "Restore me",
-                startMinutes = 9 * 60,
-                durationMinutes = 60
-            )
-        )
-
-        assertTrue(result is PlannerWriteResult.Failed)
-        assertNull(dao.getBlock(99))
-    }
-
     private class FakePlannerBlockDao(
         initialBlocks: List<PlannerBlockEntity>
     ) : PlannerBlockDao {
         private val blocks = initialBlocks.toMutableList()
         val inserted = mutableListOf<PlannerBlockEntity>()
         val overlapQueries = mutableListOf<OverlapQuery>()
-        var nextInsertResult: Long? = null
         var nextUpdateTimeRowCount: Int? = null
 
         override fun observeBlocksForDate(dateEpochDay: Long): Flow<List<PlannerBlockEntity>> {
@@ -466,22 +463,17 @@ class PlannerRepositoryTest {
                     block.dateEpochDay < dateEpochDay ||
                         (block.dateEpochDay == dateEpochDay && block.startMinutes < startMinutes)
                 }
-                .maxWithOrNull(compareBy<PlannerBlockEntity> { it.dateEpochDay }.thenBy { it.startMinutes })
+                .maxWithOrNull(
+                    compareBy<PlannerBlockEntity> { it.dateEpochDay }
+                        .thenBy { it.startMinutes }
+                        .thenBy { it.id }
+                )
                 ?.durationMinutes
         }
 
-        override suspend fun insertBlock(block: PlannerBlockEntity): Long {
-            nextInsertResult?.let { result ->
-                nextInsertResult = null
-                if (result != -1L) {
-                    blocks += block
-                    inserted += block
-                }
-                return result
-            }
+        override suspend fun insertBlock(block: PlannerBlockEntity) {
             blocks += block
             inserted += block
-            return block.id
         }
 
         override suspend fun updateTitle(id: Long, title: String): Int {
@@ -489,7 +481,13 @@ class PlannerRepositoryTest {
             blocks.replaceAll { existing ->
                 if (existing.id == id) {
                     updated = 1
-                    existing.copy(title = title)
+                    PlannerBlockEntity(
+                        id = existing.id,
+                        dateEpochDay = existing.dateEpochDay,
+                        title = title,
+                        startMinutes = existing.startMinutes,
+                        durationMinutes = existing.durationMinutes
+                    )
                 } else {
                     existing
                 }
@@ -506,7 +504,13 @@ class PlannerRepositoryTest {
             blocks.replaceAll { existing ->
                 if (existing.id == id) {
                     updated = 1
-                    existing.copy(startMinutes = startMinutes, durationMinutes = durationMinutes)
+                    PlannerBlockEntity(
+                        id = existing.id,
+                        dateEpochDay = existing.dateEpochDay,
+                        title = existing.title,
+                        startMinutes = startMinutes,
+                        durationMinutes = durationMinutes
+                    )
                 } else {
                     existing
                 }
@@ -527,7 +531,7 @@ class PlannerRepositoryTest {
         private fun getSortedBlocksForDate(dateEpochDay: Long): List<PlannerBlockEntity> {
             return blocks
                 .filter { it.dateEpochDay == dateEpochDay }
-                .sortedBy { it.startMinutes }
+                .sortedWith(compareBy<PlannerBlockEntity> { it.startMinutes }.thenBy { it.id })
         }
     }
 

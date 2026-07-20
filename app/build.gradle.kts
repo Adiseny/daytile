@@ -11,6 +11,7 @@ plugins {
 android {
     namespace = "com.privateplanner"
     compileSdk = 36
+    testBuildType = "instrumentedTest"
 
     val releaseStoreFile = providers.environmentVariable("DAYTILE_RELEASE_STORE_FILE").orNull
     val releaseStorePassword = providers.environmentVariable("DAYTILE_RELEASE_STORE_PASSWORD").orNull
@@ -20,9 +21,9 @@ android {
     defaultConfig {
         applicationId = "com.privateplanner"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        targetSdk = 36
+        versionCode = 3
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -43,24 +44,16 @@ android {
     }
 
     buildTypes {
+        create("instrumentedTest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".instrumented"
+            matchingFallbacks += "debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            isDebuggable = false
             signingConfigs.findByName("release")?.let { signingConfig = it }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-        }
-        create("benchmark") {
-            initWith(getByName("release"))
-            signingConfig = signingConfigs.getByName("debug")
-            matchingFallbacks += listOf("release")
-            proguardFiles("proguard-benchmark-rules.pro")
-        }
-        create("benchmarkRelease") {
-            signingConfig = signingConfigs.getByName("debug")
-        }
-        create("nonMinifiedRelease") {
-            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -74,6 +67,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 
@@ -83,7 +77,11 @@ android {
 
     packaging {
         resources {
-            excludes += "META-INF/*.version"
+            excludes += setOf(
+                "META-INF/*.version",
+                "DebugProbesKt.bin",
+                "kotlin-tooling-metadata.json"
+            )
         }
     }
 
@@ -97,7 +95,6 @@ dependencyLocking {
     lockAllConfigurations()
 }
 
-val compilerPluginSerializationVersion = "1.8.1"
 configurations.configureEach {
     if (name.startsWith("kotlinCompilerPluginClasspath") || name.startsWith("kspPluginClasspath")) {
         resolutionStrategy.eachDependency {
@@ -105,7 +102,7 @@ configurations.configureEach {
                 requested.group == "org.jetbrains.kotlinx" &&
                 requested.name.startsWith("kotlinx-serialization")
             ) {
-                useVersion(compilerPluginSerializationVersion)
+                useVersion("1.8.1")
                 because("Room 2.8.4 schema serializers need the 1.8.x GeneratedSerializer interface during KSP.")
             }
         }
@@ -114,18 +111,17 @@ configurations.configureEach {
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.05.01")
-    val lifecycleVersion = "2.10.0"
     val roomVersion = "2.8.4"
 
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:$lifecycleVersion")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:$lifecycleVersion")
+    // Lifecycle 2.11 requires compileSdk 37 and AGP 9.1, which this toolchain cannot use.
+    //noinspection GradleDependency
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.room:room-runtime:$roomVersion")
-    implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
     baselineProfile(project(":benchmark"))
@@ -134,9 +130,12 @@ dependencies {
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test:core:1.7.0")
+    // Compose UI Test still requests Espresso 3.5.0; pin the current test runtime so
+    // instrumentation works on Android 17, where the old reflective input API is gone.
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    add("instrumentedTestImplementation", "androidx.compose.ui:ui-test-manifest")
 }
 
 tasks.register("verifyPrivacy") {
@@ -151,9 +150,6 @@ tasks.register("verifyPrivacy") {
         val manifestText = manifest.readText()
         if ("<uses-permission" in manifestText || "<permission" in manifestText) {
             error("Release manifest must not contain permission declarations or uses-permission entries")
-        }
-        if ("android.permission.INTERNET" in manifestText) {
-            error("INTERNET permission is forbidden")
         }
         if ("android:usesCleartextTraffic=\"true\"" in manifestText) {
             error("Cleartext traffic must not be enabled")

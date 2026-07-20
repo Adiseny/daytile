@@ -1,16 +1,6 @@
 package com.privateplanner.ui
 
-import android.provider.Settings
-
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -39,7 +30,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,7 +46,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -65,10 +54,11 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
@@ -82,17 +72,16 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.privateplanner.domain.BlockLayout
-import com.privateplanner.domain.DateLabelFormatter
+import com.privateplanner.domain.MovePlacement
 import com.privateplanner.domain.OverlapLayoutCalculator
+import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.PlannerBlock
-import com.privateplanner.domain.PlannerBlockOrder
 import com.privateplanner.domain.TimeFormatter
-import com.privateplanner.domain.TimeOfDayColourMapper
 import com.privateplanner.domain.TimeSnapper
+import com.privateplanner.domain.blockBackgroundArgb
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -100,20 +89,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 
+private val CompactBlockShape = RoundedCornerShape(13.dp)
+private val RegularBlockShape = RoundedCornerShape(16.dp)
+private val SnackbarShape = RoundedCornerShape(18.dp)
+private val SnackbarActionShape = RoundedCornerShape(11.dp)
+private val HeaderButtonShape = RoundedCornerShape(10.dp)
 @Composable
-private fun rememberReduceMotion(): Boolean {
-    val context = LocalContext.current
-    return remember {
-        Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f
-        ) == 0f
-    }
-}
-
-@Composable
-fun PlannerScreen(viewModel: PlannerViewModel) {
+internal fun PlannerScreen(viewModel: PlannerViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val haptics = LocalHapticFeedback.current
@@ -124,12 +106,26 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
         is PlannerSheet.RenameBlock -> sheet.blockId
         else -> null
     }
+    val selectedBlock = selectedBlockId?.let { blockId ->
+        selectedBlocks.firstOrNull { it.id == blockId }
+    }
     val timelineScrollState = rememberScrollState()
-    val reduceMotion = rememberReduceMotion()
+    val today = LocalCurrentDate.current
+    val backgroundSemantics = if (uiState.sheet == null) {
+        Modifier
+    } else {
+        Modifier.clearAndSetSemantics { }
+    }
+    val deleteBlockWithHaptic: (Long) -> Unit = { blockId ->
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        viewModel.deleteBlock(blockId)
+    }
     val hasBackInterception = uiState.sheet != null ||
         currentSnackbar != null ||
-        uiState.selectedDate != LocalDate.now() ||
+        uiState.selectedDate != today ||
         snackbarHostState.currentSnackbarData != null
+
+    PlannerSystemBarsEffect(dimmed = uiState.sheet != null)
 
     BackHandler(enabled = hasBackInterception) {
         when {
@@ -139,7 +135,7 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
                 currentSnackbar?.let { viewModel.clearSnackbar(it.id) }
             }
             currentSnackbar != null -> viewModel.clearSnackbar(currentSnackbar.id)
-            uiState.selectedDate != LocalDate.now() -> viewModel.returnToToday()
+            uiState.selectedDate != today -> viewModel.returnToToday()
         }
     }
 
@@ -167,70 +163,40 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
             .background(PlannerColours.Paper)
             .axisLockedDaySwipe(
                 enabled = uiState.sheet == null,
-                onPrevious = viewModel::previousDay,
-                onNext = viewModel::nextDay
+                onPrevious = {
+                    viewModel.previousDay()
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                },
+                onNext = {
+                    viewModel.nextDay()
+                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                }
             )
     ) {
-        AnimatedContent(
-            targetState = uiState.selectedDate,
-            transitionSpec = {
-                if (reduceMotion) {
-                    EnterTransition.None togetherWith ExitTransition.None
-                } else {
-                    val direction = if (targetState.isAfter(initialState)) 1 else -1
-                    val slideSpec = tween<androidx.compose.ui.unit.IntOffset>(
-                        durationMillis = DayTransitionMillis,
-                        easing = FastOutSlowInEasing
-                    )
-                    slideInHorizontally(animationSpec = slideSpec) { width -> direction * width } togetherWith
-                        slideOutHorizontally(animationSpec = slideSpec) { width -> -direction * width }
-                }
-            },
-            label = "day-transition",
-            modifier = Modifier.fillMaxSize()
-        ) { animatedDate ->
-            val pageBlocks = uiState.blocksByDate[animatedDate].orEmpty()
-            val pageLoaded = if (animatedDate == uiState.selectedDate) {
-                uiState.selectedDateLoaded
-            } else {
-                uiState.blocksByDate.containsKey(animatedDate)
-            }
-            val pageScrollTarget = if (animatedDate == uiState.selectedDate) {
-                uiState.scrollTargetMinutes
-            } else {
-                null
-            }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(backgroundSemantics)
+        ) {
+            Timeline(
+                selectedDate = uiState.selectedDate,
+                blocks = selectedBlocks,
+                scrollState = timelineScrollState,
+                scrollTargetMinutes = uiState.scrollTargetMinutes,
+                onEmptyTimeTap = viewModel::openCreate,
+                onBlockTap = viewModel::openActions,
+                onBlockRename = viewModel::openRename,
+                onBlockDelete = deleteBlockWithHaptic,
+                onBlockMove = viewModel::moveBlock,
+                onBlockResize = viewModel::resizeBlock,
+                onScrollTargetConsumed = viewModel::consumeScrollTarget
+            )
 
-            Box(modifier = Modifier.fillMaxSize()) {
-                if (pageLoaded) {
-                    Timeline(
-                        selectedDate = animatedDate,
-                        blocks = pageBlocks,
-                        selectedBlockId = if (animatedDate == uiState.selectedDate) selectedBlockId else null,
-                        scrollState = timelineScrollState,
-                        scrollTargetMinutes = pageScrollTarget,
-                        onEmptyTimeTap = viewModel::openCreate,
-                        onBlockTap = viewModel::openActions,
-                        onBlockRename = viewModel::openRename,
-                        onBlockDelete = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.deleteBlock(it)
-                        },
-                        onBlockMove = viewModel::moveBlock,
-                        onBlockResize = viewModel::resizeBlock,
-                        onScrollTargetConsumed = viewModel::consumeScrollTarget,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-
-                TimelineHeader(
-                    selectedDate = animatedDate,
-                    onDateClick = viewModel::openDateJump,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(5f)
-                )
-            }
+            TimelineHeader(
+                selectedDate = uiState.selectedDate,
+                onDateClick = viewModel::openDateJump,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
         }
 
         SnackbarHost(
@@ -238,7 +204,8 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(16.dp),
+                .padding(16.dp)
+                .then(backgroundSemantics),
             snackbar = { data -> PlannerSnackbar(data) }
         )
 
@@ -248,31 +215,27 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
                 buttonLabel = "Add",
                 onSubmit = viewModel::createBlock,
                 onDismiss = viewModel::dismissSheet,
-                errorText = uiState.createError
+                errorText = uiState.sheetError
             )
             is PlannerSheet.RenameBlock -> {
-                val block = selectedBlocks.firstOrNull { it.id == sheet.blockId }
+                val block = selectedBlock
                 if (block != null) {
                     BlockInputSheet(
                         title = block.title,
                         buttonLabel = "Rename",
-                        selectAll = true,
                         onSubmit = viewModel::renameBlock,
                         onDismiss = viewModel::dismissSheet,
-                        errorText = uiState.createError
+                        errorText = uiState.sheetError
                     )
                 }
             }
             is PlannerSheet.BlockActions -> {
-                val block = selectedBlocks.firstOrNull { it.id == sheet.blockId }
+                val block = selectedBlock
                 if (block != null) {
                     BlockActionSheet(
                         block = block,
                         onRename = { viewModel.openRename(block.id) },
-                        onDelete = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.deleteBlock(block.id)
-                        },
+                        onDelete = { deleteBlockWithHaptic(block.id) },
                         onDismiss = viewModel::dismissSheet
                     )
                 }
@@ -289,58 +252,47 @@ fun PlannerScreen(viewModel: PlannerViewModel) {
 
 @Composable
 private fun PlannerSnackbar(data: SnackbarData) {
-    val shape = RoundedCornerShape(18.dp)
-    Surface(
-        color = PlannerColours.Sheet.copy(alpha = 0.96f),
-        contentColor = PlannerColours.PrimaryText,
-        shape = shape,
-        shadowElevation = 8.dp,
-        modifier = Modifier.border(
-            width = 1.dp,
-            color = PlannerColours.HourLine.copy(alpha = 0.72f),
-            shape = shape
-        )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(PlannerColours.Sheet, SnackbarShape)
+            .border(
+                width = 1.dp,
+                color = PlannerColours.HourLine.copy(alpha = 0.72f),
+                shape = SnackbarShape
+            )
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
-        ) {
+        Text(
+            text = data.visuals.message,
+            fontFamily = DaytileFontFamily,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        val actionLabel = data.visuals.actionLabel
+        if (actionLabel != null) {
             Text(
-                text = data.visuals.message,
-                color = PlannerColours.PrimaryText,
+                text = actionLabel,
+                color = PlannerColours.Delete,
                 fontFamily = DaytileFontFamily,
                 fontSize = 14.sp,
                 lineHeight = 18.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .height(48.dp)
+                    .clip(SnackbarActionShape)
+                    .background(PlannerColours.Delete.copy(alpha = 0.10f))
+                    .clickable(onClick = data::performAction)
+                    .padding(horizontal = 12.dp)
+                    .wrapContentHeight(Alignment.CenterVertically)
             )
-            val actionLabel = data.visuals.actionLabel
-            if (actionLabel != null) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .padding(start = 12.dp)
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(PlannerColours.Delete.copy(alpha = 0.10f))
-                        .clickable(onClick = data::performAction)
-                        .padding(horizontal = 12.dp)
-                ) {
-                    Text(
-                        text = actionLabel,
-                        color = PlannerColours.Delete,
-                        fontFamily = DaytileFontFamily,
-                        fontSize = 14.sp,
-                        lineHeight = 18.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
-                    )
-                }
-            }
         }
     }
 }
@@ -349,24 +301,44 @@ private fun PlannerSnackbar(data: SnackbarData) {
 private fun TimelineHeader(
     selectedDate: LocalDate,
     onDateClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier
 ) {
-    val title = DateLabelFormatter.primaryLabel(selectedDate)
-    val subtitle = DateLabelFormatter.secondaryLabel(selectedDate)
-
+    val today = LocalCurrentDate.current
+    val locale = LocalLocale.current.platformLocale
+    val dateFormatter = remember(locale) {
+        DateTimeFormatter.ofPattern("EEEE, d MMMM", locale)
+    }
+    val dateWithYearFormatter = remember(locale) {
+        DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", locale)
+    }
+    val title = remember(selectedDate, today, dateFormatter, dateWithYearFormatter) {
+        when (selectedDate) {
+            today.minusDays(1) -> "Yesterday"
+            today -> "Today"
+            today.plusDays(1) -> "Tomorrow"
+            else -> selectedDate.format(
+                if (selectedDate.year == today.year) dateFormatter else dateWithYearFormatter
+            )
+        }
+    }
+    val subtitle = remember(selectedDate, today, dateFormatter) {
+        if (selectedDate in today.minusDays(1)..today.plusDays(1)) {
+            selectedDate.format(dateFormatter)
+        } else {
+            null
+        }
+    }
+    val typography = MaterialTheme.typography
+    val titleStyle = remember(typography) {
+        typography.headlineMedium.copy(fontSize = 22.sp, lineHeight = 27.sp)
+    }
+    val subtitleStyle = remember(typography) {
+        typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp)
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colorStops = arrayOf(
-                        0f to PlannerColours.Paper,
-                        0.72f to PlannerColours.Paper,
-                        0.9f to PlannerColours.Paper.copy(alpha = 0.72f),
-                        1f to PlannerColours.Paper.copy(alpha = 0f)
-                    )
-                )
-            )
+            .background(PlannerColours.Paper)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -374,7 +346,7 @@ private fun TimelineHeader(
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
                 .padding(top = 4.dp, bottom = 14.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(HeaderButtonShape)
                 .clickable(onClick = onDateClick)
                 .padding(horizontal = 16.dp, vertical = 4.dp)
                 .semantics {
@@ -383,10 +355,7 @@ private fun TimelineHeader(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    fontSize = 22.sp,
-                    lineHeight = 27.sp
-                ),
+                style = titleStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -394,10 +363,7 @@ private fun TimelineHeader(
                 Text(
                     text = subtitle,
                     color = PlannerColours.MutedText,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 12.sp,
-                        lineHeight = 15.sp
-                    ),
+                    style = subtitleStyle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -410,7 +376,6 @@ private fun TimelineHeader(
 private fun Timeline(
     selectedDate: LocalDate,
     blocks: List<PlannerBlock>,
-    selectedBlockId: Long?,
     scrollState: ScrollState,
     scrollTargetMinutes: Int?,
     onEmptyTimeTap: (Int) -> Unit,
@@ -419,36 +384,48 @@ private fun Timeline(
     onBlockDelete: (Long) -> Unit,
     onBlockMove: (Long, Int) -> Boolean,
     onBlockResize: (Long, Int) -> Boolean,
-    onScrollTargetConsumed: () -> Unit,
-    modifier: Modifier = Modifier
+    onScrollTargetConsumed: () -> Unit
 ) {
     val density = LocalDensity.current
     val hourHeightPx = with(density) { HourHeight.toPx() }
     val gutterPx = with(density) { TimelineGutter.toPx() }
     val topClearancePx = with(density) { TimelineTopClearance.toPx() }
     val minimumTouchTargetPx = with(density) { MinimumTouchTarget.toPx() }
+    val timelineEndPaddingPx = with(density) { TimelineEndPadding.toPx() }
+    val blockColumnGapPx = with(density) { BlockColumnGap.toPx() }
     val layoutById = remember(blocks) {
         OverlapLayoutCalculator.calculate(blocks)
     }
-    val sortedBlocks = remember(blocks) {
-        blocks.sortedWith(PlannerBlockOrder)
-    }
-    val occupancyById = remember(blocks) {
-        blocks.associate { block ->
-            block.id to DayOccupancy.from(blocks, block.id)
+    val overlapPolicyForBlock: (Long) -> OverlapPolicy = remember(blocks) {
+        var cachedBlockId = Long.MIN_VALUE
+        var cachedPolicy: OverlapPolicy? = null
+        fun(blockId: Long): OverlapPolicy {
+            if (blockId != cachedBlockId) {
+                cachedBlockId = blockId
+                cachedPolicy = OverlapPolicy.from(blocks, blockId)
+            }
+            return checkNotNull(cachedPolicy)
         }
     }
-    val currentTimeMinutes = LocalCurrentMinuteOfDay.current
-    val currentDate = remember(currentTimeMinutes) { LocalDate.now() }
-    var viewportHeightPx by remember { mutableIntStateOf(0) }
+    val currentDate = LocalCurrentDate.current
     val isToday = selectedDate == currentDate
+    val currentTimeMinutes = if (isToday) LocalCurrentMinuteOfDay.current else null
+    var viewportHeightPx by remember { mutableIntStateOf(0) }
+    val accessibilityFocusMinutes = remember(scrollState, hourHeightPx, topClearancePx) {
+        derivedStateOf {
+            val focusY = scrollState.value +
+                viewportHeightPx * CurrentTimeViewportFraction -
+                topClearancePx
+            TimeSnapper.minutesFromY(focusY.coerceAtLeast(0f), hourHeightPx)
+        }
+    }
 
     LaunchedEffect(scrollTargetMinutes, viewportHeightPx, hourHeightPx, topClearancePx) {
         val target = scrollTargetMinutes
         if (target != null && viewportHeightPx > 0) {
             val targetPx = (topClearancePx + target / 60f * hourHeightPx).roundToInt()
-            val visibleLeadPx = if (selectedDate == LocalDate.now()) {
-                (viewportHeightPx * 0.32f).roundToInt()
+            val visibleLeadPx = if (isToday) {
+                (viewportHeightPx * CurrentTimeViewportFraction).roundToInt()
             } else {
                 0
             }
@@ -461,8 +438,8 @@ private fun Timeline(
     }
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
+        modifier = Modifier
+            .fillMaxSize()
             .onSizeChanged { viewportHeightPx = it.height }
             .verticalScroll(scrollState)
     ) {
@@ -470,9 +447,8 @@ private fun Timeline(
             modifier = Modifier
                 .height(TimelineTopClearance + DayHeight)
                 .fillMaxWidth()
-                .background(PlannerColours.Paper)
         ) {
-            val timelineMaxWidth = maxWidth
+            val timelineWidth = maxWidth
             val timelineWidthPx = with(density) { maxWidth.toPx() }
 
             Box(
@@ -480,34 +456,38 @@ private fun Timeline(
                     .offset(y = TimelineTopClearance)
                     .height(DayHeight)
                     .fillMaxWidth()
-                    .background(PlannerColours.Paper)
+                    .semantics {
+                        val startMinutes = accessibilityFocusMinutes.value
+                        val time = TimeFormatter.time(startMinutes)
+                        contentDescription = "Day timeline, $time"
+                        onClick(label = "Add block at $time") {
+                            onEmptyTimeTap(startMinutes)
+                            true
+                        }
+                    }
                     .timelineTapInput(
                         blocks = blocks,
                         layoutById = layoutById,
                         timelineWidthPx = timelineWidthPx,
                         gutterPx = gutterPx,
+                        timelineEndPaddingPx = timelineEndPaddingPx,
+                        blockColumnGapPx = blockColumnGapPx,
                         hourHeightPx = hourHeightPx,
                         minimumTouchTargetPx = minimumTouchTargetPx,
                         onEmptyTimeTap = onEmptyTimeTap
                     )
             ) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                ) {
-                    TimelineGrid(modifier = Modifier.fillMaxSize())
-                    TimeLabels(modifier = Modifier.fillMaxSize())
-                }
+                TimelineGrid(hiddenGridLabelMinutes(currentTimeMinutes))
 
-                sortedBlocks.forEach { block ->
-                    val layout = layoutById[block.id] ?: BlockLayout(0, 1)
+                for (blockIndex in blocks.indices) {
+                    val block = blocks[blockIndex]
+                    val layout = layoutById.getValue(block.id)
                     key(block.id) {
                         TimeBlock(
                             block = block,
-                            validator = occupancyById[block.id] ?: DayOccupancy.from(blocks, block.id),
-                            selected = selectedBlockId == block.id,
+                            validatorForBlock = overlapPolicyForBlock,
                             layout = layout,
-                            timelineWidth = timelineMaxWidth,
+                            timelineWidth = timelineWidth,
                             scrollState = scrollState,
                             viewportHeightPx = viewportHeightPx,
                             hourHeightPx = hourHeightPx,
@@ -520,7 +500,7 @@ private fun Timeline(
                     }
                 }
 
-                if (isToday) {
+                if (currentTimeMinutes != null) {
                     CurrentTimeIndicator(currentTimeMinutes)
                 }
             }
@@ -531,8 +511,7 @@ private fun Timeline(
 @Composable
 private fun TimeBlock(
     block: PlannerBlock,
-    validator: DayOccupancy,
-    selected: Boolean,
+    validatorForBlock: (Long) -> OverlapPolicy,
     layout: BlockLayout,
     timelineWidth: Dp,
     scrollState: ScrollState,
@@ -546,35 +525,23 @@ private fun TimeBlock(
 ) {
     val haptics = LocalHapticFeedback.current
     val latestBlock by rememberUpdatedState(block)
-    val latestValidator by rememberUpdatedState(validator)
+    val latestValidatorForBlock by rememberUpdatedState(validatorForBlock)
     var previewStartMinutes by remember(block.id) { mutableIntStateOf(NoPreviewMinutes) }
     var previewDurationMinutes by remember(block.id) { mutableIntStateOf(NoPreviewMinutes) }
-    // Read by graphicsLayer so snapped moves can update without recomposing the tile body.
+    // Read by the active drag layer so snapped moves do not recompose the tile body.
     val moveOffsetPx = remember(block.id) { mutableFloatStateOf(0f) }
     var moveActive by remember(block.id) { mutableStateOf(false) }
     var resizeActive by remember(block.id) { mutableStateOf(false) }
-    LaunchedEffect(block.startMinutes, moveActive) {
-        if (!moveActive && previewStartMinutes == block.startMinutes) {
-            previewStartMinutes = NoPreviewMinutes
-        }
+    val displayedDurationMinutes = if (previewDurationMinutes != NoPreviewMinutes) {
+        previewDurationMinutes
+    } else {
+        block.durationMinutes
     }
-    LaunchedEffect(block.durationMinutes, resizeActive) {
-        if (!resizeActive && previewDurationMinutes == block.durationMinutes) {
-            previewDurationMinutes = NoPreviewMinutes
-        }
-    }
-    val hasMovePreview by remember(block.id) {
-        derivedStateOf { previewStartMinutes != NoPreviewMinutes }
-    }
-    val hasResizePreview by remember(block.id) {
-        derivedStateOf { previewDurationMinutes != NoPreviewMinutes }
-    }
-    val displayedDurationMinutes = if (hasResizePreview) previewDurationMinutes else block.durationMinutes
 
-    val columnWidth = (timelineWidth - TimelineGutter - 10.dp).coerceAtLeast(1.dp) /
+    val columnWidth = (timelineWidth - TimelineGutter - TimelineEndPadding).coerceAtLeast(1.dp) /
         layout.columnCount.coerceAtLeast(1)
     val left = TimelineGutter + columnWidth * layout.columnIndex
-    val width = (columnWidth - 4.dp).coerceAtLeast(MinimumTouchTarget)
+    val width = (columnWidth - BlockColumnGap).coerceAtLeast(MinimumTouchTarget)
     val baseTop = heightForMinutes(block.startMinutes)
     val baseHeight = heightForMinutes(block.durationMinutes)
     val baseTouchHeight = baseHeight.coerceAtLeast(MinimumTouchTarget)
@@ -586,13 +553,9 @@ private fun TimeBlock(
     val latestVisualOffset by rememberUpdatedState(baseVisualOffset)
     val compact = displayedDurationMinutes <= QuickResizeMaxDurationMinutes
     val background = remember(block.startMinutes, layout.columnIndex) {
-        Color(TimeOfDayColourMapper.backgroundArgb(block.startMinutes, layout.columnIndex))
+        Color(blockBackgroundArgb(block.startMinutes, layout.columnIndex))
     }
-    val blockCornerRadius = if (compact) 13.dp else 16.dp
-    val blockShape = RoundedCornerShape(blockCornerRadius)
-    val resizeLaneWidth = (width * ResizeLaneFraction).coerceAtLeast(MinimumTouchTarget).coerceAtMost(width)
-    val resizeTouchOffset = (baseVisualOffset + visualHeight - MinimumTouchTarget)
-        .coerceIn(0.dp, (touchHeight - MinimumTouchTarget).coerceAtLeast(0.dp))
+    val blockShape = if (compact) CompactBlockShape else RegularBlockShape
     val rangeTextProvider: () -> String = {
         val labelStart = if (previewStartMinutes != NoPreviewMinutes) previewStartMinutes else block.startMinutes
         val labelDuration =
@@ -602,7 +565,7 @@ private fun TimeBlock(
     val durationText = remember(displayedDurationMinutes) {
         TimeFormatter.duration(displayedDurationMinutes)
     }
-    val movingGlass = moveActive || hasMovePreview || hasResizePreview || resizeActive
+    val active = moveActive || resizeActive
     val titleFollowOffset: Density.() -> Int = if (visualHeight < LongTitlePinMinHeight) {
         { 0 }
     } else {
@@ -619,7 +582,7 @@ private fun TimeBlock(
             block.durationMinutes
         )
         if (targetStart == block.startMinutes) return false
-        return latestValidator.placement(targetStart, block.durationMinutes) == MovePlacement.Savable &&
+        return latestValidatorForBlock(block.id).placement(targetStart, block.durationMinutes) == MovePlacement.Savable &&
             onMove(targetStart)
     }
 
@@ -629,7 +592,10 @@ private fun TimeBlock(
             block.durationMinutes + deltaMinutes
         )
         if (targetDuration == block.durationMinutes) return false
-        return latestValidator.canPlace(startMinutes = block.startMinutes, durationMinutes = targetDuration) &&
+        return latestValidatorForBlock(block.id).canPlace(
+            startMinutes = block.startMinutes,
+            durationMinutes = targetDuration
+        ) &&
             onResize(targetDuration)
     }
 
@@ -638,7 +604,7 @@ private fun TimeBlock(
             .offset(x = left, y = touchTop)
             .width(width)
             .height(touchHeight)
-            .zIndex(if (movingGlass) 2f else 1f)
+            .then(if (active) Modifier.zIndex(2f) else Modifier)
             .semantics(mergeDescendants = true) {
                 contentDescription = "${block.title}, ${TimeFormatter.spokenRange(block.startMinutes, displayedDurationMinutes)}, $durationText. Actions: Rename, Delete."
                 onClick(label = "Open actions") {
@@ -671,7 +637,7 @@ private fun TimeBlock(
             .blockMoveInput(
                 blockId = block.id,
                 latestBlock = { latestBlock },
-                latestValidator = { latestValidator },
+                latestValidator = { latestValidatorForBlock(block.id) },
                 latestVisualOffset = { latestVisualOffset },
                 hourHeightPx = hourHeightPx,
                 scrollState = scrollState,
@@ -689,49 +655,21 @@ private fun TimeBlock(
                 onResize = onResize
             )
     ) {
-        Box(
+        TimeBlockForeground(
+            background = background,
+            shape = blockShape,
+            active = active,
+            title = block.title,
+            rangeText = rangeTextProvider,
+            durationText = durationText,
+            tileWidth = width,
+            visualHeight = visualHeight,
+            titleFollowOffset = titleFollowOffset,
             modifier = Modifier
                 .offset(y = baseVisualOffset)
                 .fillMaxWidth()
                 .height(visualHeight)
-                .liftedGlassLayer(blockShape, movingGlass, moveActive, moveOffsetPx)
-                .clip(blockShape)
-        ) {
-            if (!movingGlass) {
-                TimelineGlassBackdrop(
-                    timelineWidth = timelineWidth,
-                    tileLeft = left,
-                    tileTop = baseTop,
-                    shape = blockShape,
-                    compact = compact
-                )
-            }
-
-            TimeBlockForeground(
-                background = background,
-                blockCornerRadius = blockCornerRadius,
-                compact = compact,
-                movingGlass = movingGlass,
-                selected = selected,
-                title = block.title,
-                rangeText = rangeTextProvider,
-                durationText = durationText,
-                tileWidth = width,
-                visualHeight = visualHeight,
-                titleFollowOffset = titleFollowOffset
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = resizeTouchOffset)
-                .snappedMoveLayer(moveActive, moveOffsetPx)
-                .width(resizeLaneWidth)
-                .height(MinimumTouchTarget)
-                .semantics {
-                    contentDescription = "Resize ${block.title}"
-                }
+                .dragTranslationLayer(moveActive, moveOffsetPx)
         )
     }
 }
@@ -741,11 +679,22 @@ private fun Modifier.timelineTapInput(
     layoutById: Map<Long, BlockLayout>,
     timelineWidthPx: Float,
     gutterPx: Float,
+    timelineEndPaddingPx: Float,
+    blockColumnGapPx: Float,
     hourHeightPx: Float,
     minimumTouchTargetPx: Float,
     onEmptyTimeTap: (Int) -> Unit
 ): Modifier {
-    return pointerInput(blocks, layoutById, timelineWidthPx, gutterPx, hourHeightPx, minimumTouchTargetPx) {
+    return pointerInput(
+        blocks,
+        layoutById,
+        timelineWidthPx,
+        gutterPx,
+        timelineEndPaddingPx,
+        blockColumnGapPx,
+        hourHeightPx,
+        minimumTouchTargetPx
+    ) {
         detectTapGestures { offset ->
             val hitBlock = TimelineGeometry.hitTestBlock(
                 x = offset.x,
@@ -754,6 +703,8 @@ private fun Modifier.timelineTapInput(
                 layoutById = layoutById,
                 timelineWidthPx = timelineWidthPx,
                 gutterPx = gutterPx,
+                timelineEndPaddingPx = timelineEndPaddingPx,
+                blockColumnGapPx = blockColumnGapPx,
                 hourHeightPx = hourHeightPx,
                 minimumTouchTargetPx = minimumTouchTargetPx
             )
@@ -767,7 +718,7 @@ private fun Modifier.timelineTapInput(
 private fun Modifier.blockMoveInput(
     blockId: Long,
     latestBlock: () -> PlannerBlock,
-    latestValidator: () -> DayOccupancy,
+    latestValidator: () -> OverlapPolicy,
     latestVisualOffset: () -> Dp,
     hourHeightPx: Float,
     scrollState: ScrollState,
@@ -783,11 +734,11 @@ private fun Modifier.blockMoveInput(
     onResize: (Int) -> Boolean
 ): Modifier {
     return pointerInput(blockId, hourHeightPx, viewportHeightPx) {
+        val gestureDensity = this
         coroutineScope gestureScope@{
             awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val initial = latestBlock()
-            val validator = latestValidator()
             val visualOffsetPx = latestVisualOffset().toPx()
             val downYInVisual = down.position.y - visualOffsetPx
             val visualHeightPx = initial.durationMinutes / 60f * hourHeightPx
@@ -812,23 +763,21 @@ private fun Modifier.blockMoveInput(
             )
             val touchSlop = viewConfiguration.touchSlop
             val holdStillThreshold = maxOf(touchSlop * 1.25f, HoldStillTolerance.toPx())
+            val holdStillThresholdSquared = holdStillThreshold * holdStillThreshold
             val quickResizeDragThreshold = maxOf(
                 touchSlop,
                 QuickResizeDragThreshold.toPx()
             )
             var preHoldDrag = Offset.Zero
             var resizeBeforeHold = false
-            var cancelledBeforeHold = false
             val tapped = withTimeoutOrNull(BlockMoveHoldMillis) {
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     if (event.changes.any { it.id != down.id && it.pressed }) {
-                        cancelledBeforeHold = true
                         return@withTimeoutOrNull false
                     }
                     val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull false
                     if (change.isConsumed) {
-                        cancelledBeforeHold = true
                         return@withTimeoutOrNull false
                     }
                     if (!change.pressed) {
@@ -851,21 +800,19 @@ private fun Modifier.blockMoveInput(
                             return@withTimeoutOrNull false
                         }
                     }
-                    if (!potentialQuickResize && preHoldDrag.getDistance() > holdStillThreshold) {
-                        cancelledBeforeHold = true
+                    if (
+                        !potentialQuickResize &&
+                        preHoldDrag.getDistanceSquared() > holdStillThresholdSquared
+                    ) {
                         return@withTimeoutOrNull false
                     }
                 }
             }
 
-            if (tapped == false && !resizeBeforeHold) {
-                cancelledBeforeHold = true
-            }
-            if (tapped == null && !resizeBeforeHold && !cancelledBeforeHold &&
-                preHoldDrag.getDistance() > holdStillThreshold
-            ) {
-                cancelledBeforeHold = true
-            }
+            val cancelledBeforeHold = !resizeBeforeHold &&
+                (tapped == false ||
+                    (tapped == null &&
+                        preHoldDrag.getDistanceSquared() > holdStillThresholdSquared))
             val resizeAfterHandleHold = tapped == null && startsOnResizeHandle && !cancelledBeforeHold
 
             when {
@@ -881,12 +828,13 @@ private fun Modifier.blockMoveInput(
                         gestureScope = this@gestureScope,
                         pointerId = down.id,
                         initial = initial,
-                        validator = validator,
+                        validator = latestValidator(),
                         initialDy = preHoldDrag.y,
                         initialPointerY = downYInVisual,
                         hourHeightPx = hourHeightPx,
                         scrollState = scrollState,
                         viewportHeightPx = viewportHeightPx,
+                        density = gestureDensity,
                         haptics = haptics,
                         onResizeActiveChange = onResizeActiveChange,
                         onResizePreview = onResizePreview,
@@ -897,6 +845,7 @@ private fun Modifier.blockMoveInput(
                 cancelledBeforeHold -> return@awaitEachGesture
             }
 
+            val validator = latestValidator()
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             onMoveActiveChange(true)
 
@@ -939,6 +888,7 @@ private fun Modifier.blockMoveInput(
                     pointerViewportY = { pointerViewportY },
                     viewportHeightPx = viewportHeightPx,
                     scrollState = scrollState,
+                    density = gestureDensity,
                     enabled = { hasDraggedAfterHold },
                     onScrolled = ::updateMoveFromGesture
                 )
@@ -973,7 +923,7 @@ private fun Modifier.blockMoveInput(
             } finally {
                 autoScrollJob?.cancel()
                 val hasSavableDrop = lastSavableStart != initial.startMinutes
-                if (!cancelled && (hasDraggedAfterHold || hasSavableDrop) && hasSavableDrop) {
+                if (!cancelled && hasSavableDrop) {
                     onMove(lastSavableStart)
                 }
                 onMoveActiveChange(false)
@@ -989,12 +939,13 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.run
     gestureScope: CoroutineScope,
     pointerId: PointerId,
     initial: PlannerBlock,
-    validator: DayOccupancy,
+    validator: OverlapPolicy,
     initialDy: Float,
     initialPointerY: Float,
     hourHeightPx: Float,
     scrollState: ScrollState,
     viewportHeightPx: Int,
+    density: Density,
     haptics: HapticFeedback,
     onResizeActiveChange: (Boolean) -> Unit,
     onResizePreview: (Int?) -> Unit,
@@ -1039,6 +990,7 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.run
             pointerViewportY = { pointerViewportY },
             viewportHeightPx = viewportHeightPx,
             scrollState = scrollState,
+            density = density,
             onScrolled = { resizeTo() }
         )
 

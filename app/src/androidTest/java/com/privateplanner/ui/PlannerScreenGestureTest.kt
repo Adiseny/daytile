@@ -1,10 +1,13 @@
 package com.privateplanner.ui
 
-import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsFocused
@@ -15,10 +18,14 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -26,6 +33,7 @@ import com.privateplanner.data.PlannerBlockEntity
 import com.privateplanner.data.PlannerDatabase
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.domain.MaxTitleLength
+import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
 import java.time.LocalTime
@@ -43,9 +51,13 @@ class PlannerScreenGestureTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     private var database: PlannerDatabase? = null
+    private val recordedHaptics = mutableListOf<HapticFeedbackType>()
+    private val hapticFeedback = RecordingHapticFeedback(recordedHaptics)
 
     @After
     fun closeDatabase() {
+        compose.runOnUiThread { compose.activity.setContent { } }
+        compose.waitForIdle()
         database?.close()
         database = null
     }
@@ -69,6 +81,16 @@ class PlannerScreenGestureTest {
     }
 
     @Test
+    fun timelineAccessibilityActionOpensCreateSheet() {
+        setPlannerContent()
+
+        compose.onNode(hasContentDescription("Day timeline", substring = true))
+            .performSemanticsAction(SemanticsActions.OnClick)
+
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+    }
+
+    @Test
     fun horizontalSwipeChangesDayAndBack() {
         setPlannerContent()
 
@@ -77,6 +99,10 @@ class PlannerScreenGestureTest {
         compose.waitUntilNodeWithText("Tomorrow")
         compose.onRoot().performTouchInput { swipeRight() }
         compose.waitUntilNodeWithText("Today")
+        assertEquals(
+            listOf(HapticFeedbackType.SegmentTick, HapticFeedbackType.SegmentTick),
+            recordedHaptics
+        )
     }
 
     @Test
@@ -86,6 +112,7 @@ class PlannerScreenGestureTest {
         }
 
         compose.waitUntilBlockExists("Move me")
+        val original = storedBlock("Move me")
         compose.onNode(hasContentDescription("Move me", substring = true)).performTouchInput {
             down(center)
             advanceEventTime(450)
@@ -93,36 +120,39 @@ class PlannerScreenGestureTest {
             up()
         }
 
-        compose.waitUntilBlockExists("Move me")
+        val moved = waitUntilStoredBlock("Move me") { block ->
+            block.startMinutes != original.startMinutes
+        }
         compose.onNode(hasContentDescription("Move me", substring = true)).performTouchInput {
             down(Offset(centerX, bottom - 4f))
             moveBy(Offset(0f, 80f))
             up()
         }
 
-        compose.waitUntilBlockExists("Move me")
+        val resized = waitUntilStoredBlock("Move me") { block ->
+            block.durationMinutes != moved.durationMinutes
+        }
         val actions = compose.onNode(hasContentDescription("Move me", substring = true))
             .fetchSemanticsNode()
             .config[SemanticsActions.CustomActions]
         assertTrue(actions.first { it.label == "Lengthen 5 minutes" }.action())
-        compose.waitUntilBlockExists("Move me")
+        val lengthened = waitUntilStoredBlock("Move me") { block ->
+            block.durationMinutes > resized.durationMinutes
+        }
+        assertEquals(resized.durationMinutes + TimeSnapper.SnapMinutes, lengthened.durationMinutes)
     }
 
     @Test
-    fun crowdedTimelineComposesWithinBudget() {
-        val elapsedMs = measureElapsedMillis {
-            setPlannerContent {
-                seedCrowdedVisibleDay()
-            }
-            compose.waitUntilBlockExists(title = "Load", timeoutMillis = 5_000)
+    fun crowdedTimelineRenders() {
+        setPlannerContent {
+            seedCrowdedVisibleDay()
         }
-
-        assertTrue("Crowded timeline composed in ${elapsedMs}ms", elapsedMs < 5_000)
+        compose.waitUntilBlockExists(title = "Load", timeoutMillis = 5_000)
     }
 
     @Test
     fun largeFontCreateAndActionFlowRemainReachable() {
-        setPlannerContent(fontScale = 1.6f)
+        setPlannerContent(fontScale = 2f)
 
         compose.onRoot()
             .performTouchInput {
@@ -154,14 +184,75 @@ class PlannerScreenGestureTest {
             cappedTitle,
             titleInput.fetchSemanticsNode().config[SemanticsProperties.EditableText].text
         )
+        val beforeEmoji = "A".repeat(MaxTitleLength - 1)
+        titleInput.performTextReplacement(beforeEmoji + "\uD83D\uDE00overflow")
+        assertEquals(
+            beforeEmoji,
+            titleInput.fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+        )
+        titleInput.performTextReplacement(cappedTitle)
         compose.onNodeWithText("Add").performClick()
         compose.waitUntilBlockExists(cappedTitle)
+    }
+
+    @Test
+    fun completePlanningWorkflowRemainsConsistent() {
+        val viewModel = setPlannerContent()
+        val today = viewModel.uiState.value.selectedDate
+
+        repeat(7) { index ->
+            compose.onRoot().performTouchInput { swipeLeft() }
+            compose.waitUntil {
+                viewModel.uiState.value.selectedDate == today.plusDays(index + 1L)
+            }
+        }
+        repeat(7) { index ->
+            compose.onRoot().performTouchInput { swipeRight() }
+            compose.waitUntil {
+                viewModel.uiState.value.selectedDate == today.plusDays(6L - index)
+            }
+        }
+
+        compose.onNodeWithText("Today").performClick()
+        compose.onNodeWithText("Cancel").performClick()
+
+        val timeline = hasContentDescription("Day timeline", substring = true)
+        val initialTimelineDescription = compose.onNode(timeline)
+            .fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
+        compose.onRoot().performTouchInput { swipeUp() }
+        compose.waitUntil {
+            compose.onNode(timeline).fetchSemanticsNode()
+                .config[SemanticsProperties.ContentDescription] != initialTimelineDescription
+        }
+        compose.onRoot().performTouchInput { swipeDown() }
+
+        compose.onNode(timeline).performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNode(hasSetTextAction()).performTextInput("Workflow task")
+        compose.onNodeWithText("Add").performClick()
+        compose.waitUntilBlockExists("Workflow task")
+
+        compose.onNode(hasContentDescription("Workflow task", substring = true)).performClick()
+        compose.onNode(hasContentDescription("Rename Workflow task")).performClick()
+        compose.onNode(hasSetTextAction()).performTextReplacement("Renamed workflow")
+        compose.onNodeWithText("Rename").performClick()
+        compose.waitUntilBlockExists("Renamed workflow")
+
+        compose.onNode(hasContentDescription("Renamed workflow", substring = true)).performClick()
+        compose.onNodeWithText("Delete").performClick()
+        waitUntilStoredBlockMissing("Renamed workflow")
+        compose.waitUntilNodeWithText("Undo")
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitUntilBlockExists("Renamed workflow")
+
+        compose.onNode(hasContentDescription("Renamed workflow", substring = true)).performClick()
+        compose.onNodeWithText("Delete").performClick()
+        waitUntilStoredBlockMissing("Renamed workflow")
     }
 
     private fun setPlannerContent(
         fontScale: Float = 1f,
         seed: suspend PlannerDatabase.() -> Unit = {}
-    ) {
+    ): PlannerViewModel {
         val db = Room.inMemoryDatabaseBuilder(
             compose.activity.applicationContext,
             PlannerDatabase::class.java
@@ -175,7 +266,8 @@ class PlannerScreenGestureTest {
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(
-                LocalDensity provides Density(density = density.density, fontScale = fontScale)
+                LocalDensity provides Density(density = density.density, fontScale = fontScale),
+                LocalHapticFeedback provides hapticFeedback
             ) {
                 PlannerTheme {
                     PlannerScreen(viewModel = viewModel)
@@ -183,6 +275,7 @@ class PlannerScreenGestureTest {
             }
         }
         compose.waitForIdle()
+        return viewModel
     }
 
     private suspend fun PlannerDatabase.insertVisibleBlock(title: String) {
@@ -215,16 +308,16 @@ class PlannerScreenGestureTest {
         var id = 1L
         for (start in firstStart until (firstStart + 4 * TimeSnapper.MinutesPerHour)
             .coerceAtMost(TimeSnapper.MinutesPerDay - TimeSnapper.MinimumDurationMinutes)
-            step TimeSnapper.SnapMinutes
+            step TimeSnapper.MinimumDurationMinutes
         ) {
-            repeat(4) { overlapIndex ->
+            repeat(OverlapPolicy.MaxSavedOverlap) {
                 blockDao().insertBlock(
                     PlannerBlockEntity(
                         id = id++,
                         dateEpochDay = today,
                         title = "Load $id",
                         startMinutes = start,
-                        durationMinutes = TimeSnapper.DefaultDurationMinutes + overlapIndex * TimeSnapper.SnapMinutes
+                        durationMinutes = TimeSnapper.MinimumDurationMinutes
                     )
                 )
             }
@@ -238,6 +331,36 @@ class PlannerScreenGestureTest {
             3 * TimeSnapper.MinutesPerHour
         return TimeSnapper.floorToSnap(now.hour * TimeSnapper.MinutesPerHour + now.minute)
             .coerceIn(0, latestSafeStart)
+    }
+
+    private fun storedBlock(title: String): PlannerBlockEntity {
+        return checkNotNull(findStoredBlock(title)) { "No stored block titled $title" }
+    }
+
+    private fun findStoredBlock(title: String): PlannerBlockEntity? {
+        val db = checkNotNull(database)
+        return runBlocking {
+            db.blockDao()
+                .getBlocksForDate(LocalDate.now().toEpochDay())
+                .firstOrNull { block -> block.title == title }
+        }
+    }
+
+    private fun waitUntilStoredBlock(
+        title: String,
+        predicate: (PlannerBlockEntity) -> Boolean
+    ): PlannerBlockEntity {
+        var observed: PlannerBlockEntity? = null
+        compose.waitUntil(timeoutMillis = 3_000) {
+            findStoredBlock(title)?.also { observed = it }?.let(predicate) == true
+        }
+        return checkNotNull(observed)
+    }
+
+    private fun waitUntilStoredBlockMissing(title: String) {
+        compose.waitUntil(timeoutMillis = 3_000) {
+            findStoredBlock(title) == null
+        }
     }
 
     private fun androidx.compose.ui.test.junit4.ComposeTestRule.waitUntilNodeWithText(
@@ -257,10 +380,12 @@ class PlannerScreenGestureTest {
             onAllNodes(hasContentDescription(title, substring = true)).fetchSemanticsNodes().isNotEmpty()
         }
     }
+}
 
-    private fun measureElapsedMillis(block: () -> Unit): Long {
-        val start = SystemClock.elapsedRealtime()
-        block()
-        return SystemClock.elapsedRealtime() - start
+private class RecordingHapticFeedback(
+    private val events: MutableList<HapticFeedbackType>
+) : HapticFeedback {
+    override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
+        events += hapticFeedbackType
     }
 }

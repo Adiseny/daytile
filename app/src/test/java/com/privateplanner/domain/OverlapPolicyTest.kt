@@ -13,17 +13,11 @@ class OverlapPolicyTest {
         val seventh = block(7, 9 * 60, 60)
         val eighth = block(8, 9 * 60, 60)
 
-        assertTrue(OverlapPolicy.canPlace(blocks, seventh))
-        assertFalse(OverlapPolicy.canPlace(blocks + seventh, eighth))
-    }
-
-    @Test
-    fun transientPlacementAllowsPassingOverAsEighthOverlap() {
-        val blocks = (1L..7L).map { id -> block(id, 9 * 60, 60) }
-        val moving = block(8, 9 * 60, 60)
-
-        assertFalse(OverlapPolicy.canPlace(blocks, moving, OverlapPolicy.MaxSavedOverlap))
-        assertTrue(OverlapPolicy.canPlace(blocks, moving, OverlapPolicy.MaxTransientOverlap))
+        assertTrue(OverlapPolicy.from(blocks, seventh.id).canPlace(seventh.startMinutes, seventh.durationMinutes))
+        assertFalse(
+            OverlapPolicy.from(blocks + seventh, eighth.id)
+                .canPlace(eighth.startMinutes, eighth.durationMinutes)
+        )
     }
 
     @Test
@@ -33,9 +27,8 @@ class OverlapPolicyTest {
 
         assertEquals(
             30,
-            OverlapPolicy.largestValidDuration(
-                blocks = blocks,
-                candidate = candidate,
+            OverlapPolicy.from(blocks, candidate.id).largestValidDuration(
+                startMinutes = candidate.startMinutes,
                 preferredDurationMinutes = 60
             )
         )
@@ -48,9 +41,8 @@ class OverlapPolicyTest {
 
         assertEquals(
             60,
-            OverlapPolicy.largestValidDuration(
-                blocks = blocks,
-                candidate = candidate,
+            OverlapPolicy.from(blocks, candidate.id).largestValidDuration(
+                startMinutes = candidate.startMinutes,
                 preferredDurationMinutes = 60
             )
         )
@@ -63,9 +55,8 @@ class OverlapPolicyTest {
 
         assertEquals(
             null,
-            OverlapPolicy.largestValidDuration(
-                blocks = blocks,
-                candidate = candidate,
+            OverlapPolicy.from(blocks, candidate.id).largestValidDuration(
+                startMinutes = candidate.startMinutes,
                 preferredDurationMinutes = 60
             )
         )

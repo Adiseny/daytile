@@ -17,16 +17,17 @@ class OverlapPolicyStressTest {
             }
         }
         val candidate = block(10_000, 9 * 60, 60)
+        val policy = OverlapPolicy.from(blocks, candidate.id)
 
         repeat(200) {
-            OverlapPolicy.canPlace(blocks, candidate, OverlapPolicy.MaxTransientOverlap)
+            policy.canPlace(candidate.startMinutes, candidate.durationMinutes)
         }
 
         val elapsedMs = measureNanoTime {
             repeat(2_000) { index ->
                 val start = index % (TimeSnapper.MinutesPerDay - TimeSnapper.DefaultDurationMinutes)
                 val moved = candidate.copy(startMinutes = TimeSnapper.floorToSnap(start))
-                OverlapPolicy.canPlace(blocks, moved, OverlapPolicy.MaxTransientOverlap)
+                policy.canPlace(moved.startMinutes, moved.durationMinutes)
             }
         } / 1_000_000.0
 
@@ -42,14 +43,15 @@ class OverlapPolicyStressTest {
             }
         }
         val candidate = block(10_000, 9 * 60, 8 * 60)
+        val policy = OverlapPolicy.from(blocks, candidate.id)
 
         repeat(200) {
-            OverlapPolicy.largestValidDuration(blocks, candidate, 8 * 60)
+            policy.largestValidDuration(candidate.startMinutes, 8 * 60)
         }
 
         val elapsedMs = measureNanoTime {
             repeat(2_000) {
-                OverlapPolicy.largestValidDuration(blocks, candidate, 8 * 60)
+                policy.largestValidDuration(candidate.startMinutes, 8 * 60)
             }
         } / 1_000_000.0
 

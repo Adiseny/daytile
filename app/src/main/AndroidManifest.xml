@@ -3,11 +3,11 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <permission
-        android:name="com.privateplanner.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         tools:node="remove" />
 
     <uses-permission
-        android:name="com.privateplanner.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         tools:node="remove" />
 
     <application
@@ -20,7 +20,22 @@
         android:label="@string/app_name"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Daytile"
-        tools:targetApi="tiramisu">
+        tools:targetApi="33">
+
+        <service
+            android:name="androidx.room.MultiInstanceInvalidationService"
+            tools:node="remove" />
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:exported="false">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+            <meta-data
+                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+                tools:node="remove" />
+        </provider>
 
         <activity
             android:name=".MainActivity"

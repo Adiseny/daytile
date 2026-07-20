@@ -33,7 +33,6 @@ class PlannerMacrobenchmark {
             pressHome()
         }
     ) {
-        pressHome()
         startActivityAndWait()
     }
 
@@ -49,16 +48,7 @@ class PlannerMacrobenchmark {
             startActivityAndWait()
         }
     ) {
-        val centreX = device.displayWidth / 2
-        val topY = device.displayHeight / 4
-        val bottomY = device.displayHeight * 3 / 4
-
-        repeat(3) {
-            device.swipe(centreX, bottomY, centreX, topY, 24)
-            device.waitForIdle()
-            device.swipe(centreX, topY, centreX, bottomY, 24)
-            device.waitForIdle()
-        }
+        scrollTimeline(repetitions = 3)
     }
 
     @Test
@@ -195,7 +185,19 @@ private fun MacrobenchmarkScope.performDragMove(startX: Int, startY: Int, endY: 
     }
 }
 
-private const val TargetPackage = "com.privateplanner"
+internal fun MacrobenchmarkScope.scrollTimeline(repetitions: Int) {
+    val centreX = device.displayWidth / 2
+    val topY = device.displayHeight / 4
+    val bottomY = device.displayHeight * 3 / 4
+    repeat(repetitions) {
+        device.swipe(centreX, bottomY, centreX, topY, 24)
+        device.waitForIdle()
+        device.swipe(centreX, topY, centreX, bottomY, 24)
+        device.waitForIdle()
+    }
+}
+
+internal const val TargetPackage = "com.privateplanner"
 private const val BenchmarkIterations = 5
 private const val BenchmarkBlockTitle = "BenchDrag"
 private const val UiWaitMillis = 5_000L

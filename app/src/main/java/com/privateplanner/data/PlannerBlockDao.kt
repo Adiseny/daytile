@@ -6,12 +6,15 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
+private const val BlocksForDateQuery =
+    "SELECT * FROM blocks WHERE dateEpochDay = :dateEpochDay ORDER BY startMinutes ASC, id ASC"
+
 @Dao
 interface PlannerBlockDao {
-    @Query("SELECT * FROM blocks WHERE dateEpochDay = :dateEpochDay ORDER BY startMinutes ASC")
+    @Query(BlocksForDateQuery)
     fun observeBlocksForDate(dateEpochDay: Long): Flow<List<PlannerBlockEntity>>
 
-    @Query("SELECT * FROM blocks WHERE dateEpochDay = :dateEpochDay ORDER BY startMinutes ASC")
+    @Query(BlocksForDateQuery)
     suspend fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlockEntity>
 
     @Query(
@@ -47,7 +50,7 @@ interface PlannerBlockDao {
                 dateEpochDay < :dateEpochDay
                 OR (dateEpochDay = :dateEpochDay AND startMinutes < :startMinutes)
             )
-        ORDER BY dateEpochDay DESC, startMinutes DESC
+        ORDER BY dateEpochDay DESC, startMinutes DESC, id DESC
         LIMIT 1
         """
     )
@@ -58,7 +61,7 @@ interface PlannerBlockDao {
     ): Int?
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun insertBlock(block: PlannerBlockEntity): Long
+    suspend fun insertBlock(block: PlannerBlockEntity)
 
     @Query("UPDATE blocks SET title = :title WHERE id = :id")
     suspend fun updateTitle(id: Long, title: String): Int
@@ -69,6 +72,6 @@ interface PlannerBlockDao {
     @Query("DELETE FROM blocks WHERE id = :id")
     suspend fun deleteBlockById(id: Long): Int
 
-    @Query("SELECT * FROM blocks WHERE id = :id LIMIT 1")
+    @Query("SELECT * FROM blocks WHERE id = :id")
     suspend fun getBlock(id: Long): PlannerBlockEntity?
 }

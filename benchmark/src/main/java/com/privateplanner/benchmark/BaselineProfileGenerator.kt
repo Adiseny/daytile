@@ -12,24 +12,21 @@ class BaselineProfileGenerator {
     val baselineProfileRule = BaselineProfileRule()
 
     @Test
-    fun generate() = baselineProfileRule.collect(
+    fun startup() = baselineProfileRule.collect(
         packageName = TargetPackage,
         includeInStartupProfile = true
     ) {
         pressHome()
         startActivityAndWait()
+    }
 
-        val centreX = device.displayWidth / 2
-        val topY = device.displayHeight / 4
-        val bottomY = device.displayHeight * 3 / 4
-
-        repeat(2) {
-            device.swipe(centreX, bottomY, centreX, topY, 24)
-            device.waitForIdle()
-            device.swipe(centreX, topY, centreX, bottomY, 24)
-            device.waitForIdle()
-        }
+    @Test
+    fun timelineScroll() = baselineProfileRule.collect(
+        packageName = TargetPackage,
+        includeInStartupProfile = false
+    ) {
+        pressHome()
+        startActivityAndWait()
+        scrollTimeline(repetitions = 2)
     }
 }
-
-private const val TargetPackage = "com.privateplanner"

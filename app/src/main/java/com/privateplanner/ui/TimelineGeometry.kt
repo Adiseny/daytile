@@ -11,16 +11,19 @@ internal object TimelineGeometry {
         layoutById: Map<Long, BlockLayout>,
         timelineWidthPx: Float,
         gutterPx: Float,
+        timelineEndPaddingPx: Float,
+        blockColumnGapPx: Float,
         hourHeightPx: Float,
         minimumTouchTargetPx: Float
     ): Boolean {
-        val blockAreaWidth = (timelineWidthPx - gutterPx - 10f).coerceAtLeast(1f)
+        val blockAreaWidth = (timelineWidthPx - gutterPx - timelineEndPaddingPx).coerceAtLeast(1f)
         val dayHeight = 24f * hourHeightPx
         return blocks.any { block ->
-            val layout = layoutById[block.id] ?: BlockLayout(0, 1)
+            val layout = layoutById.getValue(block.id)
             val columnWidth = blockAreaWidth / layout.columnCount.coerceAtLeast(1)
             val left = gutterPx + columnWidth * layout.columnIndex
-            val right = left + columnWidth
+            val blockWidth = (columnWidth - blockColumnGapPx).coerceAtLeast(minimumTouchTargetPx)
+            val right = left + blockWidth
             if (x !in left..right) return@any false
 
             val visualTop = block.startMinutes / 60f * hourHeightPx
@@ -30,15 +33,6 @@ internal object TimelineGeometry {
                 .coerceIn(0f, (dayHeight - touchHeight).coerceAtLeast(0f))
             y in touchTop..(touchTop + touchHeight)
         }
-    }
-
-    private fun resizeLaneWidth(
-        blockWidthPx: Float,
-        laneFraction: Float,
-        minimumTouchTargetPx: Float
-    ): Float {
-        return maxOf(blockWidthPx * laneFraction, minimumTouchTargetPx)
-            .coerceAtMost(blockWidthPx)
     }
 
     fun isInResizeZone(
@@ -51,7 +45,8 @@ internal object TimelineGeometry {
         minimumTouchTargetPx: Float,
         quickResizeMaxDurationMinutes: Int
     ): Boolean {
-        val laneWidth = resizeLaneWidth(blockWidthPx, laneFraction, minimumTouchTargetPx)
+        val laneWidth = maxOf(blockWidthPx * laneFraction, minimumTouchTargetPx)
+            .coerceAtMost(blockWidthPx)
         val laneStart = (blockWidthPx - laneWidth) / 2f
         val inLane = x in laneStart..(laneStart + laneWidth)
         return inLane &&

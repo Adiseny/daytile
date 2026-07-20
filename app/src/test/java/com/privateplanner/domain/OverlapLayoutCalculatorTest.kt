@@ -33,6 +33,22 @@ class OverlapLayoutCalculatorTest {
         assertEquals(3, layouts.getValue(3).columnCount)
     }
 
+    @Test
+    fun aFinishedColumnIsReusedWithinTheSameOverlapCluster() {
+        val layouts = OverlapLayoutCalculator.calculate(
+            listOf(
+                block(1, 8 * 60, 30),
+                block(2, 8 * 60, 60),
+                block(3, 8 * 60 + 30, 30)
+            )
+        )
+
+        assertEquals(0, layouts.getValue(1).columnIndex)
+        assertEquals(1, layouts.getValue(2).columnIndex)
+        assertEquals(0, layouts.getValue(3).columnIndex)
+        assertEquals(2, layouts.getValue(3).columnCount)
+    }
+
     private fun block(id: Long, start: Int, duration: Int): PlannerBlock {
         return PlannerBlock(
             id = id,

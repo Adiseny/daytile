@@ -1,11 +1,9 @@
 package com.privateplanner.ui
 
-import androidx.activity.SystemBarStyle
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,10 +15,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -28,14 +27,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,14 +44,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
@@ -71,23 +68,28 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
+private val SheetShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+private val SheetButtonShape = RoundedCornerShape(8.dp)
+
 @Composable
-fun BlockInputSheet(
+internal fun BlockInputSheet(
     title: String,
     buttonLabel: String,
     onSubmit: (String) -> Unit,
     onDismiss: () -> Unit,
-    selectAll: Boolean = false,
-    errorText: String? = null
+    errorText: String?
 ) {
-    PlannerSheetSurface(onDismiss = onDismiss) {
+    PlannerSheetSurface(
+        accessibilityTitle = "$buttonLabel block",
+        onDismiss = onDismiss
+    ) {
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
-        var value by remember(title, selectAll) {
+        var value by remember(title) {
             mutableStateOf(
                 TextFieldValue(
                     text = title,
-                    selection = if (selectAll) TextRange(0, title.length) else TextRange(title.length)
+                    selection = TextRange(0, title.length)
                 )
             )
         }
@@ -107,7 +109,7 @@ fun BlockInputSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-            .padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 16.dp)
+                .padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
@@ -130,7 +132,14 @@ fun BlockInputSheet(
                         value = if (incoming.text.length <= MaxTitleLength) {
                             incoming
                         } else {
-                            val capped = incoming.text.take(MaxTitleLength)
+                            val cappedLength = if (
+                                incoming.text[MaxTitleLength - 1].isHighSurrogate()
+                            ) {
+                                MaxTitleLength - 1
+                            } else {
+                                MaxTitleLength
+                            }
+                            val capped = incoming.text.take(cappedLength)
                             TextFieldValue(
                                 text = capped,
                                 selection = TextRange(capped.length)
@@ -148,10 +157,8 @@ fun BlockInputSheet(
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
                         errorIndicatorColor = Color.Transparent,
                         cursorColor = PlannerColours.PrimaryText
                     ),
@@ -161,22 +168,21 @@ fun BlockInputSheet(
                         .focusRequester(focusRequester)
                 )
 
-                Spacer(modifier = Modifier.width(10.dp))
-
                 Button(
                     onClick = { submit() },
                     enabled = canSubmit,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PlannerColours.AddButton,
+                        containerColor = PlannerColours.PrimaryText,
                         contentColor = PlannerColours.Sheet,
                         disabledContainerColor = PlannerColours.AddButtonDisabled,
                         disabledContentColor = PlannerColours.MutedText
                     ),
-                    modifier = Modifier.height(48.dp)
+                    modifier = Modifier
+                        .padding(start = 10.dp)
+                        .height(48.dp)
                 ) {
                     Text(
-                        text = buttonLabel,
-                        color = if (canSubmit) PlannerColours.Sheet else PlannerColours.MutedText
+                        text = buttonLabel
                     )
                 }
             }
@@ -194,13 +200,16 @@ fun BlockInputSheet(
 }
 
 @Composable
-fun BlockActionSheet(
+internal fun BlockActionSheet(
     block: PlannerBlock,
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    PlannerSheetSurface(onDismiss = onDismiss) {
+    PlannerSheetSurface(
+        accessibilityTitle = "Block actions",
+        onDismiss = onDismiss
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -211,7 +220,7 @@ fun BlockActionSheet(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 56.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(SheetButtonShape)
                     .clickable(onClick = onRename)
                     .padding(horizontal = 8.dp, vertical = 6.dp)
                     .semantics {
@@ -253,14 +262,17 @@ fun BlockActionSheet(
 }
 
 @Composable
-fun DateJumpSheet(
+internal fun DateJumpSheet(
     selectedDate: LocalDate,
     onSelect: (LocalDate) -> Unit,
     onDismiss: () -> Unit
 ) {
-    PlannerSheetSurface(onDismiss = onDismiss) {
+    PlannerSheetSurface(
+        accessibilityTitle = "Choose date",
+        onDismiss = onDismiss
+    ) {
         var visibleMonth by remember(selectedDate) { mutableStateOf(YearMonth.from(selectedDate)) }
-        val today = LocalDate.now()
+        val today = LocalCurrentDate.current
         val locale = LocalLocale.current.platformLocale
         val titleFormatter = remember(locale) {
             DateTimeFormatter.ofPattern("MMMM yyyy", locale)
@@ -281,7 +293,7 @@ fun DateJumpSheet(
                     onClick = { visibleMonth = visibleMonth.minusMonths(1) }
                 )
                 Text(
-                    text = visibleMonth.atDay(1).format(titleFormatter),
+                    text = visibleMonth.format(titleFormatter),
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f)
@@ -310,7 +322,7 @@ fun DateJumpSheet(
                     .padding(top = 8.dp)
             ) {
                 TextButton(onClick = { onSelect(today) }) {
-                    Text("Today", color = PlannerColours.PrimaryText)
+                    Text("Today")
                 }
                 TextButton(onClick = onDismiss) {
                     Text("Cancel", color = PlannerColours.MutedText)
@@ -322,75 +334,54 @@ fun DateJumpSheet(
 
 @Composable
 private fun PlannerSheetSurface(
+    accessibilityTitle: String,
     onDismiss: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-
-    val view = LocalView.current
-    val paperArgb = PlannerColours.Paper.toArgb()
-    val dimmedArgb = PlannerColours.Scrim.compositeOver(PlannerColours.Paper).toArgb()
-    val lightBackground = PlannerColours.Paper.luminance() > 0.5f
-    DisposableEffect(view, dimmedArgb, lightBackground) {
-        val activity = view.context.findComponentActivity()
-        activity?.enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(dimmedArgb),
-            navigationBarStyle = SystemBarStyle.dark(dimmedArgb)
-        )
-        onDispose {
-            val restored = if (lightBackground) {
-                SystemBarStyle.light(paperArgb, PaperBackgroundDarkArgb)
-            } else {
-                SystemBarStyle.dark(paperArgb)
-            }
-            activity?.enableEdgeToEdge(
-                statusBarStyle = restored,
-                navigationBarStyle = restored
-            )
-        }
-    }
-
     val density = LocalDensity.current
-    val sheetBottomPadding = with(density) {
-        val imeBottom = WindowInsets.ime.getBottom(this)
-        if (imeBottom > 0) {
-            imeBottom.toDp()
-        } else {
-            0.dp
-        }
-    }
-    val contentBottomPadding = with(density) {
-        val imeBottom = WindowInsets.ime.getBottom(this)
-        if (imeBottom > 0) 8.dp else WindowInsets.navigationBars.getBottom(this).toDp()
+    val imeInsets = WindowInsets.ime
+    val imeVisible by remember(density, imeInsets) {
+        derivedStateOf { imeInsets.getBottom(density) > 0 }
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PlannerColours.Scrim)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onDismiss
-            )
+        modifier = Modifier.fillMaxSize()
     ) {
-        Surface(
-            color = PlannerColours.Sheet,
-            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
-            shadowElevation = 8.dp,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(PlannerColours.Scrim)
+                .clickable(
+                    interactionSource = null,
+                    indication = null,
+                    onClick = onDismiss
+                )
+                .semantics {
+                    contentDescription = "Dismiss $accessibilityTitle"
+                }
+        )
+
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = sheetBottomPadding)
+                .imePadding()
                 .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {}
+                .background(PlannerColours.Sheet, SheetShape)
+                .pointerInput(Unit) { detectTapGestures(onTap = {}) }
+                .semantics {
+                    contentDescription = accessibilityTitle
+                    paneTitle = accessibilityTitle
+                    isTraversalGroup = true
+                }
+                .then(
+                    if (imeVisible) {
+                        Modifier.padding(bottom = 8.dp)
+                    } else {
+                        Modifier.navigationBarsPadding()
+                    }
                 )
         ) {
-            Box(modifier = Modifier.padding(bottom = contentBottomPadding)) {
-                content()
-            }
+            content()
         }
     }
 }
@@ -401,36 +392,26 @@ private fun MonthChevron(
     contentDescription: String,
     onClick: () -> Unit
 ) {
-    Box(
-        contentAlignment = Alignment.Center,
+    Text(
+        text = text,
+        fontFamily = DaytileFontFamily,
+        fontSize = 28.sp,
         modifier = Modifier
             .size(48.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(SheetButtonShape)
             .clickable(onClick = onClick)
             .semantics { this.contentDescription = contentDescription }
-    ) {
-        Text(
-            text = text,
-            color = PlannerColours.PrimaryText,
-            fontFamily = DaytileFontFamily,
-            fontSize = 28.sp
-        )
-    }
+            .wrapContentSize(Alignment.Center)
+    )
 }
 
 @Composable
 private fun WeekdayRow() {
     val locale = LocalLocale.current.platformLocale
     val labels = remember(locale) {
-        listOf(
-            DayOfWeek.MONDAY,
-            DayOfWeek.TUESDAY,
-            DayOfWeek.WEDNESDAY,
-            DayOfWeek.THURSDAY,
-            DayOfWeek.FRIDAY,
-            DayOfWeek.SATURDAY,
-            DayOfWeek.SUNDAY
-        ).map { day -> day.getDisplayName(java.time.format.TextStyle.NARROW, locale) }
+        DayOfWeek.entries.map { day ->
+            day.getDisplayName(java.time.format.TextStyle.NARROW, locale)
+        }
     }
 
     Row(modifier = Modifier.fillMaxWidth()) {
@@ -453,16 +434,17 @@ private fun MonthGrid(
     today: LocalDate,
     onSelect: (LocalDate) -> Unit
 ) {
-    val firstDay = visibleMonth.atDay(1)
-    val leadingBlanks = firstDay.dayOfWeek.value - 1
+    val leadingBlanks = visibleMonth.atDay(1).dayOfWeek.value - 1
+    val daysInMonth = visibleMonth.lengthOfMonth()
+    val rowCount = (leadingBlanks + daysInMonth + 6) / 7
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        repeat(6) { row ->
+        repeat(rowCount) { row ->
             Row(modifier = Modifier.fillMaxWidth()) {
                 repeat(7) { column ->
                     val cellIndex = row * 7 + column
                     val day = cellIndex - leadingBlanks + 1
-                    if (day in 1..visibleMonth.lengthOfMonth()) {
+                    if (day in 1..daysInMonth) {
                         val date = visibleMonth.atDay(day)
                         DateCell(
                             date = date,
@@ -472,7 +454,7 @@ private fun MonthGrid(
                             modifier = Modifier.weight(1f)
                         )
                     } else {
-                        Box(
+                        Spacer(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
@@ -490,10 +472,9 @@ private fun DateCell(
     isSelected: Boolean,
     isToday: Boolean,
     onSelect: (LocalDate) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier
 ) {
     val shape = CircleShape
-    val background = if (isSelected) PlannerColours.PrimaryText else Color.Transparent
     val textColour = if (isSelected) PlannerColours.Sheet else PlannerColours.PrimaryText
     val borderModifier = if (isToday && !isSelected) {
         Modifier.border(1.dp, PlannerColours.HourLine, shape)
@@ -501,23 +482,26 @@ private fun DateCell(
         Modifier
     }
 
-    Box(
-        contentAlignment = Alignment.Center,
+    Text(
+        text = date.dayOfMonth.toString(),
+        color = textColour,
+        style = MaterialTheme.typography.bodyMedium,
         modifier = modifier
             .height(48.dp)
-            .padding(3.dp)
-            .clip(shape)
-            .then(borderModifier)
-            .background(background)
             .clickable { onSelect(date) }
             .semantics {
                 contentDescription = date.toString()
             }
-    ) {
-        Text(
-            text = date.dayOfMonth.toString(),
-            color = textColour,
-            style = MaterialTheme.typography.bodyMedium
-        )
-    }
+            .padding(3.dp)
+            .clip(shape)
+            .then(borderModifier)
+            .then(
+                if (isSelected) {
+                    Modifier.background(PlannerColours.PrimaryText)
+                } else {
+                    Modifier
+                }
+            )
+            .wrapContentSize(Alignment.Center)
+    )
 }

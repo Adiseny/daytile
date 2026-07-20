@@ -3,6 +3,8 @@ package com.privateplanner.domain
 import androidx.compose.runtime.Immutable
 import java.time.LocalDate
 
+const val MaxTitleLength = 120
+
 @Immutable
 data class PlannerBlock(
     val id: Long,

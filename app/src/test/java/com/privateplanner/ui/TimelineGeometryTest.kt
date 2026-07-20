@@ -5,10 +5,19 @@ import com.privateplanner.domain.PlannerBlock
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TimelineGeometryTest {
+    @Test
+    fun currentTimeReplacesOnlyACollidingGridLabel() {
+        assertEquals(12 * 60, hiddenGridLabelMinutes(11 * 60 + 53))
+        assertEquals(11 * 60 + 30, hiddenGridLabelMinutes(11 * 60 + 39))
+        assertNull(hiddenGridLabelMinutes(11 * 60 + 45))
+        assertNull(hiddenGridLabelMinutes(null))
+    }
+
     @Test
     fun hitTestExpandsShortBlocksToMinimumTouchTarget() {
         val shortBlock = block(startMinutes = 9 * 60, durationMinutes = 5)
@@ -22,6 +31,8 @@ class TimelineGeometryTest {
                 layoutById = layouts,
                 timelineWidthPx = 400f,
                 gutterPx = 72f,
+                timelineEndPaddingPx = 10f,
+                blockColumnGapPx = 4f,
                 hourHeightPx = 120f,
                 minimumTouchTargetPx = 48f
             )
@@ -53,6 +64,8 @@ class TimelineGeometryTest {
                 layoutById = layouts,
                 timelineWidthPx = 400f,
                 gutterPx = 72f,
+                timelineEndPaddingPx = 10f,
+                blockColumnGapPx = 4f,
                 hourHeightPx = 120f,
                 minimumTouchTargetPx = 48f
             )
@@ -65,6 +78,55 @@ class TimelineGeometryTest {
                 layoutById = layouts,
                 timelineWidthPx = 400f,
                 gutterPx = 72f,
+                timelineEndPaddingPx = 10f,
+                blockColumnGapPx = 4f,
+                hourHeightPx = 120f,
+                minimumTouchTargetPx = 48f
+            )
+        )
+    }
+
+    @Test
+    fun hitTestLeavesTheVisualGapBetweenOverlapColumnsEmpty() {
+        val blocks = listOf(
+            block(id = 1, startMinutes = 9 * 60, durationMinutes = 30),
+            block(id = 2, startMinutes = 9 * 60, durationMinutes = 30)
+        )
+        val layouts = mapOf(
+            1L to BlockLayout(columnIndex = 0, columnCount = 2),
+            2L to BlockLayout(columnIndex = 1, columnCount = 2)
+        )
+
+        assertFalse(
+            TimelineGeometry.hitTestBlock(
+                x = 229f,
+                y = 9 * 120f,
+                blocks = blocks,
+                layoutById = layouts,
+                timelineWidthPx = 400f,
+                gutterPx = 72f,
+                timelineEndPaddingPx = 10f,
+                blockColumnGapPx = 4f,
+                hourHeightPx = 120f,
+                minimumTouchTargetPx = 48f
+            )
+        )
+    }
+
+    @Test
+    fun hitTestMatchesTheMinimumWidthUsedByCrowdedTiles() {
+        val target = block(startMinutes = 9 * 60, durationMinutes = 30)
+
+        assertTrue(
+            TimelineGeometry.hitTestBlock(
+                x = 118f,
+                y = 9 * 120f,
+                blocks = listOf(target),
+                layoutById = mapOf(1L to BlockLayout(columnIndex = 0, columnCount = 7)),
+                timelineWidthPx = 400f,
+                gutterPx = 72f,
+                timelineEndPaddingPx = 10f,
+                blockColumnGapPx = 4f,
                 hourHeightPx = 120f,
                 minimumTouchTargetPx = 48f
             )

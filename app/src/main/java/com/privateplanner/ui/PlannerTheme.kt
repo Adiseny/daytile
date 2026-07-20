@@ -14,12 +14,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
@@ -27,18 +29,20 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.privateplanner.domain.TimeSnapper
+import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import kotlinx.coroutines.delay
-import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.cos
 
 // Window-background colours used for the cold-start splash and the system bars.
-const val PaperBackgroundArgb: Int = 0xFFF6F2EC.toInt()
-const val PaperBackgroundDarkArgb: Int = 0xFF15120D.toInt()
+internal const val PaperBackgroundArgb: Int = 0xFFF6F2EC.toInt()
+internal const val PaperBackgroundDarkArgb: Int = 0xFF15120D.toInt()
 
-data class PlannerPalette(
+internal class PlannerPalette(
     val Paper: Color,
     val Sheet: Color,
     val PrimaryText: Color,
@@ -47,136 +51,229 @@ data class PlannerPalette(
     val HourLine: Color,
     val HalfHourLine: Color,
     val QuarterTick: Color,
-    val AddButton: Color,
     val AddButtonDisabled: Color,
     val Delete: Color,
     val Scrim: Color,
-    val GlassShade: Color
+    val LightBackground: Boolean
 )
 
-private val LightPalette = PlannerPalette(
-    Paper = Color(0xFFF6F2EC),
-    Sheet = Color(0xFFFFF9F1),
-    PrimaryText = Color(0xFF1A1814),
-    MutedText = Color(0xFF6F675F),
-    TimeText = Color(0xFF3F3932),
-    HourLine = Color(0xFFB8AA98),
-    HalfHourLine = Color(0xFFC7BAA8),
-    QuarterTick = Color(0xFFD2C8B9),
-    AddButton = Color(0xFF1A1814),
-    AddButtonDisabled = Color(0xFFE0D8CD),
-    Delete = Color(0xFF9B4F45),
-    Scrim = Color(0x661A1814),
-    GlassShade = Color(0xFF1A1814)
-)
+// The planner follows the clock, not the system theme: light through the day,
+// dark at night, with slow ramps between hand-designed anchors and two
+// deliberate steps at sunrise and dusk where the ink polarity flips (a ramp
+// across a polarity flip would pass text and paper through unreadable greys).
+// Ink sets are fixed per polarity so contrast cannot drift mid-ramp;
+// PlannerPaletteContrastTest asserts the ratios for every minute of the day.
 
-private val DarkPalette = PlannerPalette(
-    Paper = Color(0xFF15120D),
-    Sheet = Color(0xFF221C15),
-    PrimaryText = Color(0xFFEFE7DA),
-    MutedText = Color(0xFF9C9384),
-    TimeText = Color(0xFFC6BBA8),
-    HourLine = Color(0xFF39322A),
-    HalfHourLine = Color(0xFF322B23),
-    QuarterTick = Color(0xFF2B251E),
-    AddButton = Color(0xFFEFE7DA),
-    AddButtonDisabled = Color(0xFF39322A),
-    Delete = Color(0xFFC9756A),
-    Scrim = Color(0xAA0B0906),
-    GlassShade = Color(0xFF050403)
-)
+private const val HourLineBlend = 0.42f
+private const val HalfHourLineBlend = 0.34f
+private const val QuarterTickBlend = 0.26f
 
-private val LocalPlannerColours = staticCompositionLocalOf { LightPalette }
-internal val LocalCurrentMinuteOfDay = staticCompositionLocalOf {
-    TimeSnapper.minuteOfDay(LocalTime.now())
+private fun dayPalette(paper: Color, sheet: Color, lineInk: Color, timeText: Color): PlannerPalette {
+    return PlannerPalette(
+        Paper = paper,
+        Sheet = sheet,
+        PrimaryText = Color(0xFF1A1814),
+        MutedText = Color(0xFF675E51),
+        TimeText = timeText,
+        HourLine = lerp(paper, lineInk, HourLineBlend),
+        HalfHourLine = lerp(paper, lineInk, HalfHourLineBlend),
+        QuarterTick = lerp(paper, lineInk, QuarterTickBlend),
+        AddButtonDisabled = Color(0xFFE0D8CD),
+        Delete = Color(0xFF9B4F45),
+        Scrim = Color(0x661A1814),
+        LightBackground = true
+    )
 }
 
-/** Composition-aware palette accessor; resolves to the current day/night + time-of-day tint. */
-val PlannerColours: PlannerPalette
+private fun nightPalette(paper: Color, sheet: Color, lineInk: Color, timeText: Color): PlannerPalette {
+    return PlannerPalette(
+        Paper = paper,
+        Sheet = sheet,
+        PrimaryText = Color(0xFFEFE7DA),
+        MutedText = Color(0xFF9C9384),
+        TimeText = timeText,
+        HourLine = lerp(paper, lineInk, HourLineBlend),
+        HalfHourLine = lerp(paper, lineInk, HalfHourLineBlend),
+        QuarterTick = lerp(paper, lineInk, QuarterTickBlend),
+        AddButtonDisabled = Color(0xFF39322A),
+        Delete = Color(0xFFC9756A),
+        Scrim = Color(0xAA0B0906),
+        LightBackground = false
+    )
+}
+
+private val NightPalette = nightPalette(
+    paper = Color(PaperBackgroundDarkArgb),
+    sheet = Color(0xFF221C15),
+    lineInk = Color(0xFF6F5B3E),
+    timeText = Color(0xFFC6BBA8)
+)
+
+private val MiddayPalette = dayPalette(
+    paper = Color(PaperBackgroundArgb),
+    sheet = Color(0xFFFFF9F1),
+    lineInk = Color(0xFF574A38),
+    timeText = Color(0xFF3F3932)
+)
+
+// minute = when this stop is fully reached. ramp = fade from the previous stop
+// across the segment; otherwise the previous palette holds and the theme steps
+// here in one minute. Polarity may only change on a step, never on a ramp.
+private class DaylightStop(val minute: Int, val ramp: Boolean, val palette: PlannerPalette)
+
+private val DaylightStops = listOf(
+    DaylightStop(minute = 0, ramp = false, palette = NightPalette),
+    DaylightStop(minute = 5 * 60, ramp = false, palette = NightPalette),
+    // First light: the night sky warms before sunrise.
+    DaylightStop(
+        minute = 6 * 60 + 45,
+        ramp = true,
+        palette = nightPalette(
+            paper = Color(0xFF1C1710),
+            sheet = Color(0xFF291F15),
+            lineInk = Color(0xFF7D6440),
+            timeText = Color(0xFFCDBFA4)
+        )
+    ),
+    // Sunrise: polarity flips to warm morning light.
+    DaylightStop(
+        minute = 7 * 60,
+        ramp = false,
+        palette = dayPalette(
+            paper = Color(0xFFF3E6D0),
+            sheet = Color(0xFFFCF1DE),
+            lineInk = Color(0xFF6E5730),
+            timeText = Color(0xFF4A3B24)
+        )
+    ),
+    DaylightStop(
+        minute = 9 * 60 + 30,
+        ramp = true,
+        palette = dayPalette(
+            paper = Color(0xFFF5EDDE),
+            sheet = Color(0xFFFEF6E8),
+            lineInk = Color(0xFF625234),
+            timeText = Color(0xFF443A28)
+        )
+    ),
+    DaylightStop(minute = 13 * 60, ramp = true, palette = MiddayPalette),
+    DaylightStop(
+        minute = 16 * 60 + 30,
+        ramp = true,
+        palette = dayPalette(
+            paper = Color(0xFFF6EEDD),
+            sheet = Color(0xFFFEF5E5),
+            lineInk = Color(0xFF64522F),
+            timeText = Color(0xFF463B26)
+        )
+    ),
+    // Golden hour: the warmest light of the day.
+    DaylightStop(
+        minute = 19 * 60 + 30,
+        ramp = true,
+        palette = dayPalette(
+            paper = Color(0xFFF1E2C8),
+            sheet = Color(0xFFFAEDD6),
+            lineInk = Color(0xFF6E5426),
+            timeText = Color(0xFF4B3B1F)
+        )
+    ),
+    // Dusk: polarity flips back to a warm dark evening.
+    DaylightStop(
+        minute = 20 * 60,
+        ramp = false,
+        palette = nightPalette(
+            paper = Color(0xFF1F1810),
+            sheet = Color(0xFF2D2214),
+            lineInk = Color(0xFF876A3E),
+            timeText = Color(0xFFD2C2A2)
+        )
+    ),
+    DaylightStop(minute = 22 * 60 + 30, ramp = true, palette = NightPalette)
+)
+
+// The palette changes at most once per step; only palette readers recompose.
+private const val PaletteStepMinutes = 5
+
+internal fun paletteForMinute(minuteOfDay: Int): PlannerPalette {
+    val minute = minuteOfDay.coerceIn(0, TimeSnapper.MinutesPerDay - 1)
+    val index = DaylightStops.indexOfLast { it.minute <= minute }
+    val current = DaylightStops[index]
+    val next = DaylightStops.getOrNull(index + 1)
+    if (next == null || !next.ramp) return current.palette
+    val fraction = (minute - current.minute).toFloat() / (next.minute - current.minute)
+    return lerpPalette(current.palette, next.palette, fraction)
+}
+
+internal fun displayedPaletteForMinute(minuteOfDay: Int): PlannerPalette {
+    val minute = minuteOfDay.coerceIn(0, TimeSnapper.MinutesPerDay - 1)
+    return paletteForMinute(minute - minute % PaletteStepMinutes)
+}
+
+private fun lerpPalette(from: PlannerPalette, to: PlannerPalette, fraction: Float): PlannerPalette {
+    return PlannerPalette(
+        Paper = lerp(from.Paper, to.Paper, fraction),
+        Sheet = lerp(from.Sheet, to.Sheet, fraction),
+        // Ramps never cross an ink-polarity boundary, so these values are
+        // identical at both ends and need no colour-space interpolation.
+        PrimaryText = from.PrimaryText,
+        MutedText = from.MutedText,
+        TimeText = lerp(from.TimeText, to.TimeText, fraction),
+        HourLine = lerp(from.HourLine, to.HourLine, fraction),
+        HalfHourLine = lerp(from.HalfHourLine, to.HalfHourLine, fraction),
+        QuarterTick = lerp(from.QuarterTick, to.QuarterTick, fraction),
+        AddButtonDisabled = from.AddButtonDisabled,
+        Delete = from.Delete,
+        Scrim = from.Scrim,
+        LightBackground = from.LightBackground
+    )
+}
+
+private val LocalPlannerColours = compositionLocalOf { MiddayPalette }
+internal val LocalCurrentMinuteOfDay = compositionLocalOf {
+    TimeSnapper.minuteOfDay(LocalTime.now())
+}
+internal val LocalCurrentDate = compositionLocalOf<LocalDate> { LocalDate.now() }
+
+/** Composition-aware colours for the current time of day. */
+internal val PlannerColours: PlannerPalette
     @Composable
     @ReadOnlyComposable
     get() = LocalPlannerColours.current
 
-private val DawnWarmth = Color(0xFFFFC980)
-private val DayPaper = Color(0xFFF7F1E7)
-private val DaySheet = Color(0xFFFFFAF2)
-private val NightPaper = Color(0xFF15120D)
-private val NightSheet = Color(0xFF221C15)
-private const val HorizonWarmth = 0.12f
-private const val LightInkThreshold = 0.56f
-
-// 0 at midnight, 1 at midday. The circular curve gives a natural dawn/day/dusk/night cycle.
-private fun daylightFactor(minutesOfDay: Int): Float {
-    val t = minutesOfDay.coerceIn(0, TimeSnapper.MinutesPerDay) / TimeSnapper.MinutesPerDay.toFloat()
-    return ((1f - cos(t * 2f * PI.toFloat())) / 2f).coerceIn(0f, 1f)
-}
-
-// Peaks around sunrise and sunset, adding a small warm cast without weakening text contrast.
-private fun horizonFactor(daylight: Float): Float {
-    return (1f - abs(daylight - 0.5f) / 0.5f).coerceIn(0f, 1f)
-}
-
-private fun paletteForTime(minutesOfDay: Int): PlannerPalette {
-    val daylight = daylightFactor(minutesOfDay)
-    val horizon = horizonFactor(daylight)
-    val readable = if (daylight >= LightInkThreshold) LightPalette else DarkPalette
-    val paper = lerp(
-        lerp(NightPaper, DayPaper, daylight),
-        DawnWarmth,
-        horizon * HorizonWarmth
-    )
-    val sheet = lerp(
-        lerp(NightSheet, DaySheet, daylight),
-        DawnWarmth,
-        horizon * HorizonWarmth * 0.62f
-    )
-
-    return readable.copy(
-        Paper = paper,
-        Sheet = sheet,
-        GlassShade = if (daylight >= LightInkThreshold) LightPalette.GlassShade else DarkPalette.GlassShade
-    )
-}
-
-@Composable
-private fun rememberCurrentMinuteOfDay(): Int {
-    var minute by remember { mutableIntStateOf(TimeSnapper.minuteOfDay(LocalTime.now())) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            minute = TimeSnapper.minuteOfDay(LocalTime.now())
-            delay(millisUntilNextMinute())
-        }
-    }
-    return minute
-}
-
-private fun millisUntilNextMinute(): Long {
-    val now = LocalTime.now()
+private fun millisUntilNextMinute(now: LocalTime): Long {
     val millis = (60 - now.second) * 1_000L - now.nano / 1_000_000L
     return millis.coerceAtLeast(250L)
 }
 
+/**
+ * Single owner of the system-bar style. Sheets must not style the bars
+ * themselves: routing the scrim dim through here keeps theme changes and an
+ * open sheet from fighting over the bars.
+ */
 @Composable
-private fun TimeAwareSystemBars(
-    palette: PlannerPalette,
-    lightBackground: Boolean
-) {
+internal fun PlannerSystemBarsEffect(dimmed: Boolean) {
     val view = LocalView.current
-    val scrim = palette.Paper.toArgb()
-    LaunchedEffect(view, scrim, lightBackground) {
-        val style = if (lightBackground) {
-            SystemBarStyle.light(scrim, PaperBackgroundDarkArgb)
-        } else {
-            SystemBarStyle.dark(scrim)
+    val palette = PlannerColours
+    val paper = palette.Paper
+    val baseArgb = paper.toArgb()
+    val dimmedArgb = palette.Scrim.compositeOver(paper).toArgb()
+    val lightBackground = palette.LightBackground
+    val activity = remember(view) { view.context.findComponentActivity() }
+    LaunchedEffect(activity, dimmed, baseArgb, dimmedArgb, lightBackground) {
+        val style = when {
+            dimmed -> SystemBarStyle.dark(dimmedArgb)
+            lightBackground -> SystemBarStyle.light(baseArgb, PaperBackgroundDarkArgb)
+            else -> SystemBarStyle.dark(baseArgb)
         }
-        view.context.findComponentActivity()?.enableEdgeToEdge(
+        activity?.enableEdgeToEdge(
             statusBarStyle = style,
             navigationBarStyle = style
         )
     }
 }
 
-internal tailrec fun Context.findComponentActivity(): ComponentActivity? {
+private tailrec fun Context.findComponentActivity(): ComponentActivity? {
     return when (this) {
         is ComponentActivity -> this
         is ContextWrapper -> baseContext.findComponentActivity()
@@ -184,7 +281,7 @@ internal tailrec fun Context.findComponentActivity(): ComponentActivity? {
     }
 }
 
-val DaytileFontFamily = FontFamily.SansSerif
+internal val DaytileFontFamily = FontFamily.SansSerif
 
 private val plannerTypography = Typography(
     headlineMedium = TextStyle(
@@ -219,40 +316,60 @@ private val plannerTypography = Typography(
     )
 )
 
-private fun lightSchemeFrom(c: PlannerPalette) = lightColorScheme(
-    primary = c.PrimaryText,
-    onPrimary = c.Sheet,
-    background = c.Paper,
-    onBackground = c.PrimaryText,
-    surface = c.Sheet,
-    onSurface = c.PrimaryText,
-    error = c.Delete
-)
-
-private fun darkSchemeFrom(c: PlannerPalette) = darkColorScheme(
-    primary = c.PrimaryText,
-    onPrimary = c.Paper,
-    background = c.Paper,
-    onBackground = c.PrimaryText,
-    surface = c.Sheet,
-    onSurface = c.PrimaryText,
-    error = c.Delete
-)
+private fun colourSchemeFor(palette: PlannerPalette) = if (palette.LightBackground) {
+    lightColorScheme(
+        primary = palette.PrimaryText,
+        onPrimary = palette.Sheet,
+        background = palette.Paper,
+        onBackground = palette.PrimaryText,
+        surface = palette.Sheet,
+        onSurface = palette.PrimaryText,
+        error = palette.Delete
+    )
+} else {
+    darkColorScheme(
+        primary = palette.PrimaryText,
+        onPrimary = palette.Paper,
+        background = palette.Paper,
+        onBackground = palette.PrimaryText,
+        surface = palette.Sheet,
+        onSurface = palette.PrimaryText,
+        error = palette.Delete
+    )
+}
 
 @Composable
-fun PlannerTheme(content: @Composable () -> Unit) {
-    val currentMinute = rememberCurrentMinuteOfDay()
-    val daylight = daylightFactor(currentMinute)
-    val palette = paletteForTime(currentMinute)
-    val lightBackground = daylight >= LightInkThreshold
-    val colourScheme = if (lightBackground) lightSchemeFrom(palette) else darkSchemeFrom(palette)
-    TimeAwareSystemBars(palette, lightBackground)
+internal fun PlannerTheme(content: @Composable () -> Unit) {
+    val initialNow = remember { LocalDateTime.now() }
+    var currentMinute by remember {
+        mutableIntStateOf(TimeSnapper.minuteOfDay(initialNow.toLocalTime()))
+    }
+    var currentDate by remember { mutableStateOf(initialNow.toLocalDate()) }
+    // The clock pauses while the app is not visible and refreshes immediately
+    // on return, so backgrounding never wakes the process once a minute.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                val now = LocalDateTime.now()
+                val time = now.toLocalTime()
+                currentMinute = TimeSnapper.minuteOfDay(time)
+                currentDate = now.toLocalDate()
+                delay(millisUntilNextMinute(time))
+            }
+        }
+    }
+
+    val paletteStep = currentMinute / PaletteStepMinutes
+    val palette = remember(paletteStep) { displayedPaletteForMinute(currentMinute) }
+    val colourScheme = remember(palette) { colourSchemeFor(palette) }
     MaterialTheme(
         colorScheme = colourScheme,
         typography = plannerTypography
     ) {
         CompositionLocalProvider(
             LocalCurrentMinuteOfDay provides currentMinute,
+            LocalCurrentDate provides currentDate,
             LocalPlannerColours provides palette,
             LocalContentColor provides palette.PrimaryText
         ) {

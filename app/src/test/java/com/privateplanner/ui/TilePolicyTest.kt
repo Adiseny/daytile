@@ -8,28 +8,34 @@ class TilePolicyTest {
     @Test
     fun durationDisplayUsesConcreteWidthThresholdsAndReserveCap() {
         assertFalse(
-            TilePolicy.durationDisplayDecision(
-                tileWidthDp = DurationVisibleMinWidthDp - 1f,
+            durationReserveDp(
+                tileWidthDp = 111f,
                 durationText = "15m",
-                compact = true
-            ).show
+                compact = true,
+                durationFontSizeSp = 11f,
+                fontScale = 1f
+            ) > 0f
         )
 
-        val compact = TilePolicy.durationDisplayDecision(
-            tileWidthDp = DurationVisibleMinWidthDp,
+        val compactReserve = durationReserveDp(
+            tileWidthDp = 112f,
             durationText = "15m",
-            compact = true
+            compact = true,
+            durationFontSizeSp = 11f,
+            fontScale = 1f
         )
-        assertTrue(compact.show)
-        assertTrue(compact.reserveDp <= DurationVisibleMinWidthDp * DurationMaxReserveFraction)
-        assertTrue(DurationVisibleMinWidthDp - compact.reserveDp >= DurationTitleRemainderMinDp)
+        assertTrue(compactReserve > 0f)
+        assertTrue(compactReserve <= 112f * 0.34f)
+        assertTrue(112f - compactReserve >= 56f)
 
         assertFalse(
-            TilePolicy.durationDisplayDecision(
-                tileWidthDp = DurationVisibleMinWidthDp,
+            durationReserveDp(
+                tileWidthDp = 112f,
                 durationText = "12h 55m",
-                compact = false
-            ).show
+                compact = false,
+                durationFontSizeSp = 12f,
+                fontScale = 1f
+            ) > 0f
         )
     }
 }

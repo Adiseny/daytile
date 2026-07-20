@@ -12,7 +12,7 @@ import androidx.room.PrimaryKey
         Index(value = ["title", "dateEpochDay", "startMinutes", "durationMinutes"])
     ]
 )
-data class PlannerBlockEntity(
+class PlannerBlockEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val dateEpochDay: Long,
     @ColumnInfo(collate = ColumnInfo.NOCASE) val title: String,
