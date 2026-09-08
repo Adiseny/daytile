@@ -16,7 +16,7 @@ Download the APK from the [latest GitHub release](https://github.com/Adiseny/day
 
 Tap an empty time to add a block. Tap a block for its actions, hold and drag it to move it, or drag its lower handle to resize it. Swipe horizontally to change day and tap the date heading to jump further.
 
-Tap the date heading and use the bell at the bottom left to switch reminders on. While they are on, every block notifies you on your device the minute it starts. Reminders are off until you turn them on.
+Tap the date heading and use the bell at the bottom left to switch reminders on. While they are on, every block reminds you five minutes before it starts. The reminder counts down to the end of the block and clears itself when the block is over, or as soon as you delete or move it. Reminders are off until you turn them on.
 
 ## Privacy
 

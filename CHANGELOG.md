@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0 — 8 September 2026
+
+### Reminders
+
+- Reminders now arrive five minutes before a block starts, rather than as it starts.
+- A reminder counts down to the end of its block and clears itself when the block is over.
+- Deleting, moving or resizing a block now updates or withdraws its reminder immediately instead of leaving it showing the old time.
+- Reminders carry the colour of the block they belong to.
+
+### Responsiveness and efficiency
+
+- Moved all reminder scheduling off the main thread; editing a block no longer calls system services on the interaction path.
+- Editing a block no longer queries the notification service or re-arms an unchanged alarm.
+- The countdown and the automatic clearing are performed by the system, so the app never wakes to update them and still keeps only one pending alarm.
+
 ## 1.2.0 — 8 September 2026
 
 ### Reminders
