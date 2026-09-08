@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
         val app = application as PlannerApp
         val plannerViewModel = ViewModelProvider(
             this,
-            PlannerViewModel.factory(app.repository)
+            PlannerViewModel.factory(app.repository, app.reminders)
         )[PlannerViewModel::class.java]
         setContent {
             PlannerTheme {

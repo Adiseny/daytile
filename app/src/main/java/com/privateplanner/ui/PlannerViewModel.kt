@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.privateplanner.Reminders
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.data.PlannerWriteResult
 import com.privateplanner.domain.PlannerBlock
@@ -23,7 +24,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class PlannerViewModel(
-    private val repository: PlannerRepository
+    private val repository: PlannerRepository,
+    private val reminders: Reminders
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(
         LocalDateTime.now().let { now ->
@@ -33,7 +35,8 @@ class PlannerViewModel(
                 sheet = null,
                 snackbar = null,
                 sheetError = null,
-                scrollTargetMinutes = TimeSnapper.minuteOfDay(now.toLocalTime())
+                scrollTargetMinutes = TimeSnapper.minuteOfDay(now.toLocalTime()),
+                remindersOn = reminders.enabled
             )
         }
     )
@@ -214,6 +217,16 @@ class PlannerViewModel(
         return true
     }
 
+    fun setRemindersOn(on: Boolean) {
+        reminders.enabled = on
+        mutableUiState.update { it.copy(remindersOn = on) }
+        viewModelScope.launch { reminders.sync(repository) }
+    }
+
+    fun notificationsBlocked() {
+        showMessage("Turn on notifications in system settings")
+    }
+
     fun consumeScrollTarget() {
         mutableUiState.update { it.copy(scrollTargetMinutes = null) }
     }
@@ -365,10 +378,13 @@ class PlannerViewModel(
     }
 
     companion object {
-        fun factory(repository: PlannerRepository): ViewModelProvider.Factory =
+        fun factory(
+            repository: PlannerRepository,
+            reminders: Reminders
+        ): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer {
-                    PlannerViewModel(repository)
+                    PlannerViewModel(repository, reminders)
                 }
             }
     }

@@ -58,7 +58,7 @@ apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-relea
 sha256sum app/build/outputs/apk/release/app-release.apk
 ```
 
-The signature check must report a verified signer and the APK manifest must contain no permissions.
+The signature check must report a verified signer. The APK manifest must contain exactly the four reminder permissions (`POST_NOTIFICATIONS`, `USE_EXACT_ALARM`, `SCHEDULE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`) and nothing else; `verifyPrivacy` fails the build on any other permission, `INTERNET` included.
 
 ## 4. Performance checks
 
@@ -85,4 +85,4 @@ Benchmark traces and results are written to `benchmark/build/outputs/connected_a
 - Rename the signed APK to `daytile-<versionName>.apk`.
 - Produce `SHA256SUMS.txt` for that exact file.
 - Publish a GitHub release using the corresponding changelog entry and attach only the signed APK and checksum file.
-- Download the public assets again and verify their hashes, signature, package name, version and zero-permission manifest.
+- Download the public assets again and verify their hashes, signature, package name, version and permission manifest.

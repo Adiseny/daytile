@@ -491,6 +491,16 @@ class PlannerRepositoryTest {
                 ?.durationMinutes
         }
 
+        override suspend fun getNextBlock(dateEpochDay: Long, startMinutes: Int) =
+            blocks.filter {
+                it.dateEpochDay > dateEpochDay ||
+                    (it.dateEpochDay == dateEpochDay && it.startMinutes >= startMinutes)
+            }.minWithOrNull(compareBy({ it.dateEpochDay }, { it.startMinutes }))
+
+        override suspend fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int) =
+            blocks.filter { it.dateEpochDay == dateEpochDay && it.startMinutes == startMinutes }
+                .sortedBy { it.id }
+
         override suspend fun insertBlock(block: PlannerBlockEntity) {
             blocks += block
             inserted += block

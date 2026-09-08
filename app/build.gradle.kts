@@ -22,8 +22,8 @@ android {
         applicationId = "com.privateplanner"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.1.1"
+        versionCode = 5
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -148,8 +148,25 @@ tasks.register("verifyPrivacy") {
             ?: error("Merged release manifest was not found")
 
         val manifestText = manifest.readText()
-        if ("<uses-permission" in manifestText || "<permission" in manifestText) {
-            error("Release manifest must not contain permission declarations or uses-permission entries")
+        if ("<permission" in manifestText) {
+            error("Release manifest must not declare custom permissions")
+        }
+
+        // Reminders need these four and nothing else. None grants access to any
+        // data; INTERNET in particular can never be added without failing here.
+        val allowedPermissions = setOf(
+            "android.permission.POST_NOTIFICATIONS",
+            "android.permission.USE_EXACT_ALARM",
+            "android.permission.SCHEDULE_EXACT_ALARM",
+            "android.permission.RECEIVE_BOOT_COMPLETED"
+        )
+        val declaredPermissions = Regex("<uses-permission[^>]*?android:name=\"([^\"]+)\"")
+            .findAll(manifestText)
+            .map { match -> match.groupValues[1] }
+            .toSet()
+        val unexpectedPermissions = declaredPermissions - allowedPermissions
+        if (unexpectedPermissions.isNotEmpty()) {
+            error("Release manifest declares unexpected permissions: $unexpectedPermissions")
         }
         if ("android:usesCleartextTraffic=\"true\"" in manifestText) {
             error("Cleartext traffic must not be enabled")

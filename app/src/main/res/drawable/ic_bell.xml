@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stroked to match the weight of the sheet's other glyphs; also the
+     notification's status-bar icon, where it stays crisp at small sizes. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M12,3.2C8.9,3.2 6.8,5.6 6.8,9v3.6L5.2,15.4h13.6l-1.6,-2.8V9c0,-3.4 -2.1,-5.8 -5.2,-5.8z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.6" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M10.1,18.1a1.9,1.9 0 0 0 3.8,0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.6" />
+</vector>

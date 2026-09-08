@@ -63,6 +63,28 @@ interface PlannerBlockDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertBlock(block: PlannerBlockEntity)
 
+    // Reminders keep a single pending alarm: the next block starting at or after a
+    // given day/minute. Both queries ride the (dateEpochDay, startMinutes) index.
+    @Query(
+        """
+        SELECT * FROM blocks
+        WHERE dateEpochDay > :dateEpochDay
+            OR (dateEpochDay = :dateEpochDay AND startMinutes >= :startMinutes)
+        ORDER BY dateEpochDay ASC, startMinutes ASC
+        LIMIT 1
+        """
+    )
+    suspend fun getNextBlock(dateEpochDay: Long, startMinutes: Int): PlannerBlockEntity?
+
+    @Query(
+        """
+        SELECT * FROM blocks
+        WHERE dateEpochDay = :dateEpochDay AND startMinutes = :startMinutes
+        ORDER BY id ASC
+        """
+    )
+    suspend fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int): List<PlannerBlockEntity>
+
     @Query("UPDATE blocks SET title = :title WHERE id = :id")
     suspend fun updateTitle(id: Long, title: String): Int
 

@@ -13,11 +13,15 @@ import kotlinx.coroutines.flow.map
 
 class PlannerRepository private constructor(
     private val dao: PlannerBlockDao,
-    private val inTransaction: suspend (suspend () -> PlannerWriteResult) -> PlannerWriteResult
+    private val inTransaction: suspend (suspend () -> PlannerWriteResult) -> PlannerWriteResult,
+    // Fired after every successful write so the pending reminder alarm is re-armed
+    // from one place; no call site can forget to keep reminders in step.
+    private val onWrite: suspend () -> Unit = {}
 ) {
-    constructor(database: PlannerDatabase) : this(
+    constructor(database: PlannerDatabase, onWrite: suspend () -> Unit = {}) : this(
         dao = database.blockDao(),
-        inTransaction = { block -> database.withTransaction { block() } }
+        inTransaction = { block -> database.withTransaction { block() } },
+        onWrite = onWrite
     )
 
     internal constructor(dao: PlannerBlockDao) : this(
@@ -173,6 +177,33 @@ class PlannerRepository private constructor(
         return dao.getBlock(id)?.toDomain()
     }
 
+    suspend fun getNextBlock(date: LocalDate, startMinutes: Int): PlannerBlock? {
+        return dao.getNextBlock(date.toEpochDay(), startMinutes)?.toDomain()
+    }
+
+    suspend fun getBlocksStartingAt(date: LocalDate, startMinutes: Int): List<PlannerBlock> {
+        return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes).map { it.toDomain() }
+    }
+
+    private suspend fun writeCatching(
+        block: suspend () -> PlannerWriteResult
+    ): PlannerWriteResult {
+        val result = try {
+            block()
+        } catch (exception: Exception) {
+            when {
+                exception is CancellationException -> throw exception
+                exception is IllegalArgumentException -> PlannerWriteResult.InvalidInput
+                // The app keeps no logs, so debug builds crash on unexpected write
+                // failures — otherwise the cause is unrecoverable.
+                BuildConfig.DEBUG -> throw exception
+                else -> PlannerWriteResult.Failed
+            }
+        }
+        if (result == PlannerWriteResult.Success) onWrite()
+        return result
+    }
+
     private fun validateTime(startMinutes: Int, durationMinutes: Int) {
         require(startMinutes >= 0)
         require(startMinutes < TimeSnapper.MinutesPerDay)
@@ -187,21 +218,6 @@ private fun normalizeTitle(title: String): String {
     require(normalized.isNotEmpty())
     require(normalized.length <= MaxTitleLength)
     return normalized
-}
-
-private suspend fun writeCatching(block: suspend () -> PlannerWriteResult): PlannerWriteResult {
-    return try {
-        block()
-    } catch (exception: Exception) {
-        when {
-            exception is CancellationException -> throw exception
-            exception is IllegalArgumentException -> PlannerWriteResult.InvalidInput
-            // The app keeps no logs, so debug builds crash on unexpected write
-            // failures — otherwise the cause is unrecoverable.
-            BuildConfig.DEBUG -> throw exception
-            else -> PlannerWriteResult.Failed
-        }
-    }
 }
 
 private fun PlannerBlockEntity.toDomain(): PlannerBlock {

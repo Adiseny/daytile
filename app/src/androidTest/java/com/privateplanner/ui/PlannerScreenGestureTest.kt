@@ -29,6 +29,7 @@ import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.privateplanner.Reminders
 import com.privateplanner.data.PlannerBlockEntity
 import com.privateplanner.data.PlannerDatabase
 import com.privateplanner.data.PlannerRepository
@@ -214,7 +215,8 @@ class PlannerScreenGestureTest {
         }
 
         compose.onNodeWithText("Today").performClick()
-        compose.onNodeWithText("Cancel").performClick()
+        // The date sheet no longer has a Cancel button; tapping outside closes it.
+        compose.onNode(hasContentDescription("Dismiss Choose date")).performClick()
 
         val timeline = hasContentDescription("Day timeline", substring = true)
         val initialTimelineDescription = compose.onNode(timeline)
@@ -262,7 +264,10 @@ class PlannerScreenGestureTest {
         database = db
         runBlocking { db.seed() }
 
-        val viewModel = PlannerViewModel(PlannerRepository(db))
+        val viewModel = PlannerViewModel(
+            PlannerRepository(db),
+            Reminders(compose.activity.applicationContext)
+        )
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(

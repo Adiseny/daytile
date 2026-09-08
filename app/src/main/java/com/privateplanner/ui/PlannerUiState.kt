@@ -9,7 +9,8 @@ data class PlannerUiState(
     val sheet: PlannerSheet?,
     val snackbar: PlannerSnackbar?,
     val sheetError: String?,
-    val scrollTargetMinutes: Int?
+    val scrollTargetMinutes: Int?,
+    val remindersOn: Boolean
 )
 
 sealed interface PlannerSheet {

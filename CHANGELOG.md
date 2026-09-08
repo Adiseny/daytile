@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0 — 8 September 2026
+
+### Reminders
+
+- Added optional reminders. The bell at the bottom left of the date sheet switches them on, and every block then notifies you the minute it starts.
+- Reminders are off until you turn them on, and notification access is requested only on first use.
+- Delivery is exact and survives a restart, a clock change, a timezone change and an app update.
+
+### Interface and interaction
+
+- Fixed the date sheet's calendar to a constant height so it no longer jumps between months.
+- Removed the date sheet's Cancel button; tapping outside the sheet already closes it.
+
+### Privacy
+
+- Daytile now declares four permissions, all of them for reminders: `POST_NOTIFICATIONS`, `USE_EXACT_ALARM`, `SCHEDULE_EXACT_ALARM` (Android 12 only) and `RECEIVE_BOOT_COMPLETED`. None grants access to any data.
+- `INTERNET` remains absent, so planner data still cannot leave the device. `verifyPrivacy` now enforces this as an exact allowlist and fails the release build on any other permission.
+
 ## 1.1.1 — 20 July 2026
 
 ### Interface and interaction

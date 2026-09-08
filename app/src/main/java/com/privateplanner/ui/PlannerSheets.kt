@@ -4,9 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,10 +50,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -61,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.privateplanner.R
 import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
@@ -253,6 +258,8 @@ internal fun BlockActionSheet(
 @Composable
 internal fun DateJumpSheet(
     selectedDate: LocalDate,
+    remindersOn: Boolean,
+    onToggleReminders: (Boolean) -> Unit,
     onSelect: (LocalDate) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -305,16 +312,38 @@ internal fun DateJumpSheet(
             )
 
             Row(
-                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp)
             ) {
+                val reminderColour =
+                    if (remindersOn) PlannerColours.PrimaryText else PlannerColours.MutedText
+                TextButton(
+                    onClick = { onToggleReminders(!remindersOn) },
+                    // Sits the glyph in the same column as the month chevron above it.
+                    contentPadding = PaddingValues(horizontal = 15.dp, vertical = 8.dp),
+                    modifier = Modifier.semantics {
+                        contentDescription = "Reminders"
+                        stateDescription = if (remindersOn) "On" else "Off"
+                    }
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            if (remindersOn) R.drawable.ic_bell else R.drawable.ic_bell_off
+                        ),
+                        contentDescription = null,
+                        tint = reminderColour,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(text = "Reminders", color = reminderColour)
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
                 TextButton(onClick = { onSelect(today) }) {
                     Text("Today")
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel", color = PlannerColours.MutedText)
                 }
             }
         }
@@ -425,10 +454,11 @@ private fun MonthGrid(
 ) {
     val leadingBlanks = visibleMonth.atDay(1).dayOfWeek.value - 1
     val daysInMonth = visibleMonth.lengthOfMonth()
-    val rowCount = (leadingBlanks + daysInMonth + 6) / 7
 
+    // Always lay out the six rows a month can need, so the sheet keeps one
+    // height and the calendar does not jump as you page through months.
     Column(modifier = Modifier.fillMaxWidth()) {
-        repeat(rowCount) { row ->
+        repeat(6) { row ->
             Row(modifier = Modifier.fillMaxWidth()) {
                 repeat(7) { column ->
                     val cellIndex = row * 7 + column

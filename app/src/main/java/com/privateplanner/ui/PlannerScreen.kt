@@ -1,6 +1,9 @@
 package com.privateplanner.ui
 
+import android.Manifest
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,6 +58,7 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLocale
@@ -80,6 +84,7 @@ import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
+import com.privateplanner.postNotificationsGranted
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
@@ -109,6 +114,12 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
     }
     val selectedBlock = selectedBlockId?.let { blockId ->
         selectedBlocks.firstOrNull { it.id == blockId }
+    }
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) viewModel.setRemindersOn(true) else viewModel.notificationsBlocked()
     }
     val timelineScrollState = rememberScrollState()
     var headerHeightPx by remember { mutableIntStateOf(0) }
@@ -247,6 +258,14 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
             }
             PlannerSheet.DateJump -> DateJumpSheet(
                 selectedDate = uiState.selectedDate,
+                remindersOn = uiState.remindersOn,
+                onToggleReminders = { on ->
+                    if (!on || context.postNotificationsGranted()) {
+                        viewModel.setRemindersOn(on)
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
                 onSelect = viewModel::jumpTo,
                 onDismiss = viewModel::dismissSheet
             )
