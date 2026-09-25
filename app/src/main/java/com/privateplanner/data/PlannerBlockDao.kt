@@ -1,51 +1,25 @@
 package com.privateplanner.data
 
-import androidx.room.ColumnInfo
-import androidx.room.Dao
-import androidx.room.Entity
-import androidx.room.Index
-import androidx.room.Insert
-import androidx.room.PrimaryKey
-import androidx.room.Query
-import com.privateplanner.domain.TimeSnapper
 import kotlinx.coroutines.flow.Flow
 
-@Entity(
-    tableName = "blocks",
-    indices = [
-        Index("dateEpochDay", "startMinutes"),
-        Index("title", "dateEpochDay", "startMinutes", "durationMinutes")
-    ]
-)
+// One row of the `blocks` table (see PlannerDatabase). An id of 0 asks for a new one.
 data class PlannerBlockEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val id: Long = 0,
     val dateEpochDay: Long,
-    @ColumnInfo(collate = ColumnInfo.NOCASE) val title: String,
+    val title: String,
     val startMinutes: Int,
     val durationMinutes: Int
 )
 
-private const val BlocksForDateQuery =
-    "SELECT * FROM blocks WHERE dateEpochDay = :dateEpochDay ORDER BY startMinutes ASC, id ASC"
-
-@Dao
+// The planner's queries, implemented by PlannerDatabase on SQLite and by a fake in the
+// unit tests. Titles compare case-insensitively (the column is COLLATE NOCASE).
 interface PlannerBlockDao {
-    @Query(BlocksForDateQuery)
+    // A day's blocks by start then id, re-read after every write.
     fun observeBlocksForDate(dateEpochDay: Long): Flow<List<PlannerBlockEntity>>
 
-    @Query(BlocksForDateQuery)
     suspend fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlockEntity>
 
-    // Only feeds overlap counts, so row order does not matter.
-    @Query(
-        """
-        SELECT * FROM blocks
-        WHERE dateEpochDay = :dateEpochDay
-            AND id != :excludedBlockId
-            AND startMinutes < :endMinutes
-            AND startMinutes + durationMinutes > :startMinutes
-        """
-    )
+    // Blocks on the day that overlap [startMinutes, endMinutes), other than the excluded one.
     suspend fun getPotentiallyOverlappingBlocks(
         dateEpochDay: Long,
         startMinutes: Int,
@@ -53,68 +27,30 @@ interface PlannerBlockDao {
         excludedBlockId: Long
     ): List<PlannerBlockEntity>
 
-    @Query(
-        """
-        SELECT MIN(startMinutes) FROM blocks
-        WHERE dateEpochDay = :dateEpochDay AND startMinutes > :startMinutes
-        """
-    )
+    // The earliest start on the day after startMinutes, if any.
     suspend fun getNextStartMinutes(dateEpochDay: Long, startMinutes: Int): Int?
 
-    // The `dateEpochDay <=` bound starts the descending index walk at the given day
-    // instead of the title's latest entry.
-    @Query(
-        """
-        SELECT durationMinutes FROM blocks
-        WHERE title = :title
-            AND dateEpochDay <= :dateEpochDay
-            AND (dateEpochDay < :dateEpochDay OR startMinutes < :startMinutes)
-        ORDER BY dateEpochDay DESC, startMinutes DESC, id DESC
-        LIMIT 1
-        """
-    )
+    // The duration of the title's latest block before the given day and minute, if any.
     suspend fun getLatestPreviousDurationForTitle(
         title: String,
         dateEpochDay: Long,
         startMinutes: Int
     ): Int?
 
-    // Room's default conflict strategy aborts, so a clashing id fails rather than replacing a row.
-    @Insert
+    // Fails on a clashing id rather than replacing the row.
     suspend fun insertBlock(block: PlannerBlockEntity)
 
-    // Reminders keep a single pending alarm: the epoch minute of the next block starting
-    // at or after a given day/minute. Answered from the (dateEpochDay, startMinutes)
-    // index alone, starting at that day, without touching the table.
-    @Query(
-        """
-        SELECT dateEpochDay * ${TimeSnapper.MinutesPerDay} + startMinutes FROM blocks
-        WHERE dateEpochDay >= :dateEpochDay
-            AND (dateEpochDay > :dateEpochDay OR startMinutes >= :startMinutes)
-        ORDER BY dateEpochDay ASC, startMinutes ASC
-        LIMIT 1
-        """
-    )
+    // The epoch minute of the next block starting at or after the given day and minute.
     suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long?
 
-    @Query(
-        """
-        SELECT * FROM blocks
-        WHERE dateEpochDay = :dateEpochDay AND startMinutes = :startMinutes
-        ORDER BY id ASC
-        """
-    )
     suspend fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int): List<PlannerBlockEntity>
 
-    @Query("UPDATE blocks SET title = :title WHERE id = :id")
+    // The update and delete calls return the number of rows changed.
     suspend fun updateTitle(id: Long, title: String): Int
 
-    @Query("UPDATE blocks SET startMinutes = :startMinutes, durationMinutes = :durationMinutes WHERE id = :id")
     suspend fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int): Int
 
-    @Query("DELETE FROM blocks WHERE id = :id")
     suspend fun deleteBlockById(id: Long): Int
 
-    @Query("SELECT * FROM blocks WHERE id = :id")
     suspend fun getBlock(id: Long): PlannerBlockEntity?
 }

@@ -4,7 +4,6 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.devtools.ksp")
     id("androidx.baselineprofile")
 }
 
@@ -115,31 +114,12 @@ composeCompiler {
     includeTraceMarkers.set(false)
 }
 
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
-}
-
 dependencyLocking {
     lockAllConfigurations()
 }
 
-configurations.configureEach {
-    if (name.startsWith("kotlinCompilerPluginClasspath") || name.startsWith("kspPluginClasspath")) {
-        resolutionStrategy.eachDependency {
-            if (
-                requested.group == "org.jetbrains.kotlinx" &&
-                requested.name.startsWith("kotlinx-serialization")
-            ) {
-                useVersion("1.8.1")
-                because("Room 2.8.4 schema serializers need the 1.8.x GeneratedSerializer interface during KSP.")
-            }
-        }
-    }
-}
-
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.05.01")
-    val roomVersion = "2.8.4"
 
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
@@ -149,8 +129,6 @@ dependencies {
     //noinspection GradleDependency
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
-    implementation("androidx.room:room-runtime:$roomVersion")
-    ksp("androidx.room:room-compiler:$roomVersion")
 
     baselineProfile(project(":benchmark"))
 

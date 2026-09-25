@@ -3,7 +3,6 @@ package com.privateplanner
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.privateplanner.data.PlannerDatabase
@@ -26,7 +25,7 @@ class ReminderSchedulingTest {
 
     @Before
     fun setUp() {
-        database = Room.inMemoryDatabaseBuilder(context, PlannerDatabase::class.java).build()
+        database = PlannerDatabase(context, name = null)
         clearArmedAlarm()
     }
 

@@ -24,7 +24,7 @@ class PlannerRepositoryTest {
         val dao = object : PlannerBlockDao by FakePlannerBlockDao(emptyList()) {
             override fun observeBlocksForDate(dateEpochDay: Long) = flowOf(
                 listOf(original),
-                listOf(original.copy()), // Room creates fresh entities after invalidation.
+                listOf(original.copy()), // The database creates fresh entities on each re-read.
                 listOf(renamed),
                 listOf(moved),
                 listOf(resized),

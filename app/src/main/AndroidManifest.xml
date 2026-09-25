@@ -31,10 +31,6 @@
         android:theme="@style/Theme.Daytile"
         tools:targetApi="33">
 
-        <service
-            android:name="androidx.room.MultiInstanceInvalidationService"
-            tools:node="remove" />
-
         <!-- No androidx.startup: its provider queries the package manager in every process
              start, reminders included. Emoji and process-lifecycle setup are not wanted, and
              PlannerApp installs the baseline profile itself. -->

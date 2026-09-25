@@ -1,6 +1,5 @@
 package com.privateplanner.data
 
-import androidx.room.withTransaction
 import com.privateplanner.BuildConfig
 import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
@@ -40,7 +39,7 @@ class PlannerRepository private constructor(
     )
 
     fun observeBlocksForDate(date: LocalDate): Flow<List<PlannerBlock>> {
-        // Room invalidates the table even when a write only affects another day.
+        // Every write re-reads, even one that only changed another day.
         return dao.observeBlocksForDate(date.toEpochDay())
             .distinctUntilChanged()
             .map { entities -> entities.map { it.toDomain(date) } }

@@ -29,7 +29,6 @@ import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.privateplanner.Reminders
@@ -322,12 +321,7 @@ class PlannerScreenGestureTest {
         fontScale: Float = 1f,
         seed: suspend PlannerDatabase.() -> Unit = {}
     ): PlannerViewModel {
-        val db = Room.inMemoryDatabaseBuilder(
-            compose.activity.applicationContext,
-            PlannerDatabase::class.java
-        )
-            .allowMainThreadQueries()
-            .build()
+        val db = PlannerDatabase(compose.activity.applicationContext, name = null)
         database = db
         runBlocking { db.seed() }
 

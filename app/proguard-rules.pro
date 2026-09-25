@@ -1,9 +1,8 @@
 # Release rules on top of proguard-android-optimize.txt and each library's own rules.
 
 # Move every renamed class into a single package so the dex carries no package names.
-# Nothing finds a renamed class by its package: whatever is looked up by name (Room's
-# generated database, manifest components, startup initialisers) is kept by its own
-# rules and stays where it is.
+# Nothing finds a renamed class by its package: whatever is looked up by name (the
+# manifest's components) is kept by its own rules and stays where it is.
 -repackageclasses
 
 # Kotlin's generated parameter and expression null checks only matter when Java passes
