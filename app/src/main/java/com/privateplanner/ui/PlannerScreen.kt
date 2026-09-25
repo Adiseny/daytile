@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -460,6 +462,11 @@ private fun Timeline(
     // Read only by gestures, when they start, and by the accessibility focus below, so a
     // new viewport height recomposes nothing.
     val viewportHeightPx = remember { mutableIntStateOf(0) }
+    // The viewport's bottom edge above the navigation bar, read when a drag starts.
+    val navigationBars = WindowInsets.navigationBars
+    val visibleBottomPx = remember(navigationBars, density) {
+        { viewportHeightPx.intValue - navigationBars.getBottom(density) }
+    }
     val accessibilityFocusMinutes = remember(scrollState, hourHeightPx, topClearancePx) {
         derivedStateOf {
             val focusY = scrollState.value +
@@ -523,7 +530,7 @@ private fun Timeline(
                         timelineWidth = timelineWidth,
                         scrollState = scrollState,
                         headerHeightPx = headerHeightPx,
-                        viewportHeightPx = viewportHeightPx,
+                        visibleBottomPx = visibleBottomPx,
                         hourHeightPx = hourHeightPx,
                         onTap = { onBlockTap(block.id) },
                         onRename = { onBlockRename(block.id) },
@@ -549,7 +556,7 @@ private fun TimeBlock(
     timelineWidth: Dp,
     scrollState: ScrollState,
     headerHeightPx: IntState,
-    viewportHeightPx: IntState,
+    visibleBottomPx: () -> Int,
     hourHeightPx: Float,
     onTap: () -> Unit,
     onRename: () -> Unit,
@@ -679,7 +686,8 @@ private fun TimeBlock(
                 latestVisualOffset = { latestVisualOffset },
                 hourHeightPx = hourHeightPx,
                 scrollState = scrollState,
-                viewportHeightPx = viewportHeightPx,
+                headerHeightPx = headerHeightPx,
+                visibleBottomPx = visibleBottomPx,
                 haptics = haptics,
                 onTap = onTap,
                 onMoveActiveChange = { moveActive = it },
@@ -748,7 +756,8 @@ private fun Modifier.blockMoveInput(
     latestVisualOffset: () -> Dp,
     hourHeightPx: Float,
     scrollState: ScrollState,
-    viewportHeightPx: IntState,
+    headerHeightPx: IntState,
+    visibleBottomPx: () -> Int,
     haptics: HapticFeedback,
     onTap: () -> Unit,
     onMoveActiveChange: (Boolean) -> Unit,
@@ -858,7 +867,8 @@ private fun Modifier.blockMoveInput(
                         initialPointerY = downYInVisual,
                         hourHeightPx = hourHeightPx,
                         scrollState = scrollState,
-                        viewportHeightPx = viewportHeightPx.intValue,
+                        visibleTopPx = headerHeightPx.intValue,
+                        visibleBottomPx = visibleBottomPx(),
                         haptics = haptics,
                         onResizeActiveChange = onResizeActiveChange,
                         onResizePreview = onResizePreview,
@@ -874,7 +884,7 @@ private fun Modifier.blockMoveInput(
             onMoveActiveChange(true)
 
             val initialScroll = scrollState.value
-            val initialBlockTopPx = initial.startMinutes / 60f * hourHeightPx
+            val initialBlockTopPx = TimelineTopClearance.toPx() + initial.startMinutes / 60f * hourHeightPx
             val initialPointerViewportY = initialBlockTopPx - initialScroll + downYInVisual
             var totalPointerDy = preHoldDrag.y
             var pointerViewportY = initialPointerViewportY + totalPointerDy
@@ -903,7 +913,8 @@ private fun Modifier.blockMoveInput(
                 updateMoveFromGesture()
                 autoScrollJob = this@gestureScope.launchEdgeAutoScroll(
                     pointerViewportY = { pointerViewportY },
-                    viewportHeightPx = viewportHeightPx.intValue,
+                    visibleTopPx = headerHeightPx.intValue,
+                    visibleBottomPx = visibleBottomPx(),
                     scrollState = scrollState,
                     density = this,
                     enabled = { hasDraggedAfterHold },
@@ -965,14 +976,15 @@ private suspend fun AwaitPointerEventScope.runResizeGesture(
     initialPointerY: Float,
     hourHeightPx: Float,
     scrollState: ScrollState,
-    viewportHeightPx: Int,
+    visibleTopPx: Int,
+    visibleBottomPx: Int,
     haptics: HapticFeedback,
     onResizeActiveChange: (Boolean) -> Unit,
     onResizePreview: (Int?) -> Unit,
     onResize: (Int) -> Boolean
 ) {
     val initialScroll = scrollState.value
-    val initialBlockTopPx = initial.startMinutes / 60f * hourHeightPx
+    val initialBlockTopPx = TimelineTopClearance.toPx() + initial.startMinutes / 60f * hourHeightPx
     val initialPointerViewportY = initialBlockTopPx - initialScroll + initialPointerY
     var totalDy = initialDy
     var pointerViewportY = initialPointerViewportY + totalDy
@@ -1001,7 +1013,8 @@ private suspend fun AwaitPointerEventScope.runResizeGesture(
         resizeTo()
         autoScrollJob = gestureScope.launchEdgeAutoScroll(
             pointerViewportY = { pointerViewportY },
-            viewportHeightPx = viewportHeightPx,
+            visibleTopPx = visibleTopPx,
+            visibleBottomPx = visibleBottomPx,
             scrollState = scrollState,
             density = this,
             onScrolled = ::resizeTo

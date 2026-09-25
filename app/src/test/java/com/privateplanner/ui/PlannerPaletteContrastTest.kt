@@ -22,6 +22,16 @@ class PlannerPaletteContrastTest {
     }
 
     @Test
+    fun colourSchemeMatchesThePaletteAtEveryMinute() {
+        forEachMinutePalette { minute, palette ->
+            val scheme = colourSchemeFor(palette)
+            assertEquals("primary at $minute", palette.PrimaryText, scheme.primary)
+            assertEquals("onSurface at $minute", palette.PrimaryText, scheme.onSurface)
+            assertEquals("error at $minute", palette.Delete, scheme.error)
+        }
+    }
+
+    @Test
     fun textContrastHoldsAtEveryMinuteOfTheDay() {
         forEachMinutePalette { minute, palette ->
             assertContrast(minute, "PrimaryText on Paper", palette.PrimaryText, palette.Paper, 7f)

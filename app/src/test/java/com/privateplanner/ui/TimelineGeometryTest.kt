@@ -212,41 +212,37 @@ class TimelineGeometryTest {
 
     @Test
     fun edgeAutoScrollIsZeroInMiddleAndDirectionalNearEdges() {
-        assertEquals(
-            0f,
-            TimelineGeometry.edgeAutoScrollDelta(
-                pointerViewportY = 300f,
-                viewportHeightPx = 800,
-                topEdgePx = 112f,
-                bottomEdgeMinPx = 240f,
-                bottomEdgeFraction = 0.30f,
-                topMaxStepPx = 16f,
-                bottomMaxStepPx = 42f
-            ),
-            0.001f
+        fun delta(y: Float) = TimelineGeometry.edgeAutoScrollDelta(
+            pointerViewportY = y,
+            visibleTopPx = 100f,
+            visibleBottomPx = 800f,
+            topReachPx = 88f,
+            bottomReachPx = 140f,
+            topMaxStepPx = 16f,
+            bottomMaxStepPx = 42f
         )
-        assertTrue(
-            TimelineGeometry.edgeAutoScrollDelta(
-                pointerViewportY = 20f,
-                viewportHeightPx = 800,
-                topEdgePx = 112f,
-                bottomEdgeMinPx = 240f,
-                bottomEdgeFraction = 0.30f,
-                topMaxStepPx = 16f,
-                bottomMaxStepPx = 42f
-            ) < 0f
+        assertEquals(0f, delta(400f), 0.001f)
+        assertEquals(0f, delta(188f), 0.001f)
+        assertEquals(0f, delta(660f), 0.001f)
+        assertTrue(delta(150f) < 0f)
+        assertTrue(delta(700f) > 0f)
+    }
+
+    @Test
+    fun edgeAutoScrollReachesFullSpeedAtTheVisibleEdges() {
+        fun delta(y: Float) = TimelineGeometry.edgeAutoScrollDelta(
+            pointerViewportY = y,
+            visibleTopPx = 100f,
+            visibleBottomPx = 800f,
+            topReachPx = 88f,
+            bottomReachPx = 140f,
+            topMaxStepPx = 16f,
+            bottomMaxStepPx = 42f
         )
-        assertTrue(
-            TimelineGeometry.edgeAutoScrollDelta(
-                pointerViewportY = 780f,
-                viewportHeightPx = 800,
-                topEdgePx = 112f,
-                bottomEdgeMinPx = 240f,
-                bottomEdgeFraction = 0.30f,
-                topMaxStepPx = 16f,
-                bottomMaxStepPx = 42f
-            ) > 0f
-        )
+        assertEquals(-16f, delta(100f), 0.001f)
+        assertEquals(-16f, delta(20f), 0.001f)
+        assertEquals(42f, delta(800f), 0.001f)
+        assertEquals(42f, delta(900f), 0.001f)
     }
 
     private fun block(

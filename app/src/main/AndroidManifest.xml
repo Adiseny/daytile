@@ -35,16 +35,13 @@
             android:name="androidx.room.MultiInstanceInvalidationService"
             tools:node="remove" />
 
+        <!-- No androidx.startup: its provider queries the package manager in every process
+             start, reminders included. Emoji and process-lifecycle setup are not wanted, and
+             PlannerApp installs the baseline profile itself. -->
         <provider
             android:name="androidx.startup.InitializationProvider"
-            android:exported="false">
-            <meta-data
-                android:name="androidx.emoji2.text.EmojiCompatInitializer"
-                tools:node="remove" />
-            <meta-data
-                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
-                tools:node="remove" />
-        </provider>
+            android:authorities="${applicationId}.androidx-startup"
+            tools:node="remove" />
 
         <activity
             android:name=".MainActivity"

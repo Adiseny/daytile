@@ -1,10 +1,14 @@
 package com.privateplanner
 
 import android.app.Application
+import androidx.profileinstaller.ProfileInstaller
 import com.privateplanner.data.PlannerDatabase
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.ui.warmUpInterface
 import kotlin.concurrent.thread
+
+// ProfileInstallerInitializer's own delay after the first frame.
+private const val ProfileInstallDelayMillis = 5_000L
 
 class PlannerApp : Application() {
     // Synchronised, because the warm-up below builds it off the main thread.
@@ -37,12 +41,16 @@ class PlannerApp : Application() {
 
     // The first frame's CPU work, started by the activity rather than here, so a process
     // woken for a reminder or a reboot never lays out text it will not show. Once per
-    // process; main thread only.
+    // process; main thread only. The same thread then does what androidx.startup's
+    // profile installer did, well after launch: a sideloaded install's baseline profile
+    // is written once per update, and later calls return after one file check.
     fun warmUpInterfaceOnce() {
         if (interfaceWarmedUp) return
         interfaceWarmedUp = true
         thread(name = "planner-warm-up-ui") {
             runCatching { warmUpInterface() }
+            Thread.sleep(ProfileInstallDelayMillis)
+            runCatching { ProfileInstaller.writeProfile(this) }
         }
     }
 }

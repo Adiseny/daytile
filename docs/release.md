@@ -77,7 +77,7 @@ Run macrobenchmarks only on a dedicated device:
 ./gradlew :benchmark:connectedBenchmarkReleaseAndroidTest
 ```
 
-Until a measured profile is committed, `app/src/main/baseline-prof.txt` holds rules for every method of the app's own code, generated from its bytecode. The build merges it with any measured profile and ignores rules that match nothing. Regenerate it, or delete it once a measured profile covers startup, whenever the app's classes change substantially.
+Until a measured profile is committed, `app/src/main/baseline-prof.txt` holds rules for every method of the app's own code, generated from its bytecode. The build merges it with any measured profile and ignores rules that match nothing. Regenerate it, or delete it once a measured profile covers startup, whenever the app's classes change substantially. The manifest removes androidx.startup, so sideloaded installs get the profile from `PlannerApp`, which calls `ProfileInstaller.writeProfile` a few seconds after launch.
 
 Profile generation and macrobenchmarks temporarily install, clear or remove `com.privateplanner`. They must never run on a device containing plans that need to be retained. Profile generation also requires `dalvik.vm.usejit=true`.
 

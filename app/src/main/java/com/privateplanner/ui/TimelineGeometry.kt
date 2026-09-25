@@ -73,23 +73,23 @@ internal object TimelineGeometry {
 
     fun edgeAutoScrollDelta(
         pointerViewportY: Float,
-        viewportHeightPx: Int,
-        topEdgePx: Float,
-        bottomEdgeMinPx: Float,
-        bottomEdgeFraction: Float,
+        visibleTopPx: Float,
+        visibleBottomPx: Float,
+        topReachPx: Float,
+        bottomReachPx: Float,
         topMaxStepPx: Float,
         bottomMaxStepPx: Float
     ): Float {
-        if (viewportHeightPx <= 0) return 0f
-        val bottomEdge = maxOf(bottomEdgeMinPx, viewportHeightPx * bottomEdgeFraction)
+        if (visibleBottomPx <= visibleTopPx) return 0f
+        val topStart = visibleTopPx + topReachPx
+        val bottomStart = visibleBottomPx - bottomReachPx
         return when {
-            pointerViewportY < topEdgePx -> {
-                val strength = ((topEdgePx - pointerViewportY) / topEdgePx).coerceIn(0f, 1f)
+            pointerViewportY < topStart -> {
+                val strength = ((topStart - pointerViewportY) / topReachPx).coerceIn(0f, 1f)
                 -topMaxStepPx * strength * strength
             }
-            pointerViewportY > viewportHeightPx - bottomEdge -> {
-                val strength = ((pointerViewportY - (viewportHeightPx - bottomEdge)) / bottomEdge)
-                    .coerceIn(0f, 1f)
+            pointerViewportY > bottomStart -> {
+                val strength = ((pointerViewportY - bottomStart) / bottomReachPx).coerceIn(0f, 1f)
                 val easedStrength = strength * strength * (3f - 2f * strength)
                 bottomMaxStepPx * easedStrength
             }

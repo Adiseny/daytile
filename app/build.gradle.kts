@@ -103,6 +103,12 @@ android {
 
 }
 
+// Trace markers only feed composition tracing, which the app does not ship; without them no
+// composable calls into the tracer or carries a "Name (File.kt:line)" string.
+composeCompiler {
+    includeTraceMarkers.set(false)
+}
+
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }

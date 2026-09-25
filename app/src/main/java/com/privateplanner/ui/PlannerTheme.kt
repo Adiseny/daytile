@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -336,12 +337,18 @@ private val plannerTypography = Typography(
 )
 
 // Only the slots the text field, text buttons and selection handles read; every
-// surface and container colour is drawn from the palette directly.
-internal fun colourSchemeFor(palette: PlannerPalette) = if (palette.LightBackground) {
-    lightColorScheme(primary = palette.PrimaryText, onSurface = palette.PrimaryText, error = palette.Delete)
-} else {
-    darkColorScheme(primary = palette.PrimaryText, onSurface = palette.PrimaryText, error = palette.Delete)
+// surface and container colour is drawn from the palette directly. Those inks are fixed
+// per polarity, so there are two schemes, each built once: Material provides the scheme
+// statically, and a new instance at every palette step would recompose the whole screen.
+private val LightScheme by lazy {
+    lightColorScheme(primary = MiddayPalette.PrimaryText, onSurface = MiddayPalette.PrimaryText, error = MiddayPalette.Delete)
 }
+private val DarkScheme by lazy {
+    darkColorScheme(primary = NightPalette.PrimaryText, onSurface = NightPalette.PrimaryText, error = NightPalette.Delete)
+}
+
+internal fun colourSchemeFor(palette: PlannerPalette): ColorScheme =
+    if (palette.LightBackground) LightScheme else DarkScheme
 
 @Composable
 internal fun PlannerTheme(content: @Composable () -> Unit) {
@@ -367,7 +374,7 @@ internal fun PlannerTheme(content: @Composable () -> Unit) {
     // Recomposes only when the step changes, not on every tick.
     val paletteStep by remember { derivedStateOf { currentMinute.intValue / PaletteStepMinutes } }
     val palette = remember(paletteStep) { displayedPaletteForMinute(paletteStep * PaletteStepMinutes) }
-    val colourScheme = remember(palette) { colourSchemeFor(palette) }
+    val colourScheme = colourSchemeFor(palette)
     // The date is provided outside MaterialTheme, so midnight skips the theme and reaches
     // only the composables that read the date.
     CompositionLocalProvider(
