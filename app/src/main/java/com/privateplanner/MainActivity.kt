@@ -19,8 +19,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val app = application as PlannerApp
         app.warmUpInterfaceOnce()
-        // Before the window is attached, so the first frame already has the paper and bars.
-        applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())))
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // The timeline is already at its final position. Reveal it without the
@@ -39,6 +37,10 @@ class MainActivity : ComponentActivity() {
                 PlannerScreen(viewModel = plannerViewModel)
             }
         }
+        // Still before the window is attached, so the first frame already has the paper and
+        // bars; last, so the warm-up thread has built the palettes by now instead of this
+        // thread building them while it waits.
+        applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())))
         findViewById<View>(android.R.id.content).filterTouchesWhenObscured = true
     }
 }

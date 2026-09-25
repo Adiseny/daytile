@@ -43,11 +43,11 @@ class PlannerRepository private constructor(
         // Room invalidates the table even when a write only affects another day.
         return dao.observeBlocksForDate(date.toEpochDay())
             .distinctUntilChanged()
-            .map { entities -> entities.map { it.toDomain() } }
+            .map { entities -> entities.map { it.toDomain(date) } }
     }
 
     suspend fun getBlocksForDate(date: LocalDate): List<PlannerBlock> {
-        return dao.getBlocksForDate(date.toEpochDay()).map { it.toDomain() }
+        return dao.getBlocksForDate(date.toEpochDay()).map { it.toDomain(date) }
     }
 
     // Snapping and clamping below always yield a valid time, so only restoring a
@@ -69,7 +69,7 @@ class PlannerRepository private constructor(
                 } else {
                     TimeSnapper.defaultDurationForStart(start, nextStart)
                 }
-                val fittedDuration = overlapPolicy(dateKey, start, start + duration, 0)
+                val fittedDuration = overlapPolicy(date, start, start + duration, 0)
                     .largestValidDuration(start, duration)
                     ?: return@transaction PlannerWriteResult.NoSpace
                 dao.insertBlock(
@@ -102,7 +102,7 @@ class PlannerRepository private constructor(
                     startMinutes = start,
                     durationMinutes = TimeSnapper.snapDurationToNearest(durationMinutes)
                 )
-                if (!overlapPolicy(current.dateEpochDay, start, start + duration, id).canPlace(start, duration)) {
+                if (!overlapPolicy(LocalDate.ofEpochDay(current.dateEpochDay), start, start + duration, id).canPlace(start, duration)) {
                     PlannerWriteResult.RejectedOverlap
                 } else {
                     rowResult(dao.updateTime(id, start, duration))
@@ -129,8 +129,7 @@ class PlannerRepository private constructor(
                         block.durationMinutes >= TimeSnapper.MinimumDurationMinutes &&
                         block.endMinutes <= TimeSnapper.MinutesPerDay
                 )
-                val dateKey = block.date.toEpochDay()
-                if (!overlapPolicy(dateKey, block.startMinutes, block.endMinutes, block.id)
+                if (!overlapPolicy(block.date, block.startMinutes, block.endMinutes, block.id)
                         .canPlace(block.startMinutes, block.durationMinutes)
                 ) {
                     return@transaction PlannerWriteResult.RejectedOverlap
@@ -138,7 +137,7 @@ class PlannerRepository private constructor(
                 dao.insertBlock(
                     PlannerBlockEntity(
                         id = block.id,
-                        dateEpochDay = dateKey,
+                        dateEpochDay = block.date.toEpochDay(),
                         title = title,
                         startMinutes = block.startMinutes,
                         durationMinutes = block.durationMinutes
@@ -158,17 +157,17 @@ class PlannerRepository private constructor(
     }
 
     suspend fun getBlocksStartingAt(date: LocalDate, startMinutes: Int): List<PlannerBlock> {
-        return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes).map { it.toDomain() }
+        return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes).map { it.toDomain(date) }
     }
 
     private suspend fun overlapPolicy(
-        dateEpochDay: Long,
+        date: LocalDate,
         startMinutes: Int,
         endMinutes: Int,
         excludedBlockId: Long
     ): OverlapPolicy = OverlapPolicy.from(
-        dao.getPotentiallyOverlappingBlocks(dateEpochDay, startMinutes, endMinutes, excludedBlockId)
-            .map { it.toDomain() },
+        dao.getPotentiallyOverlappingBlocks(date.toEpochDay(), startMinutes, endMinutes, excludedBlockId)
+            .map { it.toDomain(date) },
         excludedBlockId
     )
 
@@ -200,10 +199,11 @@ private fun normalizeTitle(title: String): String {
     return normalized
 }
 
-private fun PlannerBlockEntity.toDomain(): PlannerBlock {
+// Rows read for one day share that day's date rather than each building their own.
+private fun PlannerBlockEntity.toDomain(date: LocalDate = LocalDate.ofEpochDay(dateEpochDay)): PlannerBlock {
     return PlannerBlock(
         id = id,
-        date = LocalDate.ofEpochDay(dateEpochDay),
+        date = date,
         title = title,
         startMinutes = startMinutes,
         durationMinutes = durationMinutes

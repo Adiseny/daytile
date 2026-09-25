@@ -6,6 +6,7 @@
 
 - Reminders on the day the clocks change now fire at the right time; blocks after the change were an hour off.
 - After a time-zone change, the next reminder moves to the new local time instead of firing at the old moment.
+- A reminder's accent now matches its tile exactly, including for blocks that share a time with others.
 
 ### Interface and interaction
 
@@ -16,6 +17,7 @@
 ### Responsiveness and efficiency
 
 - Launch reads the clock without building date-time zone rules on the main thread.
+- The launch warm-up now builds the day's colour palettes while the screen is being created, instead of the main thread building them first.
 - Processes started for a reminder or after a restart no longer prepare the interface.
 - Moving or resizing a block no longer recomposes every tile, and the five-minute colour steps no longer recompose the whole screen.
 - Removed the AndroidX Startup provider, which queried the package manager on every process start, reminder wake-ups included; the baseline profile is still installed shortly after launch.

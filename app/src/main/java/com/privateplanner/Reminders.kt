@@ -14,6 +14,8 @@ import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import com.privateplanner.data.PlannerRepository
+import com.privateplanner.domain.BlockLayout
+import com.privateplanner.domain.OverlapLayoutCalculator
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import com.privateplanner.domain.TimeSnapper
@@ -212,6 +214,9 @@ class Reminders(private val context: Context) {
             channelsReady = true
         }
         val postedAt = System.currentTimeMillis()
+        // A tile's shade follows its column among overlapping blocks, so the accent comes
+        // from the same layout the timeline draws.
+        val layouts = HashMap<LocalDate, Map<Long, BlockLayout>>(2)
         due.forEach { (id, block) ->
             val upcoming = id < 0
             val until = millisAt(
@@ -220,6 +225,9 @@ class Reminders(private val context: Context) {
             )
             val remaining = until - postedAt
             if (remaining <= 0) return@forEach
+            val column = layouts.getOrPut(block.date) {
+                OverlapLayoutCalculator.calculate(repository.getBlocksForDate(block.date))
+            }[block.id]?.columnIndex ?: 0
             val length = " · " + TimeFormatter.duration(block.durationMinutes)
             manager.notify(
                 id,
@@ -240,7 +248,7 @@ class Reminders(private val context: Context) {
                     .setUsesChronometer(true)
                     .setChronometerCountDown(true)
                     .setTimeoutAfter(remaining)
-                    .setColor(blockBackgroundArgb(block.startMinutes, 0).toInt())
+                    .setColor(blockBackgroundArgb(block.startMinutes, column).toInt())
                     .setCategory(Notification.CATEGORY_REMINDER)
                     .setContentIntent(open)
                     .setAutoCancel(true)
