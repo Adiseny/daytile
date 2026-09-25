@@ -5,9 +5,13 @@ class BlockLayout(
     val columnCount: Int
 )
 
-private val BlockLayoutOrder = compareBy<PlannerBlock> { it.startMinutes }
-    .thenBy { it.endMinutes }
-    .thenBy { it.id }
+private val BlockLayoutOrder = Comparator<PlannerBlock> { a, b ->
+    when {
+        a.startMinutes != b.startMinutes -> a.startMinutes.compareTo(b.startMinutes)
+        a.endMinutes != b.endMinutes -> a.endMinutes.compareTo(b.endMinutes)
+        else -> a.id.compareTo(b.id)
+    }
+}
 private val SingleColumnLayout = BlockLayout(columnIndex = 0, columnCount = 1)
 
 object OverlapLayoutCalculator {

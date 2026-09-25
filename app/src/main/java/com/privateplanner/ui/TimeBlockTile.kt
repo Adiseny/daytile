@@ -40,6 +40,9 @@ import kotlin.math.roundToInt
 private const val ActiveTileAlpha = 0.70f
 private const val IdleTileAlpha = 0.86f
 private const val BlackWhiteContrastSwitchLuminance = 0.17912878f
+private const val DurationVisibleMinWidthDp = 112f
+private const val DurationTitleRemainderMinDp = 56f
+private const val DurationMaxReserveFraction = 0.34f
 
 internal fun compositedTileBackground(
     background: Color,
@@ -112,6 +115,27 @@ internal fun TimeBlockForeground(
     }
 }
 
+internal fun durationReserveDp(
+    tileWidthDp: Float,
+    durationText: String,
+    compact: Boolean,
+    durationFontSizeSp: Float,
+    fontScale: Float
+): Float {
+    if (tileWidthDp < DurationVisibleMinWidthDp) return 0f
+    val estimatedTextWidthDp = durationText.length * durationFontSizeSp * fontScale * 0.58f
+    val reserveDp = estimatedTextWidthDp + if (compact) 10f else 12f
+    val maxReserveDp = tileWidthDp * DurationMaxReserveFraction
+    return if (
+        reserveDp <= maxReserveDp &&
+        tileWidthDp - reserveDp >= DurationTitleRemainderMinDp
+    ) {
+        reserveDp
+    } else {
+        0f
+    }
+}
+
 internal fun heightForMinutes(minutes: Int): Dp = HourHeight * (minutes / 60f)
 
 internal fun centredTouchTop(top: Dp, contentHeight: Dp): Dp {
@@ -161,22 +185,14 @@ private fun BlockContent(
         height < 128.dp -> 13f
         else -> 14f
     }
-    val fontScale = LocalDensity.current.fontScale
-    val durationReserveValue = remember(
-        tileWidth,
-        durationText,
-        compact,
-        durationFontSizeValue,
-        fontScale
-    ) {
-        durationReserveDp(
-            tileWidthDp = tileWidth.value,
-            durationText = durationText,
-            compact = compact,
-            durationFontSizeSp = durationFontSizeValue,
-            fontScale = fontScale
-        )
-    }
+    // A handful of float operations: cheaper to redo than to remember.
+    val durationReserveValue = durationReserveDp(
+        tileWidthDp = tileWidth.value,
+        durationText = durationText,
+        compact = compact,
+        durationFontSizeSp = durationFontSizeValue,
+        fontScale = LocalDensity.current.fontScale
+    )
     val showDuration = durationReserveValue > 0f
     val durationReserve = durationReserveValue.dp
     val endPadding = if (showDuration) durationReserve else 8.dp
@@ -257,7 +273,6 @@ private fun BlockOneLineContent(
     Text(
         text = title,
         color = ink,
-        fontFamily = DaytileFontFamily,
         fontSize = titleFontSize,
         lineHeight = titleLineHeight,
         fontWeight = FontWeight.Medium,
@@ -290,7 +305,6 @@ private fun BlockTwoLineContent(
         Text(
             text = title,
             color = ink,
-            fontFamily = DaytileFontFamily,
             fontSize = titleFontSize,
             lineHeight = titleLineHeight,
             fontWeight = FontWeight.SemiBold,
@@ -300,7 +314,6 @@ private fun BlockTwoLineContent(
         Text(
             text = rangeText(),
             color = ink,
-            fontFamily = DaytileFontFamily,
             fontSize = metaFontSize,
             lineHeight = metaLineHeight,
             maxLines = 1,
@@ -323,7 +336,6 @@ private fun DurationLabel(
     Text(
         text = text,
         color = ink,
-        fontFamily = DaytileFontFamily,
         fontSize = fontSize,
         lineHeight = lineHeight,
         fontWeight = fontWeight,

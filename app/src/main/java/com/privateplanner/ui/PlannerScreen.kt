@@ -35,6 +35,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.IntState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
@@ -94,7 +96,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.withTimeoutOrNull
 
 private val CompactBlockShape = RoundedCornerShape(13.dp)
 private val RegularBlockShape = RoundedCornerShape(16.dp)
@@ -106,16 +107,9 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val haptics = LocalHapticFeedback.current
+    val sheet = uiState.sheet
     val currentSnackbar = uiState.snackbar
     val selectedBlocks = uiState.blocksByDate[uiState.selectedDate].orEmpty()
-    val selectedBlockId = when (val sheet = uiState.sheet) {
-        is PlannerSheet.BlockActions -> sheet.blockId
-        is PlannerSheet.RenameBlock -> sheet.blockId
-        else -> null
-    }
-    val selectedBlock = selectedBlockId?.let { blockId ->
-        selectedBlocks.firstOrNull { it.id == blockId }
-    }
     val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -123,9 +117,11 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
         if (granted) viewModel.setRemindersOn(true) else viewModel.notificationsBlocked()
     }
     val timelineScrollState = rememberScrollState()
-    var headerHeightPx by remember { mutableIntStateOf(0) }
+    // Only read while placing pinned titles, so a new heading height re-places those
+    // tiles instead of recomposing every one.
+    val headerHeightPx = remember { mutableIntStateOf(0) }
     val today = LocalCurrentDate.current
-    val backgroundSemantics = if (uiState.sheet == null) {
+    val backgroundSemantics = if (sheet == null) {
         Modifier
     } else {
         Modifier.clearAndSetSemantics { }
@@ -134,22 +130,15 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         viewModel.deleteBlock(blockId)
     }
-    val hasBackInterception = uiState.sheet != null ||
-        currentSnackbar != null ||
-        uiState.selectedDate != today ||
-        snackbarHostState.currentSnackbarData != null
+    PlannerSystemBarsEffect(dimmed = sheet != null)
 
-    PlannerSystemBarsEffect(dimmed = uiState.sheet != null)
-
-    BackHandler(enabled = hasBackInterception) {
+    // The host only ever shows the current snackbar: clearing it cancels the effect
+    // below, which takes it off screen as well.
+    BackHandler(enabled = sheet != null || currentSnackbar != null || uiState.selectedDate != today) {
         when {
-            uiState.sheet != null -> viewModel.dismissSheet()
-            snackbarHostState.currentSnackbarData != null -> {
-                snackbarHostState.currentSnackbarData?.dismiss()
-                currentSnackbar?.let { viewModel.clearSnackbar(it.id) }
-            }
+            sheet != null -> viewModel.dismissSheet()
             currentSnackbar != null -> viewModel.clearSnackbar(currentSnackbar.id)
-            uiState.selectedDate != today -> viewModel.returnToToday()
+            else -> viewModel.returnToToday()
         }
     }
 
@@ -176,44 +165,41 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
             .fillMaxSize()
             .background(PlannerColours.Paper)
             .axisLockedDaySwipe(
-                enabled = uiState.sheet == null,
+                enabled = sheet == null,
                 onPrevious = {
-                    viewModel.previousDay()
+                    viewModel.shiftDay(-1)
                     haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                 },
                 onNext = {
-                    viewModel.nextDay()
+                    viewModel.shiftDay(1)
                     haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                 }
             )
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(backgroundSemantics)
-        ) {
-            Timeline(
-                selectedDate = uiState.selectedDate,
-                blocks = selectedBlocks,
-                scrollState = timelineScrollState,
-                headerHeightPx = headerHeightPx,
-                scrollTargetMinutes = uiState.scrollTargetMinutes,
-                onEmptyTimeTap = viewModel::openCreate,
-                onBlockTap = viewModel::openActions,
-                onBlockRename = viewModel::openRename,
-                onBlockDelete = deleteBlockWithHaptic,
-                onBlockMove = viewModel::moveBlock,
-                onBlockResize = viewModel::resizeBlock,
-                onScrollTargetConsumed = viewModel::consumeScrollTarget
-            )
+        Timeline(
+            selectedDate = uiState.selectedDate,
+            blocks = selectedBlocks,
+            scrollState = timelineScrollState,
+            headerHeightPx = headerHeightPx,
+            scrollTargetMinutes = uiState.scrollTargetMinutes,
+            onEmptyTimeTap = viewModel::openCreate,
+            onBlockTap = viewModel::openActions,
+            onBlockRename = viewModel::openRename,
+            onBlockDelete = deleteBlockWithHaptic,
+            onBlockMove = viewModel::moveBlock,
+            onBlockResize = viewModel::resizeBlock,
+            onScrollTargetConsumed = viewModel::consumeScrollTarget,
+            modifier = backgroundSemantics
+        )
 
-            TimelineHeader(
-                selectedDate = uiState.selectedDate,
-                onDateClick = viewModel::openDateJump,
-                onContentHeight = { headerHeightPx = it },
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
-        }
+        TimelineHeader(
+            selectedDate = uiState.selectedDate,
+            onDateClick = viewModel::openDateJump,
+            onContentHeight = { headerHeightPx.intValue = it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .then(backgroundSemantics)
+        )
 
         SnackbarHost(
             hostState = snackbarHostState,
@@ -225,7 +211,7 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
             snackbar = { data -> PlannerSnackbar(data) }
         )
 
-        when (val sheet = uiState.sheet) {
+        when (sheet) {
             is PlannerSheet.CreateBlock -> BlockInputSheet(
                 title = "",
                 buttonLabel = "Add",
@@ -233,28 +219,22 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
                 onDismiss = viewModel::dismissSheet,
                 errorText = uiState.sheetError
             )
-            is PlannerSheet.RenameBlock -> {
-                val block = selectedBlock
-                if (block != null) {
-                    BlockInputSheet(
-                        title = block.title,
-                        buttonLabel = "Rename",
-                        onSubmit = viewModel::renameBlock,
-                        onDismiss = viewModel::dismissSheet,
-                        errorText = uiState.sheetError
-                    )
-                }
+            is PlannerSheet.RenameBlock -> selectedBlocks.firstOrNull { it.id == sheet.blockId }?.let { block ->
+                BlockInputSheet(
+                    title = block.title,
+                    buttonLabel = "Rename",
+                    onSubmit = viewModel::renameBlock,
+                    onDismiss = viewModel::dismissSheet,
+                    errorText = uiState.sheetError
+                )
             }
-            is PlannerSheet.BlockActions -> {
-                val block = selectedBlock
-                if (block != null) {
-                    BlockActionSheet(
-                        block = block,
-                        onRename = { viewModel.openRename(block.id) },
-                        onDelete = { deleteBlockWithHaptic(block.id) },
-                        onDismiss = viewModel::dismissSheet
-                    )
-                }
+            is PlannerSheet.BlockActions -> selectedBlocks.firstOrNull { it.id == sheet.blockId }?.let { block ->
+                BlockActionSheet(
+                    block = block,
+                    onRename = { viewModel.openRename(block.id) },
+                    onDelete = { deleteBlockWithHaptic(block.id) },
+                    onDismiss = viewModel::dismissSheet
+                )
             }
             PlannerSheet.DateJump -> DateJumpSheet(
                 selectedDate = uiState.selectedDate,
@@ -290,7 +270,6 @@ private fun PlannerSnackbar(data: SnackbarData) {
     ) {
         Text(
             text = data.visuals.message,
-            fontFamily = DaytileFontFamily,
             fontSize = 14.sp,
             lineHeight = 18.sp,
             fontWeight = FontWeight.SemiBold,
@@ -303,7 +282,6 @@ private fun PlannerSnackbar(data: SnackbarData) {
             Text(
                 text = actionLabel,
                 color = PlannerColours.Delete,
-                fontFamily = DaytileFontFamily,
                 fontSize = 14.sp,
                 lineHeight = 18.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -339,34 +317,23 @@ private fun TimelineHeader(
     val dateFormatter = remember(locale) {
         DateTimeFormatter.ofPattern("EEEE, d MMMM", locale)
     }
-    val dateWithYearFormatter = remember(locale) {
-        DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", locale)
-    }
-    val title = remember(selectedDate, today, dateFormatter, dateWithYearFormatter) {
-        when (selectedDate) {
+    // Relative days show their date underneath; other years (rare) add the year.
+    val (title, subtitle) = remember(selectedDate, today, dateFormatter) {
+        val relative = when (selectedDate) {
             today.minusDays(1) -> "Yesterday"
             today -> "Today"
             today.plusDays(1) -> "Tomorrow"
+            else -> null
+        }
+        when {
+            relative != null -> relative to selectedDate.format(dateFormatter)
+            selectedDate.year == today.year -> selectedDate.format(dateFormatter) to null
             else -> selectedDate.format(
-                if (selectedDate.year == today.year) dateFormatter else dateWithYearFormatter
-            )
+                DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", dateFormatter.locale)
+            ) to null
         }
     }
-    val subtitle = remember(selectedDate, today, dateFormatter) {
-        if (selectedDate in today.minusDays(1)..today.plusDays(1)) {
-            selectedDate.format(dateFormatter)
-        } else {
-            null
-        }
-    }
-    val typography = MaterialTheme.typography
     val paper = PlannerColours.Paper
-    val titleStyle = remember(typography) {
-        typography.headlineMedium.copy(fontSize = 22.sp, lineHeight = 27.sp)
-    }
-    val subtitleStyle = remember(typography) {
-        typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp)
-    }
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -404,15 +371,14 @@ private fun TimelineHeader(
         ) {
             Text(
                 text = title,
-                style = titleStyle,
+                style = MaterialTheme.typography.headlineMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    color = PlannerColours.PrimaryText,
-                    style = subtitleStyle,
+                    style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -426,7 +392,7 @@ private fun Timeline(
     selectedDate: LocalDate,
     blocks: List<PlannerBlock>,
     scrollState: ScrollState,
-    headerHeightPx: Int,
+    headerHeightPx: IntState,
     scrollTargetMinutes: Int?,
     onEmptyTimeTap: (Int) -> Unit,
     onBlockTap: (Long) -> Unit,
@@ -434,15 +400,12 @@ private fun Timeline(
     onBlockDelete: (Long) -> Unit,
     onBlockMove: (Long, Int) -> Boolean,
     onBlockResize: (Long, Int) -> Boolean,
-    onScrollTargetConsumed: () -> Unit
+    onScrollTargetConsumed: () -> Unit,
+    modifier: Modifier
 ) {
     val density = LocalDensity.current
     val hourHeightPx = with(density) { HourHeight.toPx() }
-    val gutterPx = with(density) { TimelineGutter.toPx() }
     val topClearancePx = with(density) { TimelineTopClearance.toPx() }
-    val minimumTouchTargetPx = with(density) { MinimumTouchTarget.toPx() }
-    val timelineEndPaddingPx = with(density) { TimelineEndPadding.toPx() }
-    val blockColumnGapPx = with(density) { BlockColumnGap.toPx() }
     val layoutById = remember(blocks) {
         OverlapLayoutCalculator.calculate(blocks)
     }
@@ -457,9 +420,8 @@ private fun Timeline(
             return checkNotNull(cachedPolicy)
         }
     }
-    val currentDate = LocalCurrentDate.current
-    val isToday = selectedDate == currentDate
-    val currentTimeMinutes = if (isToday) LocalCurrentMinuteOfDay.current else null
+    // Only the grid and the indicator read the minute clock, so a tick never recomposes this.
+    val isToday = selectedDate == LocalCurrentDate.current
     var viewportHeightPx by remember { mutableIntStateOf(0) }
     val accessibilityFocusMinutes = remember(scrollState, hourHeightPx, topClearancePx) {
         derivedStateOf {
@@ -488,72 +450,52 @@ private fun Timeline(
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .onSizeChanged { viewportHeightPx = it.height }
             .verticalScroll(scrollState)
     ) {
         BoxWithConstraints(
             modifier = Modifier
-                .height(TimelineTopClearance + DayHeight)
+                .padding(top = TimelineTopClearance)
+                .height(DayHeight)
                 .fillMaxWidth()
+                .semantics {
+                    val startMinutes = accessibilityFocusMinutes.value
+                    val time = TimeFormatter.time(startMinutes)
+                    contentDescription = "Day timeline, $time"
+                    onClick(label = "Add block at $time") {
+                        onEmptyTimeTap(startMinutes)
+                        true
+                    }
+                }
+                .timelineTapInput(blocks, layoutById, onEmptyTimeTap)
         ) {
             val timelineWidth = maxWidth
-            val timelineWidthPx = with(density) { maxWidth.toPx() }
+            TimelineGrid(showsNow = isToday)
 
-            Box(
-                modifier = Modifier
-                    .offset(y = TimelineTopClearance)
-                    .height(DayHeight)
-                    .fillMaxWidth()
-                    .semantics {
-                        val startMinutes = accessibilityFocusMinutes.value
-                        val time = TimeFormatter.time(startMinutes)
-                        contentDescription = "Day timeline, $time"
-                        onClick(label = "Add block at $time") {
-                            onEmptyTimeTap(startMinutes)
-                            true
-                        }
-                    }
-                    .timelineTapInput(
-                        blocks = blocks,
-                        layoutById = layoutById,
-                        timelineWidthPx = timelineWidthPx,
-                        gutterPx = gutterPx,
-                        timelineEndPaddingPx = timelineEndPaddingPx,
-                        blockColumnGapPx = blockColumnGapPx,
+            for (block in blocks) {
+                key(block.id) {
+                    TimeBlock(
+                        block = block,
+                        validatorForBlock = overlapPolicyForBlock,
+                        layout = layoutById.getValue(block.id),
+                        timelineWidth = timelineWidth,
+                        scrollState = scrollState,
+                        headerHeightPx = headerHeightPx,
+                        viewportHeightPx = viewportHeightPx,
                         hourHeightPx = hourHeightPx,
-                        minimumTouchTargetPx = minimumTouchTargetPx,
-                        onEmptyTimeTap = onEmptyTimeTap
+                        onTap = { onBlockTap(block.id) },
+                        onRename = { onBlockRename(block.id) },
+                        onDelete = { onBlockDelete(block.id) },
+                        onMove = { start -> onBlockMove(block.id, start) },
+                        onResize = { onBlockResize(block.id, it) }
                     )
-            ) {
-                TimelineGrid(hiddenGridLabelMinutes(currentTimeMinutes))
-
-                for (blockIndex in blocks.indices) {
-                    val block = blocks[blockIndex]
-                    val layout = layoutById.getValue(block.id)
-                    key(block.id) {
-                        TimeBlock(
-                            block = block,
-                            validatorForBlock = overlapPolicyForBlock,
-                            layout = layout,
-                            timelineWidth = timelineWidth,
-                            scrollState = scrollState,
-                            headerHeightPx = headerHeightPx,
-                            viewportHeightPx = viewportHeightPx,
-                            hourHeightPx = hourHeightPx,
-                            onTap = { onBlockTap(block.id) },
-                            onRename = { onBlockRename(block.id) },
-                            onDelete = { onBlockDelete(block.id) },
-                            onMove = { start -> onBlockMove(block.id, start) },
-                            onResize = { onBlockResize(block.id, it) }
-                        )
-                    }
                 }
+            }
 
-                if (currentTimeMinutes != null) {
-                    CurrentTimeIndicator(currentTimeMinutes)
-                }
+            if (isToday) {
+                CurrentTimeIndicator()
             }
         }
     }
@@ -566,7 +508,7 @@ private fun TimeBlock(
     layout: BlockLayout,
     timelineWidth: Dp,
     scrollState: ScrollState,
-    headerHeightPx: Int,
+    headerHeightPx: IntState,
     viewportHeightPx: Int,
     hourHeightPx: Float,
     onTap: () -> Unit,
@@ -578,12 +520,13 @@ private fun TimeBlock(
     val haptics = LocalHapticFeedback.current
     val latestBlock by rememberUpdatedState(block)
     val latestValidatorForBlock by rememberUpdatedState(validatorForBlock)
-    var previewStartMinutes by remember(block.id) { mutableIntStateOf(NoPreviewMinutes) }
-    var previewDurationMinutes by remember(block.id) { mutableIntStateOf(NoPreviewMinutes) }
+    // The caller keys each tile by block id, so this state never outlives its block.
+    var previewStartMinutes by remember { mutableIntStateOf(NoPreviewMinutes) }
+    var previewDurationMinutes by remember { mutableIntStateOf(NoPreviewMinutes) }
     // Read by the active drag layer so snapped moves do not recompose the tile body.
-    val moveOffsetPx = remember(block.id) { mutableFloatStateOf(0f) }
-    var moveActive by remember(block.id) { mutableStateOf(false) }
-    var resizeActive by remember(block.id) { mutableStateOf(false) }
+    val moveOffsetPx = remember { mutableFloatStateOf(0f) }
+    var moveActive by remember { mutableStateOf(false) }
+    var resizeActive by remember { mutableStateOf(false) }
     val displayedDurationMinutes = if (previewDurationMinutes != NoPreviewMinutes) {
         previewDurationMinutes
     } else {
@@ -604,9 +547,7 @@ private fun TimeBlock(
         .coerceAtMost((DayHeight - touchTop).coerceAtLeast(MinimumTouchTarget))
     val latestVisualOffset by rememberUpdatedState(baseVisualOffset)
     val compact = displayedDurationMinutes <= QuickResizeMaxDurationMinutes
-    val background = remember(block.startMinutes, layout.columnIndex) {
-        Color(blockBackgroundArgb(block.startMinutes, layout.columnIndex))
-    }
+    val background = Color(blockBackgroundArgb(block.startMinutes, layout.columnIndex))
     val blockShape = if (compact) CompactBlockShape else RegularBlockShape
     val rangeTextProvider: () -> String = {
         val labelStart = if (previewStartMinutes != NoPreviewMinutes) previewStartMinutes else block.startMinutes
@@ -628,7 +569,7 @@ private fun TimeBlock(
                 scrollPx = scrollState.value,
                 blockTop = heightForMinutes(followStart),
                 visualHeight = visualHeight,
-                headerBottomPx = headerHeightPx
+                headerBottomPx = headerHeightPx.intValue
             )
         }
     }
@@ -639,7 +580,7 @@ private fun TimeBlock(
             block.durationMinutes
         )
         if (targetStart == block.startMinutes) return false
-        return latestValidatorForBlock(block.id).placement(targetStart, block.durationMinutes) == MovePlacement.Savable &&
+        return latestValidatorForBlock(block.id).canPlace(targetStart, block.durationMinutes) &&
             onMove(targetStart)
     }
 
@@ -731,39 +672,27 @@ private fun TimeBlock(
     }
 }
 
+// Pixel geometry is read at tap time from this node's own size and density, so only a
+// change of blocks restarts the detector.
 private fun Modifier.timelineTapInput(
     blocks: List<PlannerBlock>,
     layoutById: Map<Long, BlockLayout>,
-    timelineWidthPx: Float,
-    gutterPx: Float,
-    timelineEndPaddingPx: Float,
-    blockColumnGapPx: Float,
-    hourHeightPx: Float,
-    minimumTouchTargetPx: Float,
     onEmptyTimeTap: (Int) -> Unit
 ): Modifier {
-    return pointerInput(
-        blocks,
-        layoutById,
-        timelineWidthPx,
-        gutterPx,
-        timelineEndPaddingPx,
-        blockColumnGapPx,
-        hourHeightPx,
-        minimumTouchTargetPx
-    ) {
+    return pointerInput(blocks, layoutById) {
         detectTapGestures { offset ->
+            val hourHeightPx = HourHeight.toPx()
             val hitBlock = TimelineGeometry.hitTestBlock(
                 x = offset.x,
                 y = offset.y,
                 blocks = blocks,
                 layoutById = layoutById,
-                timelineWidthPx = timelineWidthPx,
-                gutterPx = gutterPx,
-                timelineEndPaddingPx = timelineEndPaddingPx,
-                blockColumnGapPx = blockColumnGapPx,
+                timelineWidthPx = size.width.toFloat(),
+                gutterPx = TimelineGutter.toPx(),
+                timelineEndPaddingPx = TimelineEndPadding.toPx(),
+                blockColumnGapPx = BlockColumnGap.toPx(),
                 hourHeightPx = hourHeightPx,
-                minimumTouchTargetPx = minimumTouchTargetPx
+                minimumTouchTargetPx = MinimumTouchTarget.toPx()
             )
             if (!hitBlock) {
                 onEmptyTimeTap(TimeSnapper.minutesFromY(offset.y, hourHeightPx))
@@ -791,7 +720,6 @@ private fun Modifier.blockMoveInput(
     onResize: (Int) -> Boolean
 ): Modifier {
     return pointerInput(blockId, hourHeightPx, viewportHeightPx) {
-        val gestureDensity = this
         coroutineScope gestureScope@{
             awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -891,7 +819,6 @@ private fun Modifier.blockMoveInput(
                         hourHeightPx = hourHeightPx,
                         scrollState = scrollState,
                         viewportHeightPx = viewportHeightPx,
-                        density = gestureDensity,
                         haptics = haptics,
                         onResizeActiveChange = onResizeActiveChange,
                         onResizePreview = onResizePreview,
@@ -926,15 +853,8 @@ private fun Modifier.blockMoveInput(
                 if (snapped != lastSnappedStart) {
                     lastSnappedStart = snapped
                     onMovePreview(snapped)
-                    when (validator.placement(snapped, initial.durationMinutes)) {
-                        MovePlacement.Invalid -> Unit
-                        MovePlacement.TransientOnly -> {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
-                        MovePlacement.Savable -> {
-                            lastSavableStart = snapped
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
+                    if (haptics.tickFor(validator.placement(snapped, initial.durationMinutes))) {
+                        lastSavableStart = snapped
                     }
                 }
             }
@@ -945,34 +865,18 @@ private fun Modifier.blockMoveInput(
                     pointerViewportY = { pointerViewportY },
                     viewportHeightPx = viewportHeightPx,
                     scrollState = scrollState,
-                    density = gestureDensity,
+                    density = this,
                     enabled = { hasDraggedAfterHold },
                     onScrolled = ::updateMoveFromGesture
                 )
 
-                while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                    if (event.changes.any { it.id != down.id && it.pressed }) {
-                        cancelled = true
-                        break
-                    }
-                    val change = event.changes.firstOrNull { it.id == down.id }
-                    if (change == null) {
-                        cancelled = true
-                        break
-                    }
-                    if (!change.pressed) break
-                    if (change.isConsumed) {
-                        cancelled = true
-                        break
-                    }
-                    totalPointerDy += change.position.y - change.previousPosition.y
+                cancelled = !trackDrag(down.id) { dy ->
+                    totalPointerDy += dy
                     pointerViewportY = initialPointerViewportY + totalPointerDy
                     if (!hasDraggedAfterHold && abs(totalPointerDy) > viewConfiguration.touchSlop) {
                         hasDraggedAfterHold = true
                     }
                     updateMoveFromGesture()
-                    change.consume()
                 }
             } catch (throwable: CancellationException) {
                 cancelled = true
@@ -992,7 +896,27 @@ private fun Modifier.blockMoveInput(
     }
 }
 
-private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.runResizeGesture(
+// Follows one pointer's vertical movement until it lifts (true), or until the gesture is
+// abandoned to a second finger, a lost pointer or another consumer (false).
+private suspend inline fun AwaitPointerEventScope.trackDrag(pointerId: PointerId, onDrag: (Float) -> Unit): Boolean {
+    while (true) {
+        val event = awaitPointerEvent(PointerEventPass.Initial)
+        if (event.changes.any { it.id != pointerId && it.pressed }) return false
+        val change = event.changes.firstOrNull { it.id == pointerId } ?: return false
+        if (!change.pressed) return true
+        if (change.isConsumed) return false
+        onDrag(change.position.y - change.previousPosition.y)
+        change.consume()
+    }
+}
+
+// Every snapped step ticks unless the spot is unusable; only a savable one may be dropped on.
+private fun HapticFeedback.tickFor(placement: MovePlacement): Boolean {
+    if (placement != MovePlacement.Invalid) performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    return placement == MovePlacement.Savable
+}
+
+private suspend fun AwaitPointerEventScope.runResizeGesture(
     gestureScope: CoroutineScope,
     pointerId: PointerId,
     initial: PlannerBlock,
@@ -1002,7 +926,6 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.run
     hourHeightPx: Float,
     scrollState: ScrollState,
     viewportHeightPx: Int,
-    density: Density,
     haptics: HapticFeedback,
     onResizeActiveChange: (Boolean) -> Unit,
     onResizePreview: (Int?) -> Unit,
@@ -1028,15 +951,8 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.run
         if (snappedDuration != lastSnappedDuration) {
             lastSnappedDuration = snappedDuration
             onResizePreview(snappedDuration)
-            when (validator.placement(initial.startMinutes, snappedDuration)) {
-                MovePlacement.Invalid -> Unit
-                MovePlacement.TransientOnly -> {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                }
-                MovePlacement.Savable -> {
-                    lastSavableDuration = snappedDuration
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                }
+            if (haptics.tickFor(validator.placement(initial.startMinutes, snappedDuration))) {
+                lastSavableDuration = snappedDuration
             }
         }
     }
@@ -1047,30 +963,14 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.run
             pointerViewportY = { pointerViewportY },
             viewportHeightPx = viewportHeightPx,
             scrollState = scrollState,
-            density = density,
-            onScrolled = { resizeTo() }
+            density = this,
+            onScrolled = ::resizeTo
         )
 
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            if (event.changes.any { it.id != pointerId && it.pressed }) {
-                cancelled = true
-                break
-            }
-            val change = event.changes.firstOrNull { it.id == pointerId }
-            if (change == null) {
-                cancelled = true
-                break
-            }
-            if (!change.pressed) break
-            if (change.isConsumed) {
-                cancelled = true
-                break
-            }
-            totalDy += change.position.y - change.previousPosition.y
+        cancelled = !trackDrag(pointerId) { dy ->
+            totalDy += dy
             pointerViewportY = initialPointerViewportY + totalDy
             resizeTo()
-            change.consume()
         }
     } catch (throwable: CancellationException) {
         cancelled = true

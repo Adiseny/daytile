@@ -2,6 +2,7 @@ package com.privateplanner.data
 
 import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
+import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -521,11 +522,11 @@ class PlannerRepositoryTest {
                 ?.durationMinutes
         }
 
-        override suspend fun getNextBlock(dateEpochDay: Long, startMinutes: Int) =
+        override suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int) =
             blocks.filter {
                 it.dateEpochDay > dateEpochDay ||
                     (it.dateEpochDay == dateEpochDay && it.startMinutes >= startMinutes)
-            }.minWithOrNull(compareBy({ it.dateEpochDay }, { it.startMinutes }))
+            }.minOfOrNull { it.dateEpochDay * TimeSnapper.MinutesPerDay + it.startMinutes }
 
         override suspend fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int) =
             blocks.filter { it.dateEpochDay == dateEpochDay && it.startMinutes == startMinutes }

@@ -1,10 +1,7 @@
 package com.privateplanner.ui
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
 import com.privateplanner.Reminders
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.data.PlannerWriteResult
@@ -13,7 +10,9 @@ import com.privateplanner.domain.PlannerBlockOrder
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
 import java.time.LocalDateTime
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +21,37 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+data class PlannerUiState(
+    val selectedDate: LocalDate,
+    val blocksByDate: Map<LocalDate, List<PlannerBlock>>,
+    val sheet: PlannerSheet?,
+    val snackbar: PlannerSnackbar?,
+    val sheetError: String?,
+    val scrollTargetMinutes: Int?,
+    val remindersOn: Boolean
+)
+
+sealed interface PlannerSheet {
+    class CreateBlock(val startMinutes: Int) : PlannerSheet
+    class RenameBlock(val blockId: Long) : PlannerSheet
+    class BlockActions(val blockId: Long) : PlannerSheet
+    object DateJump : PlannerSheet
+}
+
+sealed interface PlannerSnackbar {
+    val id: Long
+
+    class Deleted(
+        override val id: Long,
+        val deletedBlock: PlannerBlock
+    ) : PlannerSnackbar
+
+    class Message(
+        override val id: Long,
+        val message: String
+    ) : PlannerSnackbar
+}
 
 class PlannerViewModel(
     private val repository: PlannerRepository,
@@ -36,7 +66,7 @@ class PlannerViewModel(
                 snackbar = null,
                 sheetError = null,
                 scrollTargetMinutes = TimeSnapper.minuteOfDay(now.toLocalTime()),
-                remindersOn = reminders.enabled
+                remindersOn = false
             )
         }
     )
@@ -52,18 +82,18 @@ class PlannerViewModel(
 
     init {
         observeDate(mutableUiState.value.selectedDate)
+        // The switch is only drawn inside the date sheet, so its first disk read need
+        // not hold up launch.
+        viewModelScope.launch(Dispatchers.IO) {
+            if (reminders.enabled) mutableUiState.update { it.copy(remindersOn = true) }
+        }
     }
 
     private fun observeDate(date: LocalDate) {
         dateObservationJob?.cancel()
         dateObservationJob = repository.observeBlocksForDate(date)
             .onEach { blocks ->
-                mutableUiState.update { state ->
-                    state.copy(
-                        blocksByDate = state.blocksByDate +
-                            (date to mergePendingTimeUpdates(blocks))
-                    )
-                }
+                publish(date, mergePendingTimeUpdates(blocks))
                 if (mutableUiState.value.selectedDate == date) {
                     prefetchDate(date.minusDays(1))
                     prefetchDate(date.plusDays(1))
@@ -72,12 +102,20 @@ class PlannerViewModel(
             .launchIn(viewModelScope)
     }
 
-    fun previousDay() {
-        setDate(mutableUiState.value.selectedDate.minusDays(1))
+    // A re-query usually confirms what is already shown (the optimistic move, the
+    // prefetched day), and republishing an equal list would recompose the whole screen.
+    private fun publish(date: LocalDate, blocks: List<PlannerBlock>) {
+        mutableUiState.update { state ->
+            if (state.blocksByDate[date] == blocks) {
+                state
+            } else {
+                state.copy(blocksByDate = state.blocksByDate + (date to blocks))
+            }
+        }
     }
 
-    fun nextDay() {
-        setDate(mutableUiState.value.selectedDate.plusDays(1))
+    fun shiftDay(days: Long) {
+        setDate(mutableUiState.value.selectedDate.plusDays(days))
     }
 
     fun returnToToday() {
@@ -187,8 +225,7 @@ class PlannerViewModel(
     }
 
     fun clearSnackbar(snackbarId: Long) {
-        val message = mutableUiState.value.snackbar ?: return
-        if (message.id == snackbarId) {
+        if (mutableUiState.value.snackbar?.id == snackbarId) {
             mutableUiState.update { it.copy(snackbar = null) }
         }
     }
@@ -220,7 +257,7 @@ class PlannerViewModel(
     fun setRemindersOn(on: Boolean) {
         reminders.enabled = on
         mutableUiState.update { it.copy(remindersOn = on) }
-        viewModelScope.launch { reminders.sync(repository) }
+        reminders.syncSoon(repository)
     }
 
     fun notificationsBlocked() {
@@ -233,20 +270,13 @@ class PlannerViewModel(
 
     private fun setDate(date: LocalDate) {
         if (date == mutableUiState.value.selectedDate) return
-        val previousDay = date.minusDays(1)
-        val nextDay = date.plusDays(1)
-        fun isRetained(cachedDate: LocalDate): Boolean {
-            return cachedDate == previousDay ||
-                cachedDate == date ||
-                cachedDate == nextDay
-        }
-        prefetchJobs.keys.filterNot(::isRetained).forEach { staleDate ->
+        prefetchJobs.keys.filterNot { it.isNear(date) }.forEach { staleDate ->
             prefetchJobs.remove(staleDate)?.cancel()
         }
         mutableUiState.update { state ->
             state.copy(
                 selectedDate = date,
-                blocksByDate = state.blocksByDate.filterKeys(::isRetained)
+                blocksByDate = state.blocksByDate.filterKeys { it.isNear(date) }
             )
         }
         observeDate(date)
@@ -259,7 +289,7 @@ class PlannerViewModel(
             try {
                 val blocks = repository.getBlocksForDate(date)
                 mutableUiState.update { state ->
-                    if (date in state.selectedDate.minusDays(1)..state.selectedDate.plusDays(1)) {
+                    if (date.isNear(state.selectedDate)) {
                         state.copy(blocksByDate = state.blocksByDate + (date to blocks))
                     } else {
                         state
@@ -278,8 +308,7 @@ class PlannerViewModel(
     private fun cachedBlock(blockId: Long): PlannerBlock? {
         val state = mutableUiState.value
         return state.blocksByDate[state.selectedDate]
-            .orEmpty()
-            .firstOrNull { block -> block.id == blockId }
+            ?.firstOrNull { block -> block.id == blockId }
     }
 
     private fun updateCachedTime(blockId: Long, startMinutes: Int, durationMinutes: Int) {
@@ -313,13 +342,7 @@ class PlannerViewModel(
             pendingTimeUpdates.remove(blockId)
             timeWriteJobs.remove(blockId)
             if (result != PlannerWriteResult.Success) {
-                val blocks = repository.getBlocksForDate(date)
-                mutableUiState.update { state ->
-                    state.copy(
-                        blocksByDate = state.blocksByDate +
-                            (date to mergePendingTimeUpdates(blocks))
-                    )
-                }
+                publish(date, mergePendingTimeUpdates(repository.getBlocksForDate(date)))
                 showMessage("Could not save")
             }
         }
@@ -376,21 +399,11 @@ class PlannerViewModel(
             mutableUiState.update { it.copy(sheetError = message) }
         }
     }
-
-    companion object {
-        fun factory(
-            repository: PlannerRepository,
-            reminders: Reminders
-        ): ViewModelProvider.Factory =
-            viewModelFactory {
-                initializer {
-                    PlannerViewModel(repository, reminders)
-                }
-            }
-    }
 }
 
 private class PendingTimeUpdate(
     val startMinutes: Int,
     val durationMinutes: Int
 )
+
+private fun LocalDate.isNear(day: LocalDate): Boolean = abs(toEpochDay() - day.toEpochDay()) <= 1

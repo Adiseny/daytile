@@ -1,9 +1,8 @@
 package com.privateplanner.ui
 
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -25,7 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -39,9 +37,8 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import kotlinx.coroutines.delay
 
-// Window-background colours used for the cold-start splash and the system bars.
-internal const val PaperBackgroundArgb: Int = 0xFFF6F2EC.toInt()
-internal const val PaperBackgroundDarkArgb: Int = 0xFF15120D.toInt()
+// Night paper, also the dark scrim behind light system-bar icons.
+private const val PaperBackgroundDarkArgb: Int = 0xFF15120D.toInt()
 
 internal class PlannerPalette(
     val Paper: Color,
@@ -111,7 +108,7 @@ private val NightPalette = nightPalette(
 )
 
 private val MiddayPalette = dayPalette(
-    paper = Color(PaperBackgroundArgb),
+    paper = Color(0xFFF6F2EC),
     sheet = Color(0xFFFFF9F1),
     lineInk = Color(0xFF574A38),
     timeText = Color(0xFF3F3932)
@@ -254,9 +251,8 @@ private fun millisUntilNextMinute(now: LocalTime): Long {
  */
 @Composable
 internal fun PlannerSystemBarsEffect(dimmed: Boolean) {
-    val view = LocalView.current
+    val activity = LocalActivity.current as? ComponentActivity
     val palette = PlannerColours
-    val activity = remember(view) { view.context.findComponentActivity() }
     DisposableEffect(activity, dimmed, palette) {
         activity?.applyPlannerSystemBars(palette, dimmed)
         onDispose { }
@@ -282,22 +278,16 @@ internal fun ComponentActivity.applyPlannerSystemBars(palette: PlannerPalette, d
     )
 }
 
-private tailrec fun Context.findComponentActivity(): ComponentActivity? {
-    return when (this) {
-        is ComponentActivity -> this
-        is ContextWrapper -> baseContext.findComponentActivity()
-        else -> null
-    }
-}
-
 internal val DaytileFontFamily = FontFamily.SansSerif
 
+// headlineMedium and bodySmall are the timeline heading's title and date line; no
+// Material component used here reads either slot.
 private val plannerTypography = Typography(
     headlineMedium = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 29.sp,
-        lineHeight = 32.sp
+        fontSize = 22.sp,
+        lineHeight = 27.sp
     ),
     titleMedium = TextStyle(
         fontFamily = DaytileFontFamily,
@@ -317,6 +307,12 @@ private val plannerTypography = Typography(
         fontSize = 14.sp,
         lineHeight = 18.sp
     ),
+    bodySmall = TextStyle(
+        fontFamily = DaytileFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 15.sp
+    ),
     labelLarge = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.SemiBold,
@@ -325,26 +321,12 @@ private val plannerTypography = Typography(
     )
 )
 
+// Only the slots the text field, text buttons and selection handles read; every
+// surface and container colour is drawn from the palette directly.
 private fun colourSchemeFor(palette: PlannerPalette) = if (palette.LightBackground) {
-    lightColorScheme(
-        primary = palette.PrimaryText,
-        onPrimary = palette.Sheet,
-        background = palette.Paper,
-        onBackground = palette.PrimaryText,
-        surface = palette.Sheet,
-        onSurface = palette.PrimaryText,
-        error = palette.Delete
-    )
+    lightColorScheme(primary = palette.PrimaryText, onSurface = palette.PrimaryText, error = palette.Delete)
 } else {
-    darkColorScheme(
-        primary = palette.PrimaryText,
-        onPrimary = palette.Paper,
-        background = palette.Paper,
-        onBackground = palette.PrimaryText,
-        surface = palette.Sheet,
-        onSurface = palette.PrimaryText,
-        error = palette.Delete
-    )
+    darkColorScheme(primary = palette.PrimaryText, onSurface = palette.PrimaryText, error = palette.Delete)
 }
 
 @Composable
@@ -372,17 +354,18 @@ internal fun PlannerTheme(content: @Composable () -> Unit) {
     val paletteStep = currentMinute / PaletteStepMinutes
     val palette = remember(paletteStep) { displayedPaletteForMinute(currentMinute) }
     val colourScheme = remember(palette) { colourSchemeFor(palette) }
-    MaterialTheme(
-        colorScheme = colourScheme,
-        typography = plannerTypography
+    // The clock is provided outside MaterialTheme, so a minute tick skips the theme and
+    // reaches only the few composables that read the time.
+    CompositionLocalProvider(
+        LocalCurrentMinuteOfDay provides currentMinute,
+        LocalCurrentDate provides currentDate
     ) {
-        CompositionLocalProvider(
-            LocalCurrentMinuteOfDay provides currentMinute,
-            LocalCurrentDate provides currentDate,
-            LocalPlannerColours provides palette,
-            LocalContentColor provides palette.PrimaryText
-        ) {
-            content()
+        MaterialTheme(colorScheme = colourScheme, typography = plannerTypography) {
+            CompositionLocalProvider(
+                LocalPlannerColours provides palette,
+                LocalContentColor provides palette.PrimaryText,
+                content = content
+            )
         }
     }
 }

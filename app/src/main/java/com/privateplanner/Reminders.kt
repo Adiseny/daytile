@@ -23,7 +23,10 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
@@ -59,7 +62,6 @@ class Reminders(private val context: Context) {
 
     // Notifications outlive the process, so this starts pessimistic: one query settles
     // it, and afterwards writes skip the notification service entirely.
-    @Volatile
     private var mayBeShowing = true
 
     // The intent never varies, so this is one ActivityManager round trip per process
@@ -78,24 +80,46 @@ class Reminders(private val context: Context) {
     // the first sync settles it, and afterwards a write that changes nothing costs
     // no binder traffic at all. Anything that clears alarms behind our back (reboot,
     // update, force-stop) also kills the process, so it cannot go stale.
-    @Volatile
     private var armedFor = UnknownAlarm
 
     // Channels persist across restarts, so declaring them is a once-per-process
     // errand rather than something every post should pay for.
-    @Volatile
     private var channelsReady = false
+
+    // Writes, the switch and broadcasts all sync here and may overlap, so the lock keeps
+    // one sync at a time (and publishes the fields above between them): each reads state
+    // only once it holds it, so the last sync always reflects the latest write.
+    private val lock = Mutex()
+
+    // Outlives the screen, so a sync requested as the user leaves still completes.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     var enabled: Boolean
         get() = preferences.getBoolean(EnabledKey, false)
         set(value) = preferences.edit().putBoolean(EnabledKey, value).apply()
 
-    // Callers are writes running on the main thread; everything below is binder
-    // traffic and disk, so none of it belongs on the caller's thread.
-    suspend fun sync(
+    // Fire and forget: the caller, usually a write the user is waiting on, returns at
+    // once and the reminder follows a moment later, entirely off the interaction path.
+    fun syncSoon(
         repository: PlannerRepository,
-        firedMinute: Long = -1L
-    ) = withContext(Dispatchers.Default) {
+        firedMinute: Long = -1L,
+        then: () -> Unit = {}
+    ) {
+        scope.launch {
+            try {
+                sync(repository, firedMinute)
+            } finally {
+                then()
+            }
+        }
+    }
+
+    // Everything below is binder traffic and disk, so none of it runs on the caller's thread.
+    suspend fun sync(repository: PlannerRepository, firedMinute: Long = -1L) {
+        withContext(Dispatchers.Default) { lock.withLock { syncLocked(repository, firedMinute) } }
+    }
+
+    private suspend fun syncLocked(repository: PlannerRepository, firedMinute: Long) {
         val on = enabled
         val now = LocalDateTime.now()
         val nowMinute = epochMinute(now.toLocalDate(), TimeSnapper.minuteOfDay(now.toLocalTime()))
@@ -106,7 +130,7 @@ class Reminders(private val context: Context) {
         // Most writes (a rename, an edit on another day) leave the next moment alone,
         // and with reminders off there is never anything to arm. Both land here, and
         // neither reaches a system service.
-        if (event == armedFor) return@withContext
+        if (event == armedFor) return
         val alarms = context.getSystemService(AlarmManager::class.java)
         if (event == NoAlarm) {
             // Nothing to arm, so only touch the pending intent if one already exists.
@@ -115,7 +139,7 @@ class Reminders(private val context: Context) {
                 it.cancel()
             }
             armedFor = NoAlarm
-            return@withContext
+            return
         }
         val alarm = alarmIntent(event, PendingIntent.FLAG_UPDATE_CURRENT)!!
         val at = millisAt(dateOf(event), minuteOf(event))
@@ -249,14 +273,7 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as? PlannerApp ?: return
         val fired = if (intent.action == null) intent.getLongExtra(ExtraEpochMinute, -1L) else -1L
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.Default).launch {
-            try {
-                app.reminders.sync(app.repository, fired)
-            } finally {
-                pending.finish()
-            }
-        }
+        app.reminders.syncSoon(app.repository, fired, goAsync()::finish)
     }
 }
 
@@ -278,8 +295,7 @@ private fun showsAt(block: PlannerBlock, nowMinute: Long, upcoming: Boolean): Bo
 
 // The first block starting strictly after `minute`, as an epoch minute.
 private suspend fun PlannerRepository.startAfter(minute: Long): Long? =
-    getNextBlock(dateOf(minute + 1), minuteOf(minute + 1))
-        ?.let { epochMinute(it.date, it.startMinutes) }
+    getNextStart(dayOf(minute + 1), minuteOf(minute + 1))
 
 private fun millisAt(date: LocalDate, minutes: Int): Long =
     date.atStartOfDay(ZoneId.systemDefault())
@@ -290,8 +306,9 @@ private fun millisAt(date: LocalDate, minutes: Int): Long =
 private fun epochMinute(date: LocalDate, startMinutes: Int): Long =
     date.toEpochDay() * TimeSnapper.MinutesPerDay + startMinutes
 
-private fun dateOf(minute: Long): LocalDate =
-    LocalDate.ofEpochDay(Math.floorDiv(minute, TimeSnapper.MinutesPerDay.toLong()))
+private fun dayOf(minute: Long): Long = Math.floorDiv(minute, TimeSnapper.MinutesPerDay.toLong())
+
+private fun dateOf(minute: Long): LocalDate = LocalDate.ofEpochDay(dayOf(minute))
 
 private fun minuteOf(minute: Long): Int =
     Math.floorMod(minute, TimeSnapper.MinutesPerDay.toLong()).toInt()

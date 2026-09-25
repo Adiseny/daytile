@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -67,8 +68,11 @@ internal fun hiddenGridLabelMinutes(currentTimeMinutes: Int?): Int? {
     return nearestHalfHour.takeIf { abs(current - nearestHalfHour) <= collisionMinutes }
 }
 
+// On today the grid is the one reader of the minute clock besides the indicator: a tick
+// recomposes just this, and redraws only if a label has to give way.
 @Composable
-internal fun TimelineGrid(hiddenLabelMinutes: Int?) {
+internal fun TimelineGrid(showsNow: Boolean) {
+    val hiddenLabelMinutes = hiddenGridLabelMinutes(if (showsNow) LocalCurrentMinuteOfDay.current else null)
     val textMeasurer = rememberTextMeasurer(cacheSize = 0)
     val hourLayouts = remember(textMeasurer) {
         HourLabels.map { label ->
@@ -164,7 +168,8 @@ internal fun TimelineGrid(hiddenLabelMinutes: Int?) {
 }
 
 @Composable
-internal fun CurrentTimeIndicator(minutes: Int) {
+internal fun CurrentTimeIndicator() {
+    val minutes = LocalCurrentMinuteOfDay.current
     val timeText = remember(minutes) { TimeFormatter.time(minutes) }
     val indicatorColour = PlannerColours.Delete
     val y = HourHeight * (minutes / 60f)
@@ -193,7 +198,6 @@ internal fun CurrentTimeIndicator(minutes: Int) {
     Text(
         text = timeText,
         color = indicatorColour,
-        fontFamily = DaytileFontFamily,
         fontSize = 13.sp,
         lineHeight = 15.sp,
         fontWeight = FontWeight.SemiBold,
@@ -213,7 +217,7 @@ internal fun CurrentTimeIndicator(minutes: Int) {
 }
 
 private inline fun DrawScope.drawTimelineLabels(
-    layouts: List<androidx.compose.ui.text.TextLayoutResult>,
+    layouts: List<TextLayoutResult>,
     colour: Color,
     labelWidthPx: Float,
     labelHeightPx: Float,

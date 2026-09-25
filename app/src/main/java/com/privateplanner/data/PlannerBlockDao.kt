@@ -1,10 +1,30 @@
 package com.privateplanner.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
+import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
+import androidx.room.PrimaryKey
 import androidx.room.Query
+import com.privateplanner.domain.TimeSnapper
 import kotlinx.coroutines.flow.Flow
+
+@Entity(
+    tableName = "blocks",
+    indices = [
+        Index(value = ["dateEpochDay", "startMinutes"]),
+        Index(value = ["title", "dateEpochDay", "startMinutes", "durationMinutes"])
+    ]
+)
+data class PlannerBlockEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val dateEpochDay: Long,
+    @ColumnInfo(collate = ColumnInfo.NOCASE) val title: String,
+    val startMinutes: Int,
+    val durationMinutes: Int
+)
 
 private const val BlocksForDateQuery =
     "SELECT * FROM blocks WHERE dateEpochDay = :dateEpochDay ORDER BY startMinutes ASC, id ASC"
@@ -17,6 +37,7 @@ interface PlannerBlockDao {
     @Query(BlocksForDateQuery)
     suspend fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlockEntity>
 
+    // Only feeds overlap counts, so row order does not matter.
     @Query(
         """
         SELECT * FROM blocks
@@ -24,7 +45,6 @@ interface PlannerBlockDao {
             AND id != :excludedBlockId
             AND startMinutes < :endMinutes
             AND startMinutes + durationMinutes > :startMinutes
-        ORDER BY startMinutes ASC
         """
     )
     suspend fun getPotentiallyOverlappingBlocks(
@@ -42,14 +62,14 @@ interface PlannerBlockDao {
     )
     suspend fun getNextStartMinutes(dateEpochDay: Long, startMinutes: Int): Int?
 
+    // The `dateEpochDay <=` bound starts the descending index walk at the given day
+    // instead of the title's latest entry.
     @Query(
         """
         SELECT durationMinutes FROM blocks
         WHERE title = :title
-            AND (
-                dateEpochDay < :dateEpochDay
-                OR (dateEpochDay = :dateEpochDay AND startMinutes < :startMinutes)
-            )
+            AND dateEpochDay <= :dateEpochDay
+            AND (dateEpochDay < :dateEpochDay OR startMinutes < :startMinutes)
         ORDER BY dateEpochDay DESC, startMinutes DESC, id DESC
         LIMIT 1
         """
@@ -63,18 +83,19 @@ interface PlannerBlockDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertBlock(block: PlannerBlockEntity)
 
-    // Reminders keep a single pending alarm: the next block starting at or after a
-    // given day/minute. Both queries ride the (dateEpochDay, startMinutes) index.
+    // Reminders keep a single pending alarm: the epoch minute of the next block starting
+    // at or after a given day/minute. Answered from the (dateEpochDay, startMinutes)
+    // index alone, starting at that day, without touching the table.
     @Query(
         """
-        SELECT * FROM blocks
-        WHERE dateEpochDay > :dateEpochDay
-            OR (dateEpochDay = :dateEpochDay AND startMinutes >= :startMinutes)
+        SELECT dateEpochDay * ${TimeSnapper.MinutesPerDay} + startMinutes FROM blocks
+        WHERE dateEpochDay >= :dateEpochDay
+            AND (dateEpochDay > :dateEpochDay OR startMinutes >= :startMinutes)
         ORDER BY dateEpochDay ASC, startMinutes ASC
         LIMIT 1
         """
     )
-    suspend fun getNextBlock(dateEpochDay: Long, startMinutes: Int): PlannerBlockEntity?
+    suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long?
 
     @Query(
         """

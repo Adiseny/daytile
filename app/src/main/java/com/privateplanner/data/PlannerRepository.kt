@@ -12,6 +12,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
+enum class PlannerWriteResult {
+    Success,
+    NoSpace,
+    MissingBlock,
+    RejectedOverlap,
+    InvalidInput,
+    Failed
+}
+
 class PlannerRepository private constructor(
     private val dao: PlannerBlockDao,
     private val inTransaction: suspend (suspend () -> PlannerWriteResult) -> PlannerWriteResult,
@@ -41,44 +50,33 @@ class PlannerRepository private constructor(
         return dao.getBlocksForDate(date.toEpochDay()).map { it.toDomain() }
     }
 
+    // Snapping and clamping below always yield a valid time, so only restoring a
+    // stored block needs an explicit range check.
     suspend fun createBlock(date: LocalDate, startMinutes: Int, title: String): PlannerWriteResult {
         return writeCatching {
             val normalizedTitle = normalizeTitle(title)
-            val snappedStart = TimeSnapper.floorToValidStart(startMinutes)
+            val start = TimeSnapper.floorToValidStart(startMinutes)
             val dateKey = date.toEpochDay()
             inTransaction transaction@{
-                val nextStartMinutes = dao.getNextStartMinutes(dateKey, snappedStart)
-                val previousDuration = dao.getLatestPreviousDurationForTitle(
-                    title = normalizedTitle,
-                    dateEpochDay = dateKey,
-                    startMinutes = snappedStart
-                )
+                val nextStart = dao.getNextStartMinutes(dateKey, start)
+                val previousDuration = dao.getLatestPreviousDurationForTitle(normalizedTitle, dateKey, start)
                 val duration = if (previousDuration != null) {
                     TimeSnapper.capDurationAtNextStart(
-                        startMinutes = snappedStart,
-                        durationMinutes = TimeSnapper.clampDuration(snappedStart, previousDuration),
-                        nextStartMinutes = nextStartMinutes
+                        startMinutes = start,
+                        durationMinutes = TimeSnapper.clampDuration(start, previousDuration),
+                        nextStartMinutes = nextStart
                     )
                 } else {
-                    TimeSnapper.defaultDurationForStart(snappedStart, nextStartMinutes)
+                    TimeSnapper.defaultDurationForStart(start, nextStart)
                 }
-                val blocks = dao.getPotentiallyOverlappingBlocks(
-                    dateEpochDay = dateKey,
-                    startMinutes = snappedStart,
-                    endMinutes = snappedStart + duration,
-                    excludedBlockId = 0
-                ).map { it.toDomain() }
-                val overlapPolicy = OverlapPolicy.from(blocks, 0)
-                val fittedDuration = overlapPolicy.largestValidDuration(
-                    startMinutes = snappedStart,
-                    preferredDurationMinutes = duration
-                ) ?: return@transaction PlannerWriteResult.NoSpace
-                validateTime(snappedStart, fittedDuration)
+                val fittedDuration = overlapPolicy(dateKey, start, start + duration, 0)
+                    .largestValidDuration(start, duration)
+                    ?: return@transaction PlannerWriteResult.NoSpace
                 dao.insertBlock(
                     PlannerBlockEntity(
                         dateEpochDay = dateKey,
                         title = normalizedTitle,
-                        startMinutes = snappedStart,
+                        startMinutes = start,
                         durationMinutes = fittedDuration
                     )
                 )
@@ -89,8 +87,7 @@ class PlannerRepository private constructor(
 
     suspend fun updateTitle(id: Long, title: String): PlannerWriteResult {
         return writeCatching {
-            val updated = dao.updateTitle(id, normalizeTitle(title))
-            if (updated == 1) PlannerWriteResult.Success else PlannerWriteResult.MissingBlock
+            rowResult(dao.updateTitle(id, normalizeTitle(title)))
         }
     }
 
@@ -99,35 +96,16 @@ class PlannerRepository private constructor(
             inTransaction transaction@{
                 val current = dao.getBlock(id)
                     ?: return@transaction PlannerWriteResult.MissingBlock
-                val snappedStartRaw = TimeSnapper.floorToValidStart(startMinutes)
-                val snappedDuration = TimeSnapper.clampDuration(
-                    startMinutes = snappedStartRaw,
+                // The clamped duration always fits after the snapped start.
+                val start = TimeSnapper.floorToValidStart(startMinutes)
+                val duration = TimeSnapper.clampDuration(
+                    startMinutes = start,
                     durationMinutes = TimeSnapper.snapDurationToNearest(durationMinutes)
                 )
-                val snappedStart = TimeSnapper.clampStart(
-                    startMinutes = snappedStartRaw,
-                    durationMinutes = snappedDuration
-                )
-                validateTime(snappedStart, snappedDuration)
-
-                val blocks = dao.getPotentiallyOverlappingBlocks(
-                    dateEpochDay = current.dateEpochDay,
-                    startMinutes = snappedStart,
-                    endMinutes = snappedStart + snappedDuration,
-                    excludedBlockId = id
-                ).map { it.toDomain() }
-                if (!OverlapPolicy.from(blocks, id).canPlace(
-                        snappedStart,
-                        snappedDuration
-                    )
-                ) {
-                    return@transaction PlannerWriteResult.RejectedOverlap
-                }
-                val updated = dao.updateTime(id, snappedStart, snappedDuration)
-                if (updated == 1) {
-                    PlannerWriteResult.Success
+                if (!overlapPolicy(current.dateEpochDay, start, start + duration, id).canPlace(start, duration)) {
+                    PlannerWriteResult.RejectedOverlap
                 } else {
-                    PlannerWriteResult.MissingBlock
+                    rowResult(dao.updateTime(id, start, duration))
                 }
             }
         }
@@ -135,8 +113,7 @@ class PlannerRepository private constructor(
 
     suspend fun deleteBlock(id: Long): PlannerWriteResult {
         return writeCatching {
-            val deleted = dao.deleteBlockById(id)
-            if (deleted == 1) PlannerWriteResult.Success else PlannerWriteResult.MissingBlock
+            rowResult(dao.deleteBlockById(id))
         }
     }
 
@@ -146,28 +123,25 @@ class PlannerRepository private constructor(
                 if (dao.getBlock(block.id) != null) {
                     return@transaction PlannerWriteResult.MissingBlock
                 }
-                val restored = block.copy(title = normalizeTitle(block.title))
-                validateTime(restored.startMinutes, restored.durationMinutes)
-                val overlappingBlocks = dao.getPotentiallyOverlappingBlocks(
-                    dateEpochDay = restored.date.toEpochDay(),
-                    startMinutes = restored.startMinutes,
-                    endMinutes = restored.endMinutes,
-                    excludedBlockId = restored.id
-                ).map { it.toDomain() }
-                if (!OverlapPolicy.from(overlappingBlocks, restored.id).canPlace(
-                        restored.startMinutes,
-                        restored.durationMinutes
-                    )
+                val title = normalizeTitle(block.title)
+                require(
+                    block.startMinutes >= 0 &&
+                        block.durationMinutes >= TimeSnapper.MinimumDurationMinutes &&
+                        block.endMinutes <= TimeSnapper.MinutesPerDay
+                )
+                val dateKey = block.date.toEpochDay()
+                if (!overlapPolicy(dateKey, block.startMinutes, block.endMinutes, block.id)
+                        .canPlace(block.startMinutes, block.durationMinutes)
                 ) {
                     return@transaction PlannerWriteResult.RejectedOverlap
                 }
                 dao.insertBlock(
                     PlannerBlockEntity(
-                        id = restored.id,
-                        dateEpochDay = restored.date.toEpochDay(),
-                        title = restored.title,
-                        startMinutes = restored.startMinutes,
-                        durationMinutes = restored.durationMinutes
+                        id = block.id,
+                        dateEpochDay = dateKey,
+                        title = title,
+                        startMinutes = block.startMinutes,
+                        durationMinutes = block.durationMinutes
                     )
                 )
                 PlannerWriteResult.Success
@@ -179,41 +153,45 @@ class PlannerRepository private constructor(
         return dao.getBlock(id)?.toDomain()
     }
 
-    suspend fun getNextBlock(date: LocalDate, startMinutes: Int): PlannerBlock? {
-        return dao.getNextBlock(date.toEpochDay(), startMinutes)?.toDomain()
+    suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long? {
+        return dao.getNextStart(dateEpochDay, startMinutes)
     }
 
     suspend fun getBlocksStartingAt(date: LocalDate, startMinutes: Int): List<PlannerBlock> {
         return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes).map { it.toDomain() }
     }
 
-    private suspend fun writeCatching(
-        block: suspend () -> PlannerWriteResult
-    ): PlannerWriteResult {
+    private suspend fun overlapPolicy(
+        dateEpochDay: Long,
+        startMinutes: Int,
+        endMinutes: Int,
+        excludedBlockId: Long
+    ): OverlapPolicy = OverlapPolicy.from(
+        dao.getPotentiallyOverlappingBlocks(dateEpochDay, startMinutes, endMinutes, excludedBlockId)
+            .map { it.toDomain() },
+        excludedBlockId
+    )
+
+    private suspend inline fun writeCatching(block: () -> PlannerWriteResult): PlannerWriteResult {
         val result = try {
             block()
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (_: IllegalArgumentException) {
+            PlannerWriteResult.InvalidInput
         } catch (exception: Exception) {
-            when {
-                exception is CancellationException -> throw exception
-                exception is IllegalArgumentException -> PlannerWriteResult.InvalidInput
-                // The app keeps no logs, so debug builds crash on unexpected write
-                // failures — otherwise the cause is unrecoverable.
-                BuildConfig.DEBUG -> throw exception
-                else -> PlannerWriteResult.Failed
-            }
+            // The app keeps no logs, so debug builds crash on unexpected write
+            // failures — otherwise the cause is unrecoverable.
+            if (BuildConfig.DEBUG) throw exception
+            PlannerWriteResult.Failed
         }
         if (result == PlannerWriteResult.Success) onWrite()
         return result
     }
-
-    private fun validateTime(startMinutes: Int, durationMinutes: Int) {
-        require(startMinutes >= 0)
-        require(startMinutes < TimeSnapper.MinutesPerDay)
-        require(durationMinutes >= TimeSnapper.MinimumDurationMinutes)
-        require(startMinutes + durationMinutes <= TimeSnapper.MinutesPerDay)
-    }
-
 }
+
+private fun rowResult(rows: Int): PlannerWriteResult =
+    if (rows == 1) PlannerWriteResult.Success else PlannerWriteResult.MissingBlock
 
 private fun normalizeTitle(title: String): String {
     val normalized = title.trim()

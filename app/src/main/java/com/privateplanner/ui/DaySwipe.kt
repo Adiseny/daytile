@@ -4,7 +4,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.unit.dp
@@ -26,7 +25,7 @@ internal fun Modifier.axisLockedDaySwipe(
 
             while (true) {
                 val event = awaitPointerEvent()
-                val change: PointerInputChange = event.changes.firstOrNull { it.id == down.id } ?: break
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
                 if (!change.pressed) break
                 val delta = change.positionChange()
                 total += delta

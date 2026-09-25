@@ -17,5 +17,7 @@ data class PlannerBlock(
         get() = startMinutes + durationMinutes
 }
 
-val PlannerBlockOrder: Comparator<PlannerBlock> =
-    compareBy<PlannerBlock> { it.startMinutes }.thenBy { it.id }
+// Primitive comparisons: `compareBy` would box every key it compares.
+val PlannerBlockOrder = Comparator<PlannerBlock> { a, b ->
+    if (a.startMinutes != b.startMinutes) a.startMinutes.compareTo(b.startMinutes) else a.id.compareTo(b.id)
+}

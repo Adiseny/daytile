@@ -3,7 +3,6 @@ package com.privateplanner.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -57,6 +56,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -76,6 +76,13 @@ import java.time.format.DateTimeFormatter
 
 private val SheetShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
 private val SheetButtonShape = RoundedCornerShape(8.dp)
+// bodyLarge in bold, fixed rather than copied on every keystroke.
+private val TitleInputStyle = TextStyle(
+    fontFamily = DaytileFontFamily,
+    fontWeight = FontWeight.Bold,
+    fontSize = 16.sp,
+    lineHeight = 22.sp
+)
 
 @Composable
 internal fun BlockInputSheet(
@@ -154,9 +161,7 @@ internal fun BlockInputSheet(
                         errorIndicatorColor = Color.Transparent,
                         cursorColor = PlannerColours.PrimaryText
                     ),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
+                    textStyle = TitleInputStyle,
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester)
@@ -385,7 +390,9 @@ private fun PlannerSheetSurface(
                 .imePadding()
                 .fillMaxWidth()
                 .background(PlannerColours.Sheet, SheetShape)
-                .pointerInput(Unit) { detectTapGestures(onTap = {}) }
+                // Any pointer node makes the sheet the hit target, so taps on it never
+                // reach the dismissing scrim behind.
+                .pointerInput(Unit) {}
                 .semantics {
                     contentDescription = accessibilityTitle
                     paneTitle = accessibilityTitle
@@ -412,7 +419,6 @@ private fun MonthChevron(
 ) {
     Text(
         text = text,
-        fontFamily = DaytileFontFamily,
         fontSize = 28.sp,
         modifier = Modifier
             .size(48.dp)

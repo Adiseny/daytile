@@ -64,6 +64,13 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        // Every caller is Kotlin or the framework, so the generated null assertions
+        // would only add bytecode and work to every call.
+        freeCompilerArgs += listOf(
+            "-Xno-param-assertions",
+            "-Xno-call-assertions",
+            "-Xno-receiver-assertions"
+        )
     }
 
     buildFeatures {
@@ -77,6 +84,12 @@ android {
         // entry cannot give. aapt2 stores .ogg and .wav uncompressed already but
         // has no such rule for .flac.
         noCompress += "flac"
+    }
+
+    // The encrypted dependency report is for Play; a sideloaded APK only carries its bytes.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     packaging {

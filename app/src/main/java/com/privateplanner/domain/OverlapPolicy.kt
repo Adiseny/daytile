@@ -21,14 +21,8 @@ class OverlapPolicy private constructor(
         return result
     }
 
-    fun canPlace(startMinutes: Int, durationMinutes: Int): Boolean {
-        if (!isValidCandidate(startMinutes, durationMinutes)) return false
-        val endSlot = (startMinutes + durationMinutes) / minutesPerSlot
-        for (slot in startMinutes / minutesPerSlot until endSlot) {
-            if (counts[slot] >= MaxSavedOverlap) return false
-        }
-        return true
-    }
+    fun canPlace(startMinutes: Int, durationMinutes: Int): Boolean =
+        placement(startMinutes, durationMinutes) == MovePlacement.Savable
 
     fun largestValidDuration(startMinutes: Int, preferredDurationMinutes: Int): Int? {
         val duration = TimeSnapper.clampDuration(

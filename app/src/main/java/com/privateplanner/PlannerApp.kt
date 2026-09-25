@@ -10,6 +10,6 @@ class PlannerApp : Application() {
     val reminders: Reminders by lazy(LazyThreadSafetyMode.NONE) { Reminders(this) }
 
     val repository: PlannerRepository by lazy(LazyThreadSafetyMode.NONE) {
-        PlannerRepository(database) { reminders.sync(repository) }
+        PlannerRepository(database) { reminders.syncSoon(repository) }
     }
 }
