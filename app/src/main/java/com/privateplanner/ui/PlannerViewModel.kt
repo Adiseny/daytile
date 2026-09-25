@@ -22,7 +22,9 @@ import kotlinx.coroutines.launch
 
 data class PlannerUiState(
     val selectedDate: LocalDate,
-    val blocksByDate: Map<LocalDate, List<PlannerBlock>>,
+    // The selected day's blocks only: neighbours are cached privately, so a prefetch
+    // publishes nothing and recomposes nothing.
+    val blocks: List<PlannerBlock>,
     val sheet: PlannerSheet?,
     val snackbar: PlannerSnackbar?,
     val sheetError: String?,
@@ -58,7 +60,7 @@ class PlannerViewModel(
     private val mutableUiState = MutableStateFlow(
         PlannerUiState(
             selectedDate = TimeSnapper.dateOf(launchedAt),
-            blocksByDate = emptyMap(),
+            blocks = emptyList(),
             sheet = null,
             snackbar = null,
             sheetError = null,
@@ -74,6 +76,9 @@ class PlannerViewModel(
 
     fun takeScrollTarget(): Int? = scrollTarget.also { scrollTarget = null }
 
+    // The selected day and its neighbours, for an instant swipe. Main thread only, like
+    // everything here.
+    private val dayCache = HashMap<LocalDate, List<PlannerBlock>>()
     private val pendingTimeUpdates = mutableMapOf<Long, PendingTimeUpdate>()
     private val timeWriteJobs = mutableMapOf<Long, Job>()
     private val prefetchJobs = mutableMapOf<LocalDate, Job>()
@@ -102,12 +107,9 @@ class PlannerViewModel(
     // A re-query usually confirms what is already shown (the optimistic move, the
     // prefetched day), and republishing an equal list would recompose the whole screen.
     private fun publish(date: LocalDate, blocks: List<PlannerBlock>) {
+        dayCache[date] = blocks
         mutableUiState.update { state ->
-            if (state.blocksByDate[date] == blocks) {
-                state
-            } else {
-                state.copy(blocksByDate = state.blocksByDate + (date to blocks))
-            }
+            if (state.selectedDate != date || state.blocks == blocks) state else state.copy(blocks = blocks)
         }
     }
 
@@ -181,12 +183,12 @@ class PlannerViewModel(
         }
     }
 
+    // Only ever asked for a block on screen, whose displayed copy is what undo restores.
     fun deleteBlock(blockId: Long) {
+        val block = cachedBlock(blockId) ?: return
         if (!deletingBlockIds.add(blockId)) return
-        val cached = cachedBlock(blockId)
         viewModelScope.launch {
             try {
-                val block = cached ?: repository.getBlock(blockId) ?: return@launch
                 timeWriteJobs.remove(blockId)?.cancel()
                 pendingTimeUpdates.remove(blockId)
                 if (repository.deleteBlock(block.id) == PlannerWriteResult.Success) {
@@ -266,27 +268,20 @@ class PlannerViewModel(
         prefetchJobs.keys.filterNot { it.isNear(date) }.forEach { staleDate ->
             prefetchJobs.remove(staleDate)?.cancel()
         }
-        mutableUiState.update { state ->
-            state.copy(
-                selectedDate = date,
-                blocksByDate = state.blocksByDate.filterKeys { it.isNear(date) }
-            )
-        }
+        dayCache.keys.retainAll { it.isNear(date) }
+        mutableUiState.update { it.copy(selectedDate = date, blocks = dayCache[date].orEmpty()) }
         observeDate(date)
     }
 
     private fun prefetchDate(date: LocalDate) {
-        if (mutableUiState.value.blocksByDate.containsKey(date)) return
-        if (prefetchJobs.containsKey(date)) return
+        if (dayCache.containsKey(date) || prefetchJobs.containsKey(date)) return
         val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 val blocks = repository.getBlocksForDate(date)
-                mutableUiState.update { state ->
-                    if (date.isNear(state.selectedDate)) {
-                        state.copy(blocksByDate = state.blocksByDate + (date to blocks))
-                    } else {
-                        state
-                    }
+                // Never over the live observer's result: once it has published this day,
+                // a prefetch that started earlier can only be older.
+                if (!dayCache.containsKey(date) && date.isNear(mutableUiState.value.selectedDate)) {
+                    publish(date, blocks)
                 }
             } finally {
                 if (prefetchJobs[date] === coroutineContext[Job]) {
@@ -298,26 +293,20 @@ class PlannerViewModel(
         job.start()
     }
 
-    private fun cachedBlock(blockId: Long): PlannerBlock? {
-        val state = mutableUiState.value
-        return state.blocksByDate[state.selectedDate]
-            ?.firstOrNull { block -> block.id == blockId }
-    }
+    private fun cachedBlock(blockId: Long): PlannerBlock? =
+        mutableUiState.value.blocks.firstOrNull { block -> block.id == blockId }
 
     private fun updateCachedTime(blockId: Long, startMinutes: Int, durationMinutes: Int) {
-        mutableUiState.update { state ->
-            val date = state.selectedDate
-            val currentBlocks = state.blocksByDate[date].orEmpty()
-            val blockIndex = currentBlocks.indexOfFirst { it.id == blockId }
-            if (blockIndex < 0) return@update state
-            val updatedBlocks = ArrayList(currentBlocks)
-            updatedBlocks[blockIndex] = currentBlocks[blockIndex].copy(
-                startMinutes = startMinutes,
-                durationMinutes = durationMinutes
-            )
-            updatedBlocks.sortWith(PlannerBlockOrder)
-            state.copy(blocksByDate = state.blocksByDate + (date to updatedBlocks))
-        }
+        val state = mutableUiState.value
+        val blockIndex = state.blocks.indexOfFirst { it.id == blockId }
+        if (blockIndex < 0) return
+        val updatedBlocks = ArrayList(state.blocks)
+        updatedBlocks[blockIndex] = state.blocks[blockIndex].copy(
+            startMinutes = startMinutes,
+            durationMinutes = durationMinutes
+        )
+        updatedBlocks.sortWith(PlannerBlockOrder)
+        publish(state.selectedDate, updatedBlocks)
     }
 
     private fun scheduleTimeWrite(

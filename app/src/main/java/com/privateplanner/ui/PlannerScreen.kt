@@ -115,7 +115,7 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
     val haptics = LocalHapticFeedback.current
     val sheet = uiState.sheet
     val currentSnackbar = uiState.snackbar
-    val selectedBlocks = uiState.blocksByDate[uiState.selectedDate].orEmpty()
+    val selectedBlocks = uiState.blocks
     val timelineScrollState = rememberScrollState()
     // Only read while placing pinned titles, so a new heading height re-places those
     // tiles instead of recomposing every one.
@@ -644,14 +644,26 @@ private fun TimeBlock(
             onResize(targetDuration)
     }
 
-    Box(
+    // One node: the touch target's modifiers first, then the visual tile inside it, measured
+    // and placed as a child box would be (height released to at most the target's, at its
+    // top) with no second layout node.
+    TimeBlockForeground(
+        background = background,
+        shape = blockShape,
+        active = active,
+        title = block.title,
+        rangeText = rangeTextProvider,
+        durationText = durationText,
+        tileWidth = width,
+        visualHeight = visualHeight,
+        titleFollowOffset = titleFollowOffset,
         modifier = Modifier
             .offset(x = left, y = touchTop)
             .width(width)
             .height(touchHeight)
             .then(if (active) Modifier.zIndex(2f) else Modifier)
             .semantics(mergeDescendants = true) {
-                contentDescription = "${block.title}, ${TimeFormatter.spokenRange(block.startMinutes, displayedDurationMinutes)}, $durationText. Actions: Rename, Delete."
+                contentDescription = "${block.title}, ${TimeFormatter.range(block.startMinutes, displayedDurationMinutes, " to ")}, $durationText. Actions: Rename, Delete."
                 onClick(label = "Open actions") {
                     onTap()
                     true
@@ -700,24 +712,11 @@ private fun TimeBlock(
                 },
                 onResize = onResize
             )
-    ) {
-        TimeBlockForeground(
-            background = background,
-            shape = blockShape,
-            active = active,
-            title = block.title,
-            rangeText = rangeTextProvider,
-            durationText = durationText,
-            tileWidth = width,
-            visualHeight = visualHeight,
-            titleFollowOffset = titleFollowOffset,
-            modifier = Modifier
-                .offset(y = baseVisualOffset)
-                .fillMaxWidth()
-                .height(visualHeight)
-                .dragTranslationLayer(moveActive, moveOffsetPx)
-        )
-    }
+            .wrapContentHeight(Alignment.Top)
+            .offset(y = baseVisualOffset)
+            .height(visualHeight)
+            .dragTranslationLayer(moveActive, moveOffsetPx)
+    )
 }
 
 // Blocks and pixel geometry are read at tap time, so nothing restarts the detector: a

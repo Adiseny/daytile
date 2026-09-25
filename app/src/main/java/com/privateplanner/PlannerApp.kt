@@ -39,6 +39,9 @@ class PlannerApp : Application() {
 
     private var interfaceWarmedUp = false
 
+    // The splash polarity MainActivity last recorded in this process. Main thread only.
+    var recordedSplashLight: Boolean? = null
+
     // The first frame's CPU work, started by the activity rather than here, so a process
     // woken for a reminder or a reboot never lays out text it will not show. Once per
     // process; main thread only. The same thread then does what androidx.startup's

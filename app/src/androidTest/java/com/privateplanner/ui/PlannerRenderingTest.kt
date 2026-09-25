@@ -3,11 +3,21 @@ package com.privateplanner.ui
 import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.captureToImage
@@ -81,5 +91,61 @@ class PlannerRenderingTest {
                 assertEquals("Grid pixel at $x, $y", fallback[x, y], warmed[x, y])
             }
         }
+    }
+
+    @Test
+    fun oneNodeTileDrawsLikeATouchBoxAroundAVisualTile() {
+        // A short tile inside a larger touch target, and a tall one showing its duration.
+        val cases = listOf(Triple(48, 14, 20), Triple(150, 0, 150))
+        val case = mutableIntStateOf(0)
+        val merged = mutableStateOf(false)
+        compose.setContent {
+            PlannerTheme {
+                Box(Modifier.size(width = 240.dp, height = 220.dp)) {
+                    val (touch, offset, visual) = cases[case.intValue]
+                    val place = Modifier.offset(x = 12.dp, y = 30.dp).width(180.dp).height(touch.dp)
+                    if (merged.value) {
+                        TestTile(
+                            visual,
+                            place.wrapContentHeight(Alignment.Top).offset(y = offset.dp).height(visual.dp)
+                        )
+                    } else {
+                        Box(place) {
+                            TestTile(visual, Modifier.offset(y = offset.dp).fillMaxWidth().height(visual.dp))
+                        }
+                    }
+                }
+            }
+        }
+        for (index in cases.indices) {
+            compose.runOnUiThread {
+                case.intValue = index
+                merged.value = false
+            }
+            val nested = compose.onRoot().captureToImage().toPixelMap()
+            compose.runOnUiThread { merged.value = true }
+            val single = compose.onRoot().captureToImage().toPixelMap()
+            for (y in 0 until nested.height) {
+                for (x in 0 until nested.width) {
+                    assertEquals("Tile case $index pixel at $x, $y", nested[x, y], single[x, y])
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun TestTile(visual: Int, modifier: Modifier) {
+        TimeBlockForeground(
+            background = Color(0xFF5E9AC2),
+            shape = RoundedCornerShape(if (visual < 48) 13.dp else 16.dp),
+            active = false,
+            title = "Focus",
+            rangeText = { "9:00 \u2013 9:10" },
+            durationText = "10m",
+            tileWidth = 180.dp,
+            visualHeight = visual.dp,
+            titleFollowOffset = null,
+            modifier = modifier
+        )
     }
 }

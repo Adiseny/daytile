@@ -3,6 +3,7 @@
 # rules that no longer match are ignored. To replace it with a measured profile, run
 # ./gradlew :app:generateReleaseBaselineProfile on a test device (see docs/release.md).
 Lcom/privateplanner/MainActivity;
+Lcom/privateplanner/MainActivityKt;
 Lcom/privateplanner/PlannerApp$repository$2$1;
 Lcom/privateplanner/PlannerApp;
 Lcom/privateplanner/PlannerAppKt;
@@ -134,6 +135,8 @@ HSPLcom/privateplanner/MainActivity;->onCreate$lambda$2$lambda$1(Lcom/privatepla
 HSPLcom/privateplanner/MainActivity;->onCreate$lambda$4$lambda$3(Lcom/privateplanner/ui/PlannerViewModel;Landroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/MainActivity;->onCreate$lambda$4(Lcom/privateplanner/ui/PlannerViewModel;Landroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/MainActivity;->onCreate(Landroid/os/Bundle;)V
+HSPLcom/privateplanner/MainActivity;->onStop$lambda$6(Lcom/privateplanner/MainActivity;Lcom/privateplanner/PlannerApp;ZLandroid/window/SplashScreen;)Lkotlin/Unit;
+HSPLcom/privateplanner/MainActivity;->onStop()V
 HSPLcom/privateplanner/PlannerApp$repository$2$1;-><init>(Lcom/privateplanner/PlannerApp;Lkotlin/coroutines/Continuation;)V
 HSPLcom/privateplanner/PlannerApp$repository$2$1;->create(Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
 HSPLcom/privateplanner/PlannerApp$repository$2$1;->invoke(Ljava/lang/Object;)Ljava/lang/Object;
@@ -143,12 +146,14 @@ HSPLcom/privateplanner/PlannerApp;-><clinit>()V
 HSPLcom/privateplanner/PlannerApp;-><init>()V
 HSPLcom/privateplanner/PlannerApp;->database_delegate$lambda$0(Lcom/privateplanner/PlannerApp;)Lcom/privateplanner/data/PlannerDatabase;
 HSPLcom/privateplanner/PlannerApp;->getDatabase()Lcom/privateplanner/data/PlannerDatabase;
+HSPLcom/privateplanner/PlannerApp;->getRecordedSplashLight()Ljava/lang/Boolean;
 HSPLcom/privateplanner/PlannerApp;->getReminders()Lcom/privateplanner/Reminders;
 HSPLcom/privateplanner/PlannerApp;->getRepository()Lcom/privateplanner/data/PlannerRepository;
 HSPLcom/privateplanner/PlannerApp;->onCreate$lambda$4(Lcom/privateplanner/PlannerApp;)Lkotlin/Unit;
 HSPLcom/privateplanner/PlannerApp;->onCreate()V
 HSPLcom/privateplanner/PlannerApp;->reminders_delegate$lambda$1(Lcom/privateplanner/PlannerApp;)Lcom/privateplanner/Reminders;
 HSPLcom/privateplanner/PlannerApp;->repository_delegate$lambda$2(Lcom/privateplanner/PlannerApp;)Lcom/privateplanner/data/PlannerRepository;
+HSPLcom/privateplanner/PlannerApp;->setRecordedSplashLight(Ljava/lang/Boolean;)V
 HSPLcom/privateplanner/PlannerApp;->warmUpInterfaceOnce$lambda$7(Lcom/privateplanner/PlannerApp;)Lkotlin/Unit;
 HSPLcom/privateplanner/PlannerApp;->warmUpInterfaceOnce()V
 HSPLcom/privateplanner/ReminderReceiver$onReceive$1;-><init>(Ljava/lang/Object;)V
@@ -410,8 +415,8 @@ HSPLcom/privateplanner/domain/PlannerBlockKt;->getPlannerBlockOrder()Ljava/util/
 HSPLcom/privateplanner/domain/TimeFormatter;-><clinit>()V
 HSPLcom/privateplanner/domain/TimeFormatter;-><init>()V
 HSPLcom/privateplanner/domain/TimeFormatter;->duration(I)Ljava/lang/String;
-HSPLcom/privateplanner/domain/TimeFormatter;->range(II)Ljava/lang/String;
-HSPLcom/privateplanner/domain/TimeFormatter;->spokenRange(II)Ljava/lang/String;
+HSPLcom/privateplanner/domain/TimeFormatter;->range$default(Lcom/privateplanner/domain/TimeFormatter;IILjava/lang/String;ILjava/lang/Object;)Ljava/lang/String;
+HSPLcom/privateplanner/domain/TimeFormatter;->range(IILjava/lang/String;)Ljava/lang/String;
 HSPLcom/privateplanner/domain/TimeFormatter;->time(I)Ljava/lang/String;
 HSPLcom/privateplanner/domain/TimeSnapper;-><clinit>()V
 HSPLcom/privateplanner/domain/TimeSnapper;-><init>()V
@@ -616,7 +621,7 @@ HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$127$lambda$
 HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$129$lambda$128(Landroidx/compose/runtime/MutableFloatState;F)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$131$lambda$130(Landroidx/compose/runtime/MutableState;Z)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$133$lambda$132(Landroidx/compose/runtime/MutableIntState;Ljava/lang/Integer;)Lkotlin/Unit;
-HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$135(Lcom/privateplanner/domain/PlannerBlock;Lkotlin/jvm/functions/Function1;Lcom/privateplanner/domain/BlockLayout;FLandroidx/compose/foundation/ScrollState;Landroidx/compose/runtime/IntState;Lkotlin/jvm/functions/Function0;FLkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;IILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
+HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$134(Lcom/privateplanner/domain/PlannerBlock;Lkotlin/jvm/functions/Function1;Lcom/privateplanner/domain/BlockLayout;FLandroidx/compose/foundation/ScrollState;Landroidx/compose/runtime/IntState;Lkotlin/jvm/functions/Function0;FLkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;IILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$89(Landroidx/compose/runtime/State;)Lcom/privateplanner/domain/PlannerBlock;
 HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$91(Landroidx/compose/runtime/MutableIntState;)I
 HSPLcom/privateplanner/ui/PlannerScreenKt;->TimeBlock_RdchTO8$lambda$92(Landroidx/compose/runtime/MutableIntState;I)V
@@ -653,7 +658,7 @@ HSPLcom/privateplanner/ui/PlannerScreenKt;->access$tickFor(Landroidx/compose/ui/
 HSPLcom/privateplanner/ui/PlannerScreenKt;->blockMoveInput(Landroidx/compose/ui/Modifier;JLkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function0;FLandroidx/compose/foundation/ScrollState;Landroidx/compose/runtime/IntState;Lkotlin/jvm/functions/Function0;Landroidx/compose/ui/hapticfeedback/HapticFeedback;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)Landroidx/compose/ui/Modifier;
 HSPLcom/privateplanner/ui/PlannerScreenKt;->dateFormatter(Ljava/lang/String;Ljava/util/Locale;)Ljava/time/format/DateTimeFormatter;
 HSPLcom/privateplanner/ui/PlannerScreenKt;->runResizeGesture-rxS4u50(Landroidx/compose/ui/input/pointer/AwaitPointerEventScope;Lkotlinx/coroutines/CoroutineScope;JLcom/privateplanner/domain/PlannerBlock;Lcom/privateplanner/domain/OverlapPolicy;FFFLandroidx/compose/foundation/ScrollState;IILandroidx/compose/ui/hapticfeedback/HapticFeedback;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
-HSPLcom/privateplanner/ui/PlannerScreenKt;->runResizeGesture_rxS4u50$lambda$138(Lkotlin/jvm/internal/Ref$FloatRef;)F
+HSPLcom/privateplanner/ui/PlannerScreenKt;->runResizeGesture_rxS4u50$lambda$137(Lkotlin/jvm/internal/Ref$FloatRef;)F
 HSPLcom/privateplanner/ui/PlannerScreenKt;->runResizeGesture_rxS4u50$resizeTo(Lkotlin/jvm/internal/Ref$FloatRef;Landroidx/compose/foundation/ScrollState;ILcom/privateplanner/domain/PlannerBlock;FLkotlin/jvm/internal/Ref$IntRef;Lkotlin/jvm/functions/Function1;Landroidx/compose/ui/hapticfeedback/HapticFeedback;Lcom/privateplanner/domain/OverlapPolicy;Lkotlin/jvm/internal/Ref$IntRef;)V
 HSPLcom/privateplanner/ui/PlannerScreenKt;->tickFor(Landroidx/compose/ui/hapticfeedback/HapticFeedback;Lcom/privateplanner/domain/MovePlacement;)Z
 HSPLcom/privateplanner/ui/PlannerScreenKt;->timelineTapInput(Landroidx/compose/ui/Modifier;Landroidx/compose/runtime/State;Landroidx/compose/runtime/State;Lkotlin/jvm/functions/Function1;)Landroidx/compose/ui/Modifier;
@@ -781,17 +786,17 @@ HSPLcom/privateplanner/ui/PlannerThemeKt;->millisUntilNextMinute(J)J
 HSPLcom/privateplanner/ui/PlannerThemeKt;->nightPalette-jRlVdoo(JJJJ)Lcom/privateplanner/ui/PlannerPalette;
 HSPLcom/privateplanner/ui/PlannerThemeKt;->paletteForMinute(I)Lcom/privateplanner/ui/PlannerPalette;
 HSPLcom/privateplanner/ui/PlannerUiState;-><clinit>()V
-HSPLcom/privateplanner/ui/PlannerUiState;-><init>(Ljava/time/LocalDate;Ljava/util/Map;Lcom/privateplanner/ui/PlannerSheet;Lcom/privateplanner/ui/PlannerSnackbar;Ljava/lang/String;Z)V
+HSPLcom/privateplanner/ui/PlannerUiState;-><init>(Ljava/time/LocalDate;Ljava/util/List;Lcom/privateplanner/ui/PlannerSheet;Lcom/privateplanner/ui/PlannerSnackbar;Ljava/lang/String;Z)V
 HSPLcom/privateplanner/ui/PlannerUiState;->component1()Ljava/time/LocalDate;
-HSPLcom/privateplanner/ui/PlannerUiState;->component2()Ljava/util/Map;
+HSPLcom/privateplanner/ui/PlannerUiState;->component2()Ljava/util/List;
 HSPLcom/privateplanner/ui/PlannerUiState;->component3()Lcom/privateplanner/ui/PlannerSheet;
 HSPLcom/privateplanner/ui/PlannerUiState;->component4()Lcom/privateplanner/ui/PlannerSnackbar;
 HSPLcom/privateplanner/ui/PlannerUiState;->component5()Ljava/lang/String;
 HSPLcom/privateplanner/ui/PlannerUiState;->component6()Z
-HSPLcom/privateplanner/ui/PlannerUiState;->copy$default(Lcom/privateplanner/ui/PlannerUiState;Ljava/time/LocalDate;Ljava/util/Map;Lcom/privateplanner/ui/PlannerSheet;Lcom/privateplanner/ui/PlannerSnackbar;Ljava/lang/String;ZILjava/lang/Object;)Lcom/privateplanner/ui/PlannerUiState;
-HSPLcom/privateplanner/ui/PlannerUiState;->copy(Ljava/time/LocalDate;Ljava/util/Map;Lcom/privateplanner/ui/PlannerSheet;Lcom/privateplanner/ui/PlannerSnackbar;Ljava/lang/String;Z)Lcom/privateplanner/ui/PlannerUiState;
+HSPLcom/privateplanner/ui/PlannerUiState;->copy$default(Lcom/privateplanner/ui/PlannerUiState;Ljava/time/LocalDate;Ljava/util/List;Lcom/privateplanner/ui/PlannerSheet;Lcom/privateplanner/ui/PlannerSnackbar;Ljava/lang/String;ZILjava/lang/Object;)Lcom/privateplanner/ui/PlannerUiState;
+HSPLcom/privateplanner/ui/PlannerUiState;->copy(Ljava/time/LocalDate;Ljava/util/List;Lcom/privateplanner/ui/PlannerSheet;Lcom/privateplanner/ui/PlannerSnackbar;Ljava/lang/String;Z)Lcom/privateplanner/ui/PlannerUiState;
 HSPLcom/privateplanner/ui/PlannerUiState;->equals(Ljava/lang/Object;)Z
-HSPLcom/privateplanner/ui/PlannerUiState;->getBlocksByDate()Ljava/util/Map;
+HSPLcom/privateplanner/ui/PlannerUiState;->getBlocks()Ljava/util/List;
 HSPLcom/privateplanner/ui/PlannerUiState;->getRemindersOn()Z
 HSPLcom/privateplanner/ui/PlannerUiState;->getSelectedDate()Ljava/time/LocalDate;
 HSPLcom/privateplanner/ui/PlannerUiState;->getSheet()Lcom/privateplanner/ui/PlannerSheet;
@@ -805,7 +810,7 @@ HSPLcom/privateplanner/ui/PlannerViewModel$createBlock$1;->create(Ljava/lang/Obj
 HSPLcom/privateplanner/ui/PlannerViewModel$createBlock$1;->invoke(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
 HSPLcom/privateplanner/ui/PlannerViewModel$createBlock$1;->invoke(Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 HSPLcom/privateplanner/ui/PlannerViewModel$createBlock$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;
-HSPLcom/privateplanner/ui/PlannerViewModel$deleteBlock$1;-><init>(Lcom/privateplanner/domain/PlannerBlock;Lcom/privateplanner/ui/PlannerViewModel;JLkotlin/coroutines/Continuation;)V
+HSPLcom/privateplanner/ui/PlannerViewModel$deleteBlock$1;-><init>(Lcom/privateplanner/ui/PlannerViewModel;JLcom/privateplanner/domain/PlannerBlock;Lkotlin/coroutines/Continuation;)V
 HSPLcom/privateplanner/ui/PlannerViewModel$deleteBlock$1;->create(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Lkotlin/coroutines/Continuation;
 HSPLcom/privateplanner/ui/PlannerViewModel$deleteBlock$1;->invoke(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
 HSPLcom/privateplanner/ui/PlannerViewModel$deleteBlock$1;->invoke(Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
@@ -840,6 +845,7 @@ HSPLcom/privateplanner/ui/PlannerViewModel$undoDelete$1;->invokeSuspend(Ljava/la
 HSPLcom/privateplanner/ui/PlannerViewModel;-><clinit>()V
 HSPLcom/privateplanner/ui/PlannerViewModel;-><init>(Lcom/privateplanner/data/PlannerRepository;Lcom/privateplanner/Reminders;)V
 HSPLcom/privateplanner/ui/PlannerViewModel;->access$finishSheetWrite(Lcom/privateplanner/ui/PlannerViewModel;Lcom/privateplanner/ui/PlannerSheet;Ljava/lang/String;)V
+HSPLcom/privateplanner/ui/PlannerViewModel;->access$getDayCache$p(Lcom/privateplanner/ui/PlannerViewModel;)Ljava/util/HashMap;
 HSPLcom/privateplanner/ui/PlannerViewModel;->access$getDeletingBlockIds$p(Lcom/privateplanner/ui/PlannerViewModel;)Ljava/util/Set;
 HSPLcom/privateplanner/ui/PlannerViewModel;->access$getMutableUiState$p(Lcom/privateplanner/ui/PlannerViewModel;)Lkotlinx/coroutines/flow/MutableStateFlow;
 HSPLcom/privateplanner/ui/PlannerViewModel;->access$getPendingTimeUpdates$p(Lcom/privateplanner/ui/PlannerViewModel;)Ljava/util/Map;
@@ -872,6 +878,7 @@ HSPLcom/privateplanner/ui/PlannerViewModel;->renameBlock(Ljava/lang/String;)V
 HSPLcom/privateplanner/ui/PlannerViewModel;->resizeBlock(JI)Z
 HSPLcom/privateplanner/ui/PlannerViewModel;->returnToToday()V
 HSPLcom/privateplanner/ui/PlannerViewModel;->scheduleTimeWrite(JLjava/time/LocalDate;II)V
+HSPLcom/privateplanner/ui/PlannerViewModel;->setDate$lambda$6(Ljava/time/LocalDate;Ljava/time/LocalDate;)Z
 HSPLcom/privateplanner/ui/PlannerViewModel;->setDate(Ljava/time/LocalDate;)V
 HSPLcom/privateplanner/ui/PlannerViewModel;->setRemindersOn(Z)V
 HSPLcom/privateplanner/ui/PlannerViewModel;->setSheetError(Ljava/lang/String;)V
@@ -883,17 +890,17 @@ HSPLcom/privateplanner/ui/PlannerViewModel;->undoDelete(J)V
 HSPLcom/privateplanner/ui/PlannerViewModel;->updateCachedTime(JII)V
 HSPLcom/privateplanner/ui/PlannerViewModelKt;->access$isNear(Ljava/time/LocalDate;Ljava/time/LocalDate;)Z
 HSPLcom/privateplanner/ui/PlannerViewModelKt;->isNear(Ljava/time/LocalDate;Ljava/time/LocalDate;)Z
-HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockContent-bhB4Xeg(Ljava/lang/String;Lkotlin/jvm/functions/Function0;Ljava/lang/String;FFLkotlin/jvm/functions/Function1;JLandroidx/compose/runtime/Composer;I)V
-HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockContent_bhB4Xeg$lambda$8(Ljava/lang/String;Lkotlin/jvm/functions/Function0;Ljava/lang/String;FFLkotlin/jvm/functions/Function1;JILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
+HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockContent-fIXB-Xs(Landroidx/compose/foundation/layout/BoxScope;Ljava/lang/String;Lkotlin/jvm/functions/Function0;Ljava/lang/String;FFLkotlin/jvm/functions/Function1;JLandroidx/compose/runtime/Composer;I)V
+HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockContent_fIXB_Xs$lambda$7(Landroidx/compose/foundation/layout/BoxScope;Ljava/lang/String;Lkotlin/jvm/functions/Function0;Ljava/lang/String;FFLkotlin/jvm/functions/Function1;JILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockOneLineContent-32VforI(Ljava/lang/String;JJJLandroidx/compose/ui/Modifier;Landroidx/compose/runtime/Composer;I)V
-HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockOneLineContent_32VforI$lambda$10(Ljava/lang/String;JJJLandroidx/compose/ui/Modifier;ILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
+HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockOneLineContent_32VforI$lambda$9(Ljava/lang/String;JJJLandroidx/compose/ui/Modifier;ILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockPrimaryContent-FZaIbqw(Ljava/lang/String;Lkotlin/jvm/functions/Function0;FFLkotlin/jvm/functions/Function1;JLandroidx/compose/runtime/Composer;I)V
-HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockPrimaryContent_FZaIbqw$lambda$9(Ljava/lang/String;Lkotlin/jvm/functions/Function0;FFLkotlin/jvm/functions/Function1;JILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
+HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockPrimaryContent_FZaIbqw$lambda$8(Ljava/lang/String;Lkotlin/jvm/functions/Function0;FFLkotlin/jvm/functions/Function1;JILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockTwoLineContent-dBqaTPc(Ljava/lang/String;Lkotlin/jvm/functions/Function0;JJIJJJLandroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;I)V
-HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockTwoLineContent_dBqaTPc$lambda$12$lambda$11(Lkotlin/jvm/functions/Function1;Landroidx/compose/ui/unit/Density;)Landroidx/compose/ui/unit/IntOffset;
-HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockTwoLineContent_dBqaTPc$lambda$14(Ljava/lang/String;Lkotlin/jvm/functions/Function0;JJIJJJLandroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function1;ILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
+HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockTwoLineContent_dBqaTPc$lambda$11$lambda$10(Lkotlin/jvm/functions/Function1;Landroidx/compose/ui/unit/Density;)Landroidx/compose/ui/unit/IntOffset;
+HSPLcom/privateplanner/ui/TimeBlockTileKt;->BlockTwoLineContent_dBqaTPc$lambda$13(Ljava/lang/String;Lkotlin/jvm/functions/Function0;JJIJJJLandroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function1;ILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/TimeBlockTileKt;->DurationLabel-KUPzkcs(Ljava/lang/String;JJFLandroidx/compose/ui/text/font/FontWeight;JLandroidx/compose/ui/Modifier;Landroidx/compose/runtime/Composer;I)V
-HSPLcom/privateplanner/ui/TimeBlockTileKt;->DurationLabel_KUPzkcs$lambda$15(Ljava/lang/String;JJFLandroidx/compose/ui/text/font/FontWeight;JLandroidx/compose/ui/Modifier;ILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
+HSPLcom/privateplanner/ui/TimeBlockTileKt;->DurationLabel_KUPzkcs$lambda$14(Ljava/lang/String;JJFLandroidx/compose/ui/text/font/FontWeight;JLandroidx/compose/ui/Modifier;ILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/TimeBlockTileKt;->TimeBlockForeground-70pZMGQ(JLandroidx/compose/ui/graphics/Shape;ZLjava/lang/String;Lkotlin/jvm/functions/Function0;Ljava/lang/String;FFLkotlin/jvm/functions/Function1;Landroidx/compose/ui/Modifier;Landroidx/compose/runtime/Composer;I)V
 HSPLcom/privateplanner/ui/TimeBlockTileKt;->TimeBlockForeground_70pZMGQ$lambda$3(JLandroidx/compose/ui/graphics/Shape;ZLjava/lang/String;Lkotlin/jvm/functions/Function0;Ljava/lang/String;FFLkotlin/jvm/functions/Function1;Landroidx/compose/ui/Modifier;ILandroidx/compose/runtime/Composer;I)Lkotlin/Unit;
 HSPLcom/privateplanner/ui/TimeBlockTileKt;->centredTouchTop-YgX7TsA(FF)F

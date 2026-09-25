@@ -1,6 +1,7 @@
 package com.privateplanner.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -189,8 +190,10 @@ internal fun Modifier.dragTranslationLayer(
     }
 }
 
+// Emitted straight into the tile's box: a box of its own around the title and duration
+// would measure and place them exactly as the tile's does.
 @Composable
-private fun BlockContent(
+private fun BoxScope.BlockContent(
     title: String,
     rangeText: () -> String,
     durationText: String,
@@ -218,23 +221,19 @@ private fun BlockContent(
     val durationReserve = durationReserveValue.dp
     val endPadding = if (showDuration) durationReserve else 8.dp
 
+    BlockPrimaryContent(title, rangeText, height, endPadding, titleFollowOffset, ink)
     if (showDuration) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            BlockPrimaryContent(title, rangeText, height, endPadding, titleFollowOffset, ink)
-            DurationLabel(
-                text = durationText,
-                fontSize = durationFontSizeValue.sp,
-                lineHeight = (durationFontSizeValue + 2f).sp,
-                endPadding = if (compact) 5.dp else 8.dp,
-                fontWeight = if (height >= 64.dp) FontWeight.Bold else FontWeight.SemiBold,
-                ink = ink,
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .width(durationReserve)
-            )
-        }
-    } else {
-        BlockPrimaryContent(title, rangeText, height, endPadding, titleFollowOffset, ink)
+        DurationLabel(
+            text = durationText,
+            fontSize = durationFontSizeValue.sp,
+            lineHeight = (durationFontSizeValue + 2f).sp,
+            endPadding = if (compact) 5.dp else 8.dp,
+            fontWeight = if (height >= 64.dp) FontWeight.Bold else FontWeight.SemiBold,
+            ink = ink,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(durationReserve)
+        )
     }
 }
 

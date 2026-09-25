@@ -13,8 +13,9 @@ object TimeFormatter {
         }
     }
 
-    fun range(startMinutes: Int, durationMinutes: Int): String {
-        return "${time(startMinutes)} \u2013 ${time(startMinutes + durationMinutes)}"
+    // An en dash on screen; read aloud, " to ".
+    fun range(startMinutes: Int, durationMinutes: Int, separator: String = " \u2013 "): String {
+        return time(startMinutes) + separator + time(startMinutes + durationMinutes)
     }
 
     fun duration(durationMinutes: Int): String {
@@ -25,9 +26,5 @@ object TimeFormatter {
             minutes == 0 -> "${hours}h"
             else -> "${hours}h ${minutes}m"
         }
-    }
-
-    fun spokenRange(startMinutes: Int, durationMinutes: Int): String {
-        return "${time(startMinutes)} to ${time(startMinutes + durationMinutes)}"
     }
 }

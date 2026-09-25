@@ -50,12 +50,15 @@ class MainActivity : ComponentActivity() {
     // through a black splash. Leaving records the polarity on screen for the next launch;
     // only the first launch after 07:00 or 20:00 can still differ. Off the main thread, and
     // the system call, which persists the theme, is made only when the polarity changed.
+    // After the first stop in a process, an unchanged polarity costs no thread or disk read.
     override fun onStop() {
         super.onStop()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         val light = displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())).LightBackground
+        val app = application as PlannerApp
+        if (app.recordedSplashLight == light) return
+        app.recordedSplashLight = light
         val splash = splashScreen
-        val app = applicationContext
         thread(name = "planner-splash") {
             runCatching {
                 val launch = app.getSharedPreferences(LaunchStore, MODE_PRIVATE)

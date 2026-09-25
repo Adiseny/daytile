@@ -12,6 +12,7 @@
 
 - Dragging a block towards the top or bottom of the screen now scrolls relative to what is visible: scrolling builds to full speed at the bottom of the heading and at the top of the navigation bar, so the finger never has to cover either, and both zones follow font size and navigation mode. Full speed at the bottom was previously out of reach.
 - A tap on empty time is no longer lost when it lands just after a block is dropped or changed.
+- A block moved just after swiping to its day no longer briefly jumps back when that day's prefetch finishes late.
 - The date sheet reads calendar days aloud as dates and announces today and the selected day.
 - Launching no longer flashes through the system's black or white splash: on Android 13 and later the splash takes the planner's own light or dark paper, with matching status and navigation bars, as it was when the app was last left. Earlier versions follow the system's dark theme setting.
 
@@ -24,6 +25,9 @@
 - Removed the AndroidX Startup provider, which queried the package manager on every process start, reminder wake-ups included; the baseline profile is still installed shortly after launch.
 - Composition trace markers are no longer compiled in.
 - Posting the first reminder in a process checks the notification channels with one system call instead of three.
+- Prefetching the neighbouring days no longer recomposes the screen after launch and after every swipe.
+- Each tile is laid out as one node instead of two, and tiles that show their duration drop a further nested box.
+- Leaving the app again with an unchanged palette no longer starts a thread and reads the splash setting from disk.
 - Removed an unused native graphics library, which with its page alignment took about 75 KB of the APK across four processor architectures.
 - Regenerated the baseline profile for the changed code.
 
