@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.1 — 25 September 2026
+
+### Responsiveness and efficiency
+
+- Cold launches open at the current time in the first frame, without an initial jump from midnight or movement during the splash screen's exit.
+- Prepared launch data and grid labels away from the main thread, with normal text measurement available whenever the display settings differ.
+- Reduced repeated database processing, text measurement, layout and drawing work while editing and scrolling.
+- Kept the current-time badge within the time gutter, with its line and dot visible across the timeline.
+- Extended the lightweight header glaze behind the status icons and retained its smooth fade into the timeline.
+- Reduced packaged code and resources, and added a bundled baseline profile for the app's own code.
+
 ## 1.3.0 — 8 September 2026
 
 ### Reminders

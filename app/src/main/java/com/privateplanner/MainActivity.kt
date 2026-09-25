@@ -1,6 +1,7 @@
 package com.privateplanner
 
 import android.os.Bundle
+import android.os.Build
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,6 +21,11 @@ class MainActivity : ComponentActivity() {
         // Before the window is attached, so the first frame already has the paper and bars.
         applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(LocalTime.now())))
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // The timeline is already at its final position. Reveal it without the
+            // default splash animation translating the content after its first draw.
+            splashScreen.setOnExitAnimationListener { it.remove() }
+        }
 
         val app = application as PlannerApp
         // An explicit key: the default one is built from the class's canonical name by
