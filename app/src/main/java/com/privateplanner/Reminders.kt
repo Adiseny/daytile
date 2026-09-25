@@ -277,6 +277,12 @@ class ReminderReceiver : BroadcastReceiver() {
     }
 }
 
+// Starts reading the switch from disk on the platform's loader thread, so the first
+// read of `enabled` finds it in memory.
+internal fun Context.preloadReminderSettings() {
+    getSharedPreferences(Store, Context.MODE_PRIVATE)
+}
+
 internal fun Context.postNotificationsGranted(): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==

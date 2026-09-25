@@ -12,14 +12,17 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.IntState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
@@ -28,6 +31,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -228,8 +232,10 @@ private fun lerpPalette(from: PlannerPalette, to: PlannerPalette, fraction: Floa
 }
 
 private val LocalPlannerColours = compositionLocalOf { MiddayPalette }
-internal val LocalCurrentMinuteOfDay = compositionLocalOf {
-    TimeSnapper.minuteOfDay(LocalTime.now())
+// The minute as a state, not a value: only the grid and the current-time indicator read
+// it, so a tick reaches them and nothing between them and the theme.
+internal val LocalCurrentMinuteOfDay = staticCompositionLocalOf<IntState> {
+    mutableIntStateOf(TimeSnapper.minuteOfDay(LocalTime.now()))
 }
 internal val LocalCurrentDate = compositionLocalOf<LocalDate> { LocalDate.now() }
 
@@ -260,6 +266,18 @@ internal fun PlannerSystemBarsEffect(dimmed: Boolean) {
 }
 
 internal fun ComponentActivity.applyPlannerSystemBars(palette: PlannerPalette, dimmed: Boolean = false) {
+    val paper = palette.Paper.toArgb()
+    // Paper, dim and polarity fix every colour below. Re-applying an unchanged style would
+    // still update the window, which happens at launch when composition repeats what
+    // onCreate set, so each distinct style is applied once.
+    val style = (paper.toLong() shl 2) or (if (dimmed) 2L else 0L) or (if (palette.LightBackground) 1L else 0L)
+    val decor = window.decorView
+    val applied = decor.tag as? Long
+    if (applied == style) return
+    decor.tag = style
+    // The window background is the paper, so the planner paints nothing beneath its
+    // content and the screen is filled once per frame instead of twice.
+    if (applied == null || applied shr 2 != style shr 2) window.setBackgroundDrawable(paper.toDrawable())
     val background = if (dimmed) palette.Scrim.compositeOver(palette.Paper) else palette.Paper
     val darkIcons = palette.LightBackground && !dimmed
     // The Compose header owns the tint behind the status icons. An opaque
@@ -332,7 +350,7 @@ private fun colourSchemeFor(palette: PlannerPalette) = if (palette.LightBackgrou
 @Composable
 internal fun PlannerTheme(content: @Composable () -> Unit) {
     val initialNow = remember { LocalDateTime.now() }
-    var currentMinute by remember {
+    val currentMinute = remember {
         mutableIntStateOf(TimeSnapper.minuteOfDay(initialNow.toLocalTime()))
     }
     var currentDate by remember { mutableStateOf(initialNow.toLocalDate()) }
@@ -344,18 +362,19 @@ internal fun PlannerTheme(content: @Composable () -> Unit) {
             while (true) {
                 val now = LocalDateTime.now()
                 val time = now.toLocalTime()
-                currentMinute = TimeSnapper.minuteOfDay(time)
+                currentMinute.intValue = TimeSnapper.minuteOfDay(time)
                 currentDate = now.toLocalDate()
                 delay(millisUntilNextMinute(time))
             }
         }
     }
 
-    val paletteStep = currentMinute / PaletteStepMinutes
-    val palette = remember(paletteStep) { displayedPaletteForMinute(currentMinute) }
+    // Recomposes only when the step changes, not on every tick.
+    val paletteStep by remember { derivedStateOf { currentMinute.intValue / PaletteStepMinutes } }
+    val palette = remember(paletteStep) { displayedPaletteForMinute(paletteStep * PaletteStepMinutes) }
     val colourScheme = remember(palette) { colourSchemeFor(palette) }
-    // The clock is provided outside MaterialTheme, so a minute tick skips the theme and
-    // reaches only the few composables that read the time.
+    // The date is provided outside MaterialTheme, so midnight skips the theme and reaches
+    // only the composables that read the date.
     CompositionLocalProvider(
         LocalCurrentMinuteOfDay provides currentMinute,
         LocalCurrentDate provides currentDate

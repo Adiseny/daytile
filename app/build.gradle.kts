@@ -53,7 +53,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             signingConfigs.findByName("release")?.let { signingConfig = it }
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // The source is public; the APK need not carry a record of the checkout.
+            vcsInfo.include = false
         }
     }
 
@@ -64,13 +66,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-        // Every caller is Kotlin or the framework, so the generated null assertions
-        // would only add bytecode and work to every call.
-        freeCompilerArgs += listOf(
-            "-Xno-param-assertions",
-            "-Xno-call-assertions",
-            "-Xno-receiver-assertions"
-        )
     }
 
     buildFeatures {
@@ -94,8 +89,12 @@ android {
 
     packaging {
         resources {
+            // Build and reflection metadata nothing reads at runtime; the app ships no
+            // Kotlin reflection, the only reader of the module and builtins files.
             excludes += setOf(
                 "META-INF/*.version",
+                "META-INF/*.kotlin_module",
+                "kotlin/**",
                 "DebugProbesKt.bin",
                 "kotlin-tooling-metadata.json"
             )

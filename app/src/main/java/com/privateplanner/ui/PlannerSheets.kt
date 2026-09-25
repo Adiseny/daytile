@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -85,7 +86,7 @@ private val TitleInputStyle = TextStyle(
 )
 
 @Composable
-internal fun BlockInputSheet(
+internal fun BoxScope.BlockInputSheet(
     title: String,
     buttonLabel: String,
     onSubmit: (String) -> Unit,
@@ -199,7 +200,7 @@ internal fun BlockInputSheet(
 }
 
 @Composable
-internal fun BlockActionSheet(
+internal fun BoxScope.BlockActionSheet(
     block: PlannerBlock,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -261,7 +262,7 @@ internal fun BlockActionSheet(
 }
 
 @Composable
-internal fun DateJumpSheet(
+internal fun BoxScope.DateJumpSheet(
     selectedDate: LocalDate,
     remindersOn: Boolean,
     onToggleReminders: (Boolean) -> Unit,
@@ -355,8 +356,10 @@ internal fun DateJumpSheet(
     }
 }
 
+// Scrim and sheet go straight into the screen's root box, above everything drawn
+// before them, instead of into a full-screen box of their own.
 @Composable
-private fun PlannerSheetSurface(
+private fun BoxScope.PlannerSheetSurface(
     accessibilityTitle: String,
     onDismiss: () -> Unit,
     content: @Composable () -> Unit
@@ -368,46 +371,42 @@ private fun PlannerSheetSurface(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(PlannerColours.Scrim)
-                .clickable(
-                    interactionSource = null,
-                    indication = null,
-                    onClick = onDismiss
-                )
-                .semantics {
-                    contentDescription = "Dismiss $accessibilityTitle"
-                }
-        )
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PlannerColours.Scrim)
+            .clickable(
+                interactionSource = null,
+                indication = null,
+                onClick = onDismiss
+            )
+            .semantics {
+                contentDescription = "Dismiss $accessibilityTitle"
+            }
+    )
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .imePadding()
-                .fillMaxWidth()
-                .background(PlannerColours.Sheet, SheetShape)
-                // Any pointer node makes the sheet the hit target, so taps on it never
-                // reach the dismissing scrim behind.
-                .pointerInput(Unit) {}
-                .semantics {
-                    contentDescription = accessibilityTitle
-                    paneTitle = accessibilityTitle
-                    isTraversalGroup = true
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .imePadding()
+            .fillMaxWidth()
+            .background(PlannerColours.Sheet, SheetShape)
+            // Any pointer node makes the sheet the hit target, so taps on it never
+            // reach the dismissing scrim behind.
+            .pointerInput(Unit) {}
+            .semantics {
+                contentDescription = accessibilityTitle
+                paneTitle = accessibilityTitle
+                isTraversalGroup = true
+            }
+            .then(
+                if (imeVisible) {
+                    Modifier.padding(bottom = 8.dp)
+                } else {
+                    Modifier.navigationBarsPadding()
                 }
-                .then(
-                    if (imeVisible) {
-                        Modifier.padding(bottom = 8.dp)
-                    } else {
-                        Modifier.navigationBarsPadding()
-                    }
-                )
-        ) {
-            content()
-        }
+            )
+    ) {
+        content()
     }
 }
 

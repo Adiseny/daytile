@@ -5,7 +5,6 @@ import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import com.privateplanner.domain.TimeSnapper
@@ -14,8 +13,8 @@ import kotlinx.coroutines.flow.Flow
 @Entity(
     tableName = "blocks",
     indices = [
-        Index(value = ["dateEpochDay", "startMinutes"]),
-        Index(value = ["title", "dateEpochDay", "startMinutes", "durationMinutes"])
+        Index("dateEpochDay", "startMinutes"),
+        Index("title", "dateEpochDay", "startMinutes", "durationMinutes")
     ]
 )
 data class PlannerBlockEntity(
@@ -80,7 +79,8 @@ interface PlannerBlockDao {
         startMinutes: Int
     ): Int?
 
-    @Insert(onConflict = OnConflictStrategy.ABORT)
+    // Room's default conflict strategy aborts, so a clashing id fails rather than replacing a row.
+    @Insert
     suspend fun insertBlock(block: PlannerBlockEntity)
 
     // Reminders keep a single pending alarm: the epoch minute of the next block starting

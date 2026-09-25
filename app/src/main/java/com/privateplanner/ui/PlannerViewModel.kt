@@ -12,7 +12,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import kotlin.math.abs
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,7 +65,8 @@ class PlannerViewModel(
                 snackbar = null,
                 sheetError = null,
                 scrollTargetMinutes = TimeSnapper.minuteOfDay(now.toLocalTime()),
-                remindersOn = false
+                // Already in memory: PlannerApp starts loading it before the activity exists.
+                remindersOn = reminders.enabled
             )
         }
     )
@@ -82,11 +82,6 @@ class PlannerViewModel(
 
     init {
         observeDate(mutableUiState.value.selectedDate)
-        // The switch is only drawn inside the date sheet, so its first disk read need
-        // not hold up launch.
-        viewModelScope.launch(Dispatchers.IO) {
-            if (reminders.enabled) mutableUiState.update { it.copy(remindersOn = true) }
-        }
     }
 
     private fun observeDate(date: LocalDate) {

@@ -4,8 +4,6 @@ import android.os.Bundle
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.ui.graphics.toArgb
-import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -19,9 +17,8 @@ import java.time.LocalTime
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        val launchPalette = displayedPaletteForMinute(TimeSnapper.minuteOfDay(LocalTime.now()))
-        window.setBackgroundDrawable(launchPalette.Paper.toArgb().toDrawable())
-        applyPlannerSystemBars(launchPalette)
+        // Before the window is attached, so the first frame already has the paper and bars.
+        applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(LocalTime.now())))
         super.onCreate(savedInstanceState)
 
         val app = application as PlannerApp

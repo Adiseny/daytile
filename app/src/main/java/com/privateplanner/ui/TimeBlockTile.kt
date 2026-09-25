@@ -1,7 +1,5 @@
 package com.privateplanner.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,19 +9,22 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
@@ -35,6 +36,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 private const val ActiveTileAlpha = 0.70f
@@ -64,7 +68,7 @@ internal fun tileInkFor(background: Color, paper: Color, active: Boolean): Color
 @Composable
 internal fun TimeBlockForeground(
     background: Color,
-    shape: RoundedCornerShape,
+    shape: Shape,
     active: Boolean,
     title: String,
     rangeText: () -> String,
@@ -76,32 +80,17 @@ internal fun TimeBlockForeground(
 ) {
     val paper = PlannerColours.Paper
     val ink = remember(background, paper, active) { tileInkFor(background, paper, active) }
-    Box(
-        modifier = modifier
-            .background(
-                color = background.copy(alpha = if (active) ActiveTileAlpha else IdleTileAlpha),
-                shape = shape
-            )
-            .border(
-                width = if (active) 1.5.dp else 1.dp,
-                color = ink.copy(alpha = 0.30f),
-                shape = shape
-            )
-            .drawWithContent {
-                drawContent()
-                val handleWidth = ResizeHandleWidth.toPx()
-                val handleHeight = ResizeHandleHeight.toPx()
-                drawRoundRect(
-                    color = ink.copy(alpha = 0.18f),
-                    topLeft = Offset(
-                        x = (size.width - handleWidth) / 2f,
-                        y = size.height - ResizeHandleBottomPadding.toPx() - handleHeight
-                    ),
-                    size = Size(handleWidth, handleHeight),
-                    cornerRadius = CornerRadius(handleHeight / 2f)
-                )
-            }
-    ) {
+    // Cached on what it draws, so a recomposition that changes none of it keeps the node's
+    // draw cache instead of rebuilding it.
+    val surface = remember(background, ink, shape, active) {
+        Modifier.tileSurface(
+            fill = background.copy(alpha = if (active) ActiveTileAlpha else IdleTileAlpha),
+            ink = ink,
+            shape = shape,
+            borderWidth = if (active) 1.5.dp else 1.dp
+        )
+    }
+    Box(modifier = modifier.then(surface)) {
         BlockContent(
             title = title,
             rangeText = rangeText,
@@ -111,9 +100,41 @@ internal fun TimeBlockForeground(
             titleFollowOffset = titleFollowOffset,
             ink = ink
         )
-
     }
 }
+
+// One cached draw node where background, border and a handle overlay would take three.
+// It paints in their order (fill, content, resize handle, border) and with their exact
+// geometry: the fill is the shape's outline, and the border is a whole-pixel stroke
+// inset by half its width with correspondingly smaller corners, as Modifier.border
+// draws it. Tiles are never small enough for its thin-shape fallbacks.
+private fun Modifier.tileSurface(fill: Color, ink: Color, shape: Shape, borderWidth: Dp): Modifier =
+    drawWithCache {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        val corner = (outline as? Outline.Rounded)?.roundRect?.topLeftCornerRadius ?: CornerRadius.Zero
+        val stroke = min(ceil(borderWidth.toPx()), ceil(size.minDimension / 2))
+        val halfStroke = stroke / 2
+        val borderColour = ink.copy(alpha = 0.30f)
+        val borderTopLeft = Offset(halfStroke, halfStroke)
+        val borderSize = Size(size.width - stroke, size.height - stroke)
+        val borderCorner = CornerRadius(max(0f, corner.x - halfStroke), max(0f, corner.y - halfStroke))
+        val borderStyle = Stroke(stroke)
+        val handleColour = ink.copy(alpha = 0.18f)
+        val handleWidth = ResizeHandleWidth.toPx()
+        val handleHeight = ResizeHandleHeight.toPx()
+        val handleTopLeft = Offset(
+            x = (size.width - handleWidth) / 2f,
+            y = size.height - ResizeHandleBottomPadding.toPx() - handleHeight
+        )
+        val handleSize = Size(handleWidth, handleHeight)
+        val handleCorner = CornerRadius(handleHeight / 2f)
+        onDrawWithContent {
+            drawOutline(outline, fill)
+            drawContent()
+            drawRoundRect(handleColour, handleTopLeft, handleSize, handleCorner)
+            drawRoundRect(borderColour, borderTopLeft, borderSize, borderCorner, style = borderStyle)
+        }
+    }
 
 internal fun durationReserveDp(
     tileWidthDp: Float,

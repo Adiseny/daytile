@@ -1,6 +1,5 @@
 package com.privateplanner.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Spacer
@@ -12,11 +11,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -39,6 +38,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private val CurrentTimeLabelShape = RoundedCornerShape(7.dp)
+private val CurrentTimeLabelLeft = 6.dp
 private val HourLabels = List(24) { hour -> TimeFormatter.time(hour * 60) }
 private val HalfHourLabels = List(24) { hour -> TimeFormatter.time(hour * 60 + 30) }
 private val HourLabelStyle = TextStyle(
@@ -68,11 +68,14 @@ internal fun hiddenGridLabelMinutes(currentTimeMinutes: Int?): Int? {
     return nearestHalfHour.takeIf { abs(current - nearestHalfHour) <= collisionMinutes }
 }
 
-// On today the grid is the one reader of the minute clock besides the indicator: a tick
-// recomposes just this, and redraws only if a label has to give way.
+// On today the clock is read only by this derived state, inside the draw pass: a tick
+// recomposes nothing, and redraws the grid only when a label has to give way.
 @Composable
 internal fun TimelineGrid(showsNow: Boolean) {
-    val hiddenLabelMinutes = hiddenGridLabelMinutes(if (showsNow) LocalCurrentMinuteOfDay.current else null)
+    val minute = LocalCurrentMinuteOfDay.current
+    val hiddenLabel = remember(showsNow, minute) {
+        derivedStateOf { if (showsNow) hiddenGridLabelMinutes(minute.intValue) else null }
+    }
     val textMeasurer = rememberTextMeasurer(cacheSize = 0)
     val hourLayouts = remember(textMeasurer) {
         HourLabels.map { label ->
@@ -89,7 +92,6 @@ internal fun TimelineGrid(showsNow: Boolean) {
     val quarterTick = PlannerColours.QuarterTick
     val hourColour = PlannerColours.TimeText
     val halfHourColour = PlannerColours.MutedText
-    val currentHiddenLabel by rememberUpdatedState(hiddenLabelMinutes)
     Spacer(
         modifier = Modifier
             .fillMaxSize()
@@ -139,7 +141,7 @@ internal fun TimelineGrid(showsNow: Boolean) {
                 val stroke = Stroke(width = strokePx)
                 onDrawBehind {
                     // Clock ticks change label visibility, not the cached grid paths.
-                    val hidden = currentHiddenLabel
+                    val hidden = hiddenLabel.value
                     drawPath(hourPath, hourLine, style = stroke)
                     drawPath(halfHourPath, halfHourLine, style = stroke)
                     drawPath(quarterPath, quarterTick, style = stroke)
@@ -167,33 +169,16 @@ internal fun TimelineGrid(showsNow: Boolean) {
     )
 }
 
+// The label also draws the line and dot, outside its own bounds, rather than laying out
+// a day-tall canvas for them. Its placement is whole pixels, so shifting the day
+// coordinates by it draws exactly the same pixels.
 @Composable
-internal fun CurrentTimeIndicator() {
-    val minutes = LocalCurrentMinuteOfDay.current
+internal fun CurrentTimeIndicator(timelineWidthPx: Int) {
+    val minutes = LocalCurrentMinuteOfDay.current.intValue
     val timeText = remember(minutes) { TimeFormatter.time(minutes) }
     val indicatorColour = PlannerColours.Delete
     val y = HourHeight * (minutes / 60f)
     val labelTop = (y - HourLabelHeight / 2).coerceAtLeast(0.dp)
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .zIndex(3f)
-    ) {
-        val yPx = y.toPx().roundToInt().toFloat()
-        val gutter = TimelineGutter.toPx()
-        drawLine(
-            color = indicatorColour,
-            start = Offset(gutter, yPx),
-            end = Offset(size.width, yPx),
-            strokeWidth = 2.dp.toPx()
-        )
-        drawCircle(
-            color = indicatorColour,
-            radius = 4.dp.toPx(),
-            center = Offset(gutter, yPx)
-        )
-    }
 
     Text(
         text = timeText,
@@ -203,10 +188,26 @@ internal fun CurrentTimeIndicator() {
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,
         modifier = Modifier
-            .offset(x = 6.dp, y = labelTop)
+            .offset(x = CurrentTimeLabelLeft, y = labelTop)
             .width(58.dp)
             .height(HourLabelHeight)
             .zIndex(4f)
+            .drawBehind {
+                val left = CurrentTimeLabelLeft.roundToPx()
+                val lineY = y.toPx().roundToInt().toFloat() - labelTop.roundToPx()
+                val gutter = TimelineGutter.toPx() - left
+                drawLine(
+                    color = indicatorColour,
+                    start = Offset(gutter, lineY),
+                    end = Offset((timelineWidthPx - left).toFloat(), lineY),
+                    strokeWidth = 2.dp.toPx()
+                )
+                drawCircle(
+                    color = indicatorColour,
+                    radius = 4.dp.toPx(),
+                    center = Offset(gutter, lineY)
+                )
+            }
             .background(PlannerColours.Sheet, CurrentTimeLabelShape)
             .border(1.dp, indicatorColour.copy(alpha = 0.35f), CurrentTimeLabelShape)
             .semantics {

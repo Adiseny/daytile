@@ -110,12 +110,6 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
     val sheet = uiState.sheet
     val currentSnackbar = uiState.snackbar
     val selectedBlocks = uiState.blocksByDate[uiState.selectedDate].orEmpty()
-    val context = LocalContext.current
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) viewModel.setRemindersOn(true) else viewModel.notificationsBlocked()
-    }
     val timelineScrollState = rememberScrollState()
     // Only read while placing pinned titles, so a new heading height re-places those
     // tiles instead of recomposing every one.
@@ -160,10 +154,10 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
         }
     }
 
+    // No background: the window's is the paper (see applyPlannerSystemBars).
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(PlannerColours.Paper)
             .axisLockedDaySwipe(
                 enabled = sheet == null,
                 onPrevious = {
@@ -236,19 +230,30 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
                     onDismiss = viewModel::dismissSheet
                 )
             }
-            PlannerSheet.DateJump -> DateJumpSheet(
-                selectedDate = uiState.selectedDate,
-                remindersOn = uiState.remindersOn,
-                onToggleReminders = { on ->
-                    if (!on || context.postNotificationsGranted()) {
-                        viewModel.setRemindersOn(on)
-                    } else {
-                        permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                },
-                onSelect = viewModel::jumpTo,
-                onDismiss = viewModel::dismissSheet
-            )
+            PlannerSheet.DateJump -> {
+                // Registered only while the sheet that asks is open: registering draws a
+                // random key, and the first draw seeds SecureRandom, which launch should
+                // not wait for.
+                val context = LocalContext.current
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission()
+                ) { granted ->
+                    if (granted) viewModel.setRemindersOn(true) else viewModel.notificationsBlocked()
+                }
+                DateJumpSheet(
+                    selectedDate = uiState.selectedDate,
+                    remindersOn = uiState.remindersOn,
+                    onToggleReminders = { on ->
+                        if (!on || context.postNotificationsGranted()) {
+                            viewModel.setRemindersOn(on)
+                        } else {
+                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                    onSelect = viewModel::jumpTo,
+                    onDismiss = viewModel::dismissSheet
+                )
+            }
             null -> Unit
         }
     }
@@ -495,7 +500,7 @@ private fun Timeline(
             }
 
             if (isToday) {
-                CurrentTimeIndicator()
+                CurrentTimeIndicator(timelineWidthPx = constraints.maxWidth)
             }
         }
     }
