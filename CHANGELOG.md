@@ -24,6 +24,7 @@
 - Removed the AndroidX Startup provider, which queried the package manager on every process start, reminder wake-ups included; the baseline profile is still installed shortly after launch.
 - Composition trace markers are no longer compiled in.
 - Posting the first reminder in a process checks the notification channels with one system call instead of three.
+- Removed an unused native graphics library, which with its page alignment took about 75 KB of the APK across four processor architectures.
 - Regenerated the baseline profile for the changed code.
 
 ## 1.3.1 — 25 September 2026

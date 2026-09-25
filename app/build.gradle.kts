@@ -88,6 +88,12 @@ android {
     }
 
     packaging {
+        // Compose's path iterator loads this library on Android 8-13, but nothing in the app
+        // iterates a path, so R8 removes the iterator. -checkdiscard in proguard-rules.pro
+        // fails the release build if that ever changes.
+        jniLibs {
+            excludes += "**/libandroidx.graphics.path.so"
+        }
         resources {
             // Build and reflection metadata nothing reads at runtime; the app ships no
             // Kotlin reflection, the only reader of the module and builtins files.

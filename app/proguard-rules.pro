@@ -20,3 +20,8 @@
     public static void checkFieldIsNotNull(java.lang.Object, java.lang.String);
     public static void checkFieldIsNotNull(java.lang.Object, java.lang.String, java.lang.String);
 }
+
+# libandroidx.graphics.path.so is left out of the APK (packaging in build.gradle.kts). It is
+# loaded only when a path is iterated on Android 8-13, and PathIterator is the only way in,
+# so it must stay unused: iterating a path would otherwise crash there.
+-checkdiscard class androidx.graphics.path.PathIterator
