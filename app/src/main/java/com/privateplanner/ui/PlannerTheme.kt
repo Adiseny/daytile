@@ -4,12 +4,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -295,60 +292,46 @@ internal fun ComponentActivity.applyPlannerSystemBars(palette: PlannerPalette, d
 
 internal val DaytileFontFamily = FontFamily.SansSerif
 
-// headlineMedium and bodySmall are the timeline heading's title and date line; no
-// Material component used here reads either slot.
-private val plannerTypography = Typography(
-    headlineMedium = TextStyle(
+// headlineMedium and bodySmall are the timeline heading's title and date line;
+// bodyLarge is what unstyled text reads, and labelLarge a button's label.
+internal object PlannerType {
+    val headlineMedium = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 22.sp,
         lineHeight = 27.sp
-    ),
-    titleMedium = TextStyle(
+    )
+    val titleMedium = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 18.sp,
         lineHeight = 24.sp
-    ),
-    bodyLarge = TextStyle(
+    )
+    val bodyLarge = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 22.sp
-    ),
-    bodyMedium = TextStyle(
+    )
+    val bodyMedium = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 18.sp
-    ),
-    bodySmall = TextStyle(
+    )
+    val bodySmall = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 15.sp
-    ),
-    labelLarge = TextStyle(
+    )
+    val labelLarge = TextStyle(
         fontFamily = DaytileFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 15.sp,
         lineHeight = 20.sp
     )
-)
-
-// Only the slots the text field, text buttons and selection handles read; every
-// surface and container colour is drawn from the palette directly. Those inks are fixed
-// per polarity, so there are two schemes, each built once: Material provides the scheme
-// statically, and a new instance at every palette step would recompose the whole screen.
-private val LightScheme by lazy {
-    lightColorScheme(primary = MiddayPalette.PrimaryText, onSurface = MiddayPalette.PrimaryText, error = MiddayPalette.Delete)
 }
-private val DarkScheme by lazy {
-    darkColorScheme(primary = NightPalette.PrimaryText, onSurface = NightPalette.PrimaryText, error = NightPalette.Delete)
-}
-
-internal fun colourSchemeFor(palette: PlannerPalette): ColorScheme =
-    if (palette.LightBackground) LightScheme else DarkScheme
 
 @Composable
 internal fun PlannerTheme(content: @Composable () -> Unit) {
@@ -374,19 +357,18 @@ internal fun PlannerTheme(content: @Composable () -> Unit) {
     // Recomposes only when the step changes, not on every tick.
     val paletteStep by remember { derivedStateOf { currentMinute.intValue / PaletteStepMinutes } }
     val palette = remember(paletteStep) { displayedPaletteForMinute(paletteStep * PaletteStepMinutes) }
-    val colourScheme = colourSchemeFor(palette)
-    // The date is provided outside MaterialTheme, so midnight skips the theme and reaches
-    // only the composables that read the date.
+    // The ink is fixed per polarity, so these change twice a day, not at every step.
+    val selectionColours = remember(palette.PrimaryText) {
+        TextSelectionColors(handleColor = palette.PrimaryText, backgroundColor = palette.PrimaryText.copy(alpha = 0.4f))
+    }
     CompositionLocalProvider(
         LocalCurrentMinuteOfDay provides currentMinute,
-        LocalCurrentDate provides currentDate
-    ) {
-        MaterialTheme(colorScheme = colourScheme, typography = plannerTypography) {
-            CompositionLocalProvider(
-                LocalPlannerColours provides palette,
-                LocalContentColor provides palette.PrimaryText,
-                content = content
-            )
-        }
-    }
+        LocalCurrentDate provides currentDate,
+        LocalIndication provides PlannerRipple,
+        LocalTextSelectionColors provides selectionColours,
+        LocalTextStyle provides BodyTextStyle,
+        LocalPlannerColours provides palette,
+        LocalContentColor provides palette.PrimaryText,
+        content = content
+    )
 }

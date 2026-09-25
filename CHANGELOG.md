@@ -29,6 +29,7 @@
 - Each tile is laid out as one node instead of two, and tiles that show their duration drop a further nested box.
 - Leaving the app again with an unchanged palette no longer starts a thread and reads the splash setting from disk.
 - Removed an unused native graphics library, which with its page alignment took about 75 KB of the APK across four processor architectures.
+- Removed the Material 3 library. The title field, buttons, ripple and snackbar it provided are now a few hundred lines of the app's own, drawn pixel for pixel as before, and the APK is about 59 KB smaller.
 - Regenerated the baseline profile for the changed code.
 
 ## 1.3.1 — 25 September 2026

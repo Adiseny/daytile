@@ -144,7 +144,7 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-ripple")
     // Lifecycle 2.11 requires compileSdk 37 and AGP 9.1, which this toolchain cannot use.
     //noinspection GradleDependency
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")

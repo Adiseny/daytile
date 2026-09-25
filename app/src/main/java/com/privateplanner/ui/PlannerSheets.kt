@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,19 +21,13 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -43,20 +38,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.paint
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.selected
@@ -70,7 +70,10 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
@@ -132,6 +135,69 @@ private val TitleInputStyle = TextStyle(
     lineHeight = 22.sp
 )
 
+// Material's placeholder colour (onSurfaceVariant) for each polarity.
+private val PlaceholderOnLight = Color(0xFF49454F)
+private val PlaceholderOnDark = Color(0xFFCAC4D0)
+private val TitleFieldPadding = 16.dp
+// The input and the placeholder each sit in a line at least 24dp tall, 16dp from either side.
+private val TitleSlot = Modifier
+    .heightIn(min = 24.dp)
+    .wrapContentHeight()
+    .padding(horizontal = TitleFieldPadding)
+
+// Material's filled TextField as this sheet used it, container and indicator hidden: at
+// least 280 by 56, with the input and the placeholder each centred in its height.
+@Composable
+private fun TitleField(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    errorText: String?,
+    keyboardOptions: KeyboardOptions,
+    keyboardActions: KeyboardActions,
+    modifier: Modifier
+) {
+    val colours = PlannerColours
+    val textStyle = remember(colours.PrimaryText) { TitleInputStyle.merge(TextStyle(color = colours.PrimaryText)) }
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier
+            .then(if (errorText != null) Modifier.semantics { error(errorText) } else Modifier)
+            .defaultMinSize(minWidth = 280.dp, minHeight = 56.dp),
+        textStyle = textStyle,
+        cursorBrush = SolidColor(if (errorText != null) colours.Delete else colours.PrimaryText),
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
+        singleLine = true,
+        decorationBox = { innerTextField ->
+            Layout(
+                content = {
+                    if (value.text.isEmpty()) {
+                        Box(TitleSlot) {
+                            Text(
+                                text = "What's happening?",
+                                color = if (colours.LightBackground) PlaceholderOnLight else PlaceholderOnDark
+                            )
+                        }
+                    }
+                    Box(TitleSlot, propagateMinConstraints = true) { innerTextField() }
+                }
+            ) { measurables, constraints ->
+                val verticalPadding = (TitleFieldPadding * 2).roundToPx()
+                val slot = constraints.copy(minHeight = 0).offset(vertical = -verticalPadding)
+                val input = measurables.last().measure(slot)
+                val placeholder = if (measurables.size > 1) measurables[0].measure(slot.copy(minWidth = 0)) else null
+                val width = constraints.constrainWidth(maxOf(input.width, placeholder?.width ?: 0))
+                val height = constraints.constrainHeight(verticalPadding + maxOf(input.height, placeholder?.height ?: 0))
+                layout(width, height) {
+                    placeholder?.placeRelative(0, Alignment.CenterVertically.align(placeholder.height, height))
+                    input.placeRelative(0, Alignment.CenterVertically.align(input.height, height))
+                }
+            }
+        }
+    )
+}
+
 @Composable
 internal fun BoxScope.BlockInputSheet(
     title: String,
@@ -152,21 +218,6 @@ internal fun BoxScope.BlockInputSheet(
             )
         )
     }
-    val fieldColours = TextFieldDefaults.colors(
-        focusedContainerColor = Color.Transparent,
-        unfocusedContainerColor = Color.Transparent,
-        focusedIndicatorColor = Color.Transparent,
-        unfocusedIndicatorColor = Color.Transparent,
-        errorIndicatorColor = Color.Transparent,
-        cursorColor = PlannerColours.PrimaryText
-    )
-    val buttonColours = ButtonDefaults.buttonColors(
-        containerColor = PlannerColours.PrimaryText,
-        contentColor = PlannerColours.Sheet,
-        disabledContainerColor = PlannerColours.AddButtonDisabled,
-        disabledContentColor = PlannerColours.MutedText
-    )
-
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
         keyboard?.show()
@@ -190,7 +241,7 @@ internal fun BoxScope.BlockInputSheet(
                 .padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextField(
+                TitleField(
                     value = value,
                     onValueChange = { incoming ->
                         value = if (incoming.text.length <= MaxTitleLength) {
@@ -210,25 +261,23 @@ internal fun BoxScope.BlockInputSheet(
                             )
                         }
                     },
-                    singleLine = true,
-                    placeholder = { Text("What's happening?") },
-                    isError = errorText != null,
+                    errorText = errorText,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Done
                     ),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
-                    colors = fieldColours,
-                    textStyle = TitleInputStyle,
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester)
                 )
 
-                Button(
+                PlannerButton(
                     onClick = { submit() },
                     enabled = canSubmit,
-                    colors = buttonColours,
+                    containerColor = if (canSubmit) PlannerColours.PrimaryText else PlannerColours.AddButtonDisabled,
+                    contentColor = if (canSubmit) PlannerColours.Sheet else PlannerColours.MutedText,
+                    contentPadding = ButtonPadding,
                     modifier = Modifier
                         .padding(start = 10.dp)
                         .height(48.dp)
@@ -243,7 +292,7 @@ internal fun BoxScope.BlockInputSheet(
                 Text(
                     text = errorText,
                     color = PlannerColours.Delete,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = PlannerType.bodyMedium,
                     modifier = Modifier.padding(start = 16.dp, top = 2.dp, end = 8.dp)
                 )
             }
@@ -281,22 +330,25 @@ internal fun BoxScope.BlockActionSheet(
             ) {
                 Text(
                     text = block.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = PlannerType.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "${TimeFormatter.range(block.startMinutes, block.durationMinutes)} \u00B7 ${TimeFormatter.duration(block.durationMinutes)}",
                     color = PlannerColours.MutedText,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = PlannerType.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
 
-            TextButton(
+            PlannerButton(
                 onClick = onDelete,
+                containerColor = Color.Transparent,
+                contentColor = PlannerColours.PrimaryText,
+                contentPadding = TextButtonPadding,
                 modifier = Modifier
                     .height(48.dp)
                     .semantics {
@@ -306,7 +358,7 @@ internal fun BoxScope.BlockActionSheet(
                 Text(
                     text = "Delete",
                     color = PlannerColours.Delete,
-                    style = MaterialTheme.typography.labelLarge
+                    style = PlannerType.labelLarge
                 )
             }
         }
@@ -347,7 +399,7 @@ internal fun BoxScope.DateJumpSheet(
                 )
                 Text(
                     text = visibleMonth.format(titleFormatter),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = PlannerType.titleMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f)
                 )
@@ -377,8 +429,10 @@ internal fun BoxScope.DateJumpSheet(
             ) {
                 val reminderColour =
                     if (remindersOn) PlannerColours.PrimaryText else PlannerColours.MutedText
-                TextButton(
+                PlannerButton(
                     onClick = { onToggleReminders(!remindersOn) },
+                    containerColor = Color.Transparent,
+                    contentColor = PlannerColours.PrimaryText,
                     // Sits the glyph in the same column as the month chevron above it.
                     contentPadding = PaddingValues(horizontal = 15.dp, vertical = 8.dp),
                     modifier = Modifier.semantics {
@@ -386,11 +440,15 @@ internal fun BoxScope.DateJumpSheet(
                         stateDescription = if (remindersOn) "On" else "Off"
                     }
                 ) {
-                    Icon(
-                        painter = rememberVectorPainter(if (remindersOn) BellOn else BellOff),
-                        contentDescription = null,
-                        tint = reminderColour,
-                        modifier = Modifier.size(18.dp)
+                    val bellTint = remember(reminderColour) { ColorFilter.tint(reminderColour) }
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .paint(
+                                rememberVectorPainter(if (remindersOn) BellOn else BellOff),
+                                colorFilter = bellTint,
+                                contentScale = ContentScale.Fit
+                            )
                     )
                     Spacer(modifier = Modifier.width(7.dp))
                     Text(text = "Reminders", color = reminderColour)
@@ -398,7 +456,12 @@ internal fun BoxScope.DateJumpSheet(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                TextButton(onClick = { onSelect(today) }) {
+                PlannerButton(
+                    onClick = { onSelect(today) },
+                    containerColor = Color.Transparent,
+                    contentColor = PlannerColours.PrimaryText,
+                    contentPadding = TextButtonPadding
+                ) {
                     Text("Today")
                 }
             }
@@ -489,7 +552,7 @@ private fun WeekdayRow() {
                 text = label,
                 color = PlannerColours.MutedText,
                 textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium,
+                style = PlannerType.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -558,7 +621,7 @@ private fun DateCell(
     Text(
         text = date.dayOfMonth.toString(),
         color = textColour,
-        style = MaterialTheme.typography.bodyMedium,
+        style = PlannerType.bodyMedium,
         modifier = modifier
             .height(48.dp)
             .clickable { onSelect(date) }

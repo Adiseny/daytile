@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,23 +32,18 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarData
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.IntState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.currentRecomposeScope
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.key
-import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -57,6 +54,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
@@ -65,15 +63,20 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.dismiss
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -102,6 +105,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val CompactBlockShape = RoundedCornerShape(13.dp)
 private val RegularBlockShape = RoundedCornerShape(16.dp)
@@ -111,7 +116,6 @@ private val HeaderButtonShape = RoundedCornerShape(10.dp)
 @Composable
 internal fun PlannerScreen(viewModel: PlannerViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     val haptics = LocalHapticFeedback.current
     val sheet = uiState.sheet
     val currentSnackbar = uiState.snackbar
@@ -138,26 +142,6 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
             sheet != null -> viewModel.dismissSheet()
             currentSnackbar != null -> viewModel.clearSnackbar(currentSnackbar.id)
             else -> viewModel.returnToToday()
-        }
-    }
-
-    // Composed only while there is a snackbar: clearing it cancels this, which takes it
-    // off screen, and no effect runs while there is none.
-    if (currentSnackbar != null) LaunchedEffect(currentSnackbar.id) {
-        val message = currentSnackbar
-        val result = snackbarHostState.showSnackbar(
-            message = when (message) {
-                is PlannerSnackbar.Deleted -> "Deleted"
-                is PlannerSnackbar.Message -> message.message
-            },
-            actionLabel = if (message is PlannerSnackbar.Deleted) "Undo" else null,
-            withDismissAction = false,
-            duration = SnackbarDuration.Short
-        )
-        if (message is PlannerSnackbar.Deleted && result == SnackbarResult.ActionPerformed) {
-            viewModel.undoDelete(message.id)
-        } else {
-            viewModel.clearSnackbar(message.id)
         }
     }
 
@@ -201,14 +185,15 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
                 .then(backgroundSemantics)
         )
 
-        SnackbarHost(
-            hostState = snackbarHostState,
+        PlannerSnackbarHost(
+            current = currentSnackbar,
+            onUndo = viewModel::undoDelete,
+            onDismiss = viewModel::clearSnackbar,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(16.dp)
-                .then(backgroundSemantics),
-            snackbar = { data -> PlannerSnackbar(data) }
+                .then(backgroundSemantics)
         )
 
         when (sheet) {
@@ -265,8 +250,88 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
     }
 }
 
+// Material's snackbar host, driven by the view model's snackbar: 4s on screen (or what
+// accessibility services ask for), its fade and scale springs in and out, and gone the
+// moment Undo is tapped while the restore runs. One on its way out stays until it fades.
 @Composable
-private fun PlannerSnackbar(data: SnackbarData) {
+private fun PlannerSnackbarHost(
+    current: PlannerSnackbar?,
+    onUndo: (Long) -> Unit,
+    onDismiss: (Long) -> Unit,
+    modifier: Modifier
+) {
+    var undoneId by remember { mutableLongStateOf(Long.MIN_VALUE) }
+    val shown = current?.takeIf { it.id != undoneId }
+    val accessibility = LocalAccessibilityManager.current
+    if (shown != null) LaunchedEffect(shown) {
+        delay(
+            accessibility?.calculateRecommendedTimeoutMillis(
+                SnackbarMillis,
+                containsIcons = true,
+                containsText = true,
+                containsControls = shown is PlannerSnackbar.Deleted
+            ) ?: SnackbarMillis
+        )
+        onDismiss(shown.id)
+    }
+    // A plain list, as Material's: it changes only here and when a fade ends, which
+    // recomposes the host.
+    val items = remember { ArrayList<PlannerSnackbar>(2) }
+    if (shown != null && shown !in items) items += shown
+    val host = currentRecomposeScope
+    Box(modifier) {
+        items.forEach { item ->
+            key(item) {
+                val visible = item === shown
+                val alpha = remember { Animatable(if (visible) 0f else 1f) }
+                val scale = remember { Animatable(if (visible) 0.8f else 1f) }
+                LaunchedEffect(visible) {
+                    launch { scale.animateTo(if (visible) 1f else 0.8f, SnackbarScaleSpring) }
+                    alpha.animateTo(if (visible) 1f else 0f, SnackbarFadeSpring)
+                    if (!visible) {
+                        items.remove(item)
+                        host.invalidate()
+                    }
+                }
+                Box(
+                    Modifier
+                        .graphicsLayer {
+                            scaleX = scale.value
+                            scaleY = scale.value
+                            this.alpha = alpha.value
+                        }
+                        .semantics {
+                            if (visible) liveRegion = LiveRegionMode.Polite
+                            dismiss {
+                                onDismiss(item.id)
+                                true
+                            }
+                            paneTitle = "Alert"
+                        }
+                ) {
+                    PlannerSnackbar(
+                        message = if (item is PlannerSnackbar.Message) item.message else "Deleted",
+                        onUndo = if (item is PlannerSnackbar.Deleted) {
+                            {
+                                undoneId = item.id
+                                onUndo(item.id)
+                            }
+                        } else {
+                            null
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val SnackbarMillis = 4_000L
+private val SnackbarFadeSpring = spring<Float>(dampingRatio = 1f, stiffness = 3800f)
+private val SnackbarScaleSpring = spring<Float>(dampingRatio = 0.9f, stiffness = 1400f)
+
+@Composable
+private fun PlannerSnackbar(message: String, onUndo: (() -> Unit)?) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -280,7 +345,7 @@ private fun PlannerSnackbar(data: SnackbarData) {
             .padding(start = 16.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
     ) {
         Text(
-            text = data.visuals.message,
+            text = message,
             fontSize = 14.sp,
             lineHeight = 18.sp,
             fontWeight = FontWeight.SemiBold,
@@ -288,10 +353,9 @@ private fun PlannerSnackbar(data: SnackbarData) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        val actionLabel = data.visuals.actionLabel
-        if (actionLabel != null) {
+        if (onUndo != null) {
             Text(
-                text = actionLabel,
+                text = "Undo",
                 color = PlannerColours.Delete,
                 fontSize = 14.sp,
                 lineHeight = 18.sp,
@@ -302,7 +366,7 @@ private fun PlannerSnackbar(data: SnackbarData) {
                     .height(48.dp)
                     .clip(SnackbarActionShape)
                     .background(PlannerColours.Delete.copy(alpha = 0.10f))
-                    .clickable(onClick = data::performAction)
+                    .clickable(onClick = onUndo)
                     .padding(horizontal = 12.dp)
                     .wrapContentHeight(Alignment.CenterVertically)
             )
@@ -319,12 +383,13 @@ internal fun dateFormatter(pattern: String, locale: Locale): DateTimeFormatter =
     DateFormatters.getOrPut(pattern to locale) { DateTimeFormatter.ofPattern(pattern, locale) }
 
 // Launch's main-thread work that can be done ahead, on the warm-up thread: the palettes
-// with their colour spaces and Material's colour tokens, the grid labels, and the
-// locale's day and month names (the first format loads them). Whatever is not ready in
-// time is done where it was.
+// with their colour spaces, the text styles, the grid labels, and the locale's day and
+// month names (the first format loads them). Whatever is not ready in time is done where
+// it was.
 internal fun Context.warmUpInterface() {
     val now = TimeSnapper.localNowMillis()
-    colourSchemeFor(displayedPaletteForMinute(TimeSnapper.minuteOfDay(now)))
+    displayedPaletteForMinute(TimeSnapper.minuteOfDay(now))
+    BodyTextStyle.hashCode()
     prepareGridLabels()
     val locale = Locale.getDefault()
     val today = TimeSnapper.dateOf(now)
@@ -400,14 +465,14 @@ private fun TimelineHeader(
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineMedium,
+                style = PlannerType.headlineMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = PlannerType.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
