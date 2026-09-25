@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Reminders
+
+- Reminders on the day the clocks change now fire at the right time; blocks after the change were an hour off.
+- After a time-zone change, the next reminder moves to the new local time instead of firing at the old moment.
+
+### Interface and interaction
+
+- Dragging a block towards the top or bottom of the screen now scrolls relative to what is visible: scrolling builds to full speed at the bottom of the heading and at the top of the navigation bar, so the finger never has to cover either, and both zones follow font size and navigation mode. Full speed at the bottom was previously out of reach.
+- A tap on empty time is no longer lost when it lands just after a block is dropped or changed.
+- The date sheet reads calendar days aloud as dates and announces today and the selected day.
+
+### Responsiveness and efficiency
+
+- Launch reads the clock without building date-time zone rules on the main thread.
+- Processes started for a reminder or after a restart no longer prepare the interface.
+- Moving or resizing a block no longer recomposes every tile, and the five-minute colour steps no longer recompose the whole screen.
+- Removed the AndroidX Startup provider, which queried the package manager on every process start, reminder wake-ups included; the baseline profile is still installed shortly after launch.
+- Composition trace markers are no longer compiled in.
+- Posting the first reminder in a process checks the notification channels with one system call instead of three.
+- Regenerated the baseline profile for the changed code.
+
 ## 1.3.1 — 25 September 2026
 
 ### Responsiveness and efficiency
