@@ -44,6 +44,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -90,7 +91,6 @@ import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
 import com.privateplanner.postNotificationsGranted
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -309,23 +309,25 @@ private fun PlannerSnackbar(data: SnackbarData) {
 }
 
 private const val HeadingDatePattern = "EEEE, d MMMM"
+internal const val FullDatePattern = "EEEE, d MMMM yyyy"
 private val DateFormatters = ConcurrentHashMap<Pair<String, Locale>, DateTimeFormatter>()
 
 // Each pattern is parsed once per locale and shared, including with the launch warm-up.
 internal fun dateFormatter(pattern: String, locale: Locale): DateTimeFormatter =
     DateFormatters.getOrPut(pattern to locale) { DateTimeFormatter.ofPattern(pattern, locale) }
 
-// Launch's main-thread work that can be done ahead, on the warm-up thread: the time
-// zone's rules (the first clock read loads them), the palettes with their colour spaces
-// and Material's colour tokens, the grid labels, and the locale's day and month names
-// (the first format loads them). Whatever is not ready in time is done where it was.
+// Launch's main-thread work that can be done ahead, on the warm-up thread: the palettes
+// with their colour spaces and Material's colour tokens, the grid labels, and the
+// locale's day and month names (the first format loads them). Whatever is not ready in
+// time is done where it was.
 internal fun Context.warmUpInterface() {
-    val now = LocalDateTime.now()
-    colourSchemeFor(displayedPaletteForMinute(TimeSnapper.minuteOfDay(now.toLocalTime())))
+    val now = TimeSnapper.localNowMillis()
+    colourSchemeFor(displayedPaletteForMinute(TimeSnapper.minuteOfDay(now)))
     prepareGridLabels()
     val locale = Locale.getDefault()
-    now.toLocalDate().format(dateFormatter(HeadingDatePattern, locale))
-    prepareDateSheet(locale, now.toLocalDate())
+    val today = TimeSnapper.dateOf(now)
+    today.format(dateFormatter(HeadingDatePattern, locale))
+    prepareDateSheet(locale, today)
 }
 
 // A single translucent tint spans the status bar and heading. It never becomes
@@ -355,7 +357,7 @@ private fun TimelineHeader(
         when {
             relative != null -> relative to selectedDate.format(dateFormatter)
             selectedDate.year == today.year -> selectedDate.format(dateFormatter) to null
-            else -> selectedDate.format(dateFormatter("EEEE, d MMMM yyyy", locale)) to null
+            else -> selectedDate.format(dateFormatter(FullDatePattern, locale)) to null
         }
     }
     val paper = PlannerColours.Paper
@@ -433,13 +435,22 @@ private fun Timeline(
     val layoutById = remember(blocks) {
         OverlapLayoutCalculator.calculate(blocks)
     }
-    val overlapPolicyForBlock: (Long) -> OverlapPolicy = remember(blocks) {
+    // Read when a tap or gesture asks rather than captured, so neither the tap detector nor
+    // the tiles' validator changes with the blocks.
+    val latestBlocks = rememberUpdatedState(blocks)
+    val latestLayoutById = rememberUpdatedState(layoutById)
+    // One validator for the timeline's lifetime: a change to one block hands the other
+    // tiles no new parameter, so they skip.
+    val overlapPolicyForBlock: (Long) -> OverlapPolicy = remember {
+        var cachedBlocks: List<PlannerBlock>? = null
         var cachedBlockId = Long.MIN_VALUE
         var cachedPolicy: OverlapPolicy? = null
         fun(blockId: Long): OverlapPolicy {
-            if (blockId != cachedBlockId) {
+            val current = latestBlocks.value
+            if (current !== cachedBlocks || blockId != cachedBlockId) {
+                cachedBlocks = current
                 cachedBlockId = blockId
-                cachedPolicy = OverlapPolicy.from(blocks, blockId)
+                cachedPolicy = OverlapPolicy.from(current, blockId)
             }
             return checkNotNull(cachedPolicy)
         }
@@ -498,7 +509,7 @@ private fun Timeline(
                         true
                     }
                 }
-                .timelineTapInput(blocks, layoutById, onEmptyTimeTap)
+                .timelineTapInput(latestBlocks, latestLayoutById, onEmptyTimeTap)
         ) {
             val timelineWidth = maxWidth
             TimelineGrid(showsNow = isToday)
@@ -548,7 +559,6 @@ private fun TimeBlock(
 ) {
     val haptics = LocalHapticFeedback.current
     val latestBlock by rememberUpdatedState(block)
-    val latestValidatorForBlock by rememberUpdatedState(validatorForBlock)
     // The caller keys each tile by block id, so this state never outlives its block.
     var previewStartMinutes by remember { mutableIntStateOf(NoPreviewMinutes) }
     var previewDurationMinutes by remember { mutableIntStateOf(NoPreviewMinutes) }
@@ -610,7 +620,7 @@ private fun TimeBlock(
             block.durationMinutes
         )
         if (targetStart == block.startMinutes) return false
-        return latestValidatorForBlock(block.id).canPlace(targetStart, block.durationMinutes) &&
+        return validatorForBlock(block.id).canPlace(targetStart, block.durationMinutes) &&
             onMove(targetStart)
     }
 
@@ -620,7 +630,7 @@ private fun TimeBlock(
             block.durationMinutes + deltaMinutes
         )
         if (targetDuration == block.durationMinutes) return false
-        return latestValidatorForBlock(block.id).canPlace(
+        return validatorForBlock(block.id).canPlace(
             startMinutes = block.startMinutes,
             durationMinutes = targetDuration
         ) &&
@@ -665,7 +675,7 @@ private fun TimeBlock(
             .blockMoveInput(
                 blockId = block.id,
                 latestBlock = { latestBlock },
-                latestValidator = { latestValidatorForBlock(block.id) },
+                latestValidator = { validatorForBlock(block.id) },
                 latestVisualOffset = { latestVisualOffset },
                 hourHeightPx = hourHeightPx,
                 scrollState = scrollState,
@@ -702,21 +712,21 @@ private fun TimeBlock(
     }
 }
 
-// Pixel geometry is read at tap time from this node's own size and density, so only a
-// change of blocks restarts the detector.
+// Blocks and pixel geometry are read at tap time, so nothing restarts the detector: a
+// change of blocks, such as the write after a drop, cannot drop a tap in progress.
 private fun Modifier.timelineTapInput(
-    blocks: List<PlannerBlock>,
-    layoutById: Map<Long, BlockLayout>,
+    blocks: State<List<PlannerBlock>>,
+    layoutById: State<Map<Long, BlockLayout>>,
     onEmptyTimeTap: (Int) -> Unit
 ): Modifier {
-    return pointerInput(blocks, layoutById) {
+    return pointerInput(onEmptyTimeTap) {
         detectTapGestures { offset ->
             val hourHeightPx = HourHeight.toPx()
             val hitBlock = TimelineGeometry.hitTestBlock(
                 x = offset.x,
                 y = offset.y,
-                blocks = blocks,
-                layoutById = layoutById,
+                blocks = blocks.value,
+                layoutById = layoutById.value,
                 timelineWidthPx = size.width.toFloat(),
                 gutterPx = TimelineGutter.toPx(),
                 timelineEndPaddingPx = TimelineEndPadding.toPx(),

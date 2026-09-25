@@ -9,7 +9,6 @@ import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.PlannerBlockOrder
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
-import java.time.LocalDateTime
 import kotlin.math.abs
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -55,10 +54,10 @@ class PlannerViewModel(
     private val repository: PlannerRepository,
     private val reminders: Reminders
 ) : ViewModel() {
-    private val launchedAt = LocalDateTime.now()
+    private val launchedAt = TimeSnapper.localNowMillis()
     private val mutableUiState = MutableStateFlow(
         PlannerUiState(
-            selectedDate = launchedAt.toLocalDate(),
+            selectedDate = TimeSnapper.dateOf(launchedAt),
             blocksByDate = emptyMap(),
             sheet = null,
             snackbar = null,
@@ -71,7 +70,7 @@ class PlannerViewModel(
 
     // Where the timeline opens, taken once by its first layout. Outside the UI state, so
     // taking it publishes nothing and recomposes nothing.
-    private var scrollTarget: Int? = TimeSnapper.minuteOfDay(launchedAt.toLocalTime())
+    private var scrollTarget: Int? = TimeSnapper.minuteOfDay(launchedAt)
 
     fun takeScrollTarget(): Int? = scrollTarget.also { scrollTarget = null }
 
@@ -117,7 +116,7 @@ class PlannerViewModel(
     }
 
     fun returnToToday() {
-        setDate(LocalDate.now())
+        setDate(TimeSnapper.dateOf(TimeSnapper.localNowMillis()))
     }
 
     fun jumpTo(date: LocalDate) {

@@ -19,7 +19,6 @@ import com.privateplanner.domain.TimeFormatter
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,8 +78,11 @@ class Reminders(private val context: Context) {
     // Alarms outlive the process, so like `mayBeShowing` this starts pessimistic:
     // the first sync settles it, and afterwards a write that changes nothing costs
     // no binder traffic at all. Anything that clears alarms behind our back (reboot,
-    // update, force-stop) also kills the process, so it cannot go stale.
+    // update, force-stop) also kills the process, so it cannot go stale. The instant
+    // is kept too: a time-zone change moves an unchanged event's wall-clock minute to
+    // another instant, which must be re-armed.
     private var armedFor = UnknownAlarm
+    private var armedAt = 0L
 
     // Channels persist across restarts, so declaring them is a once-per-process
     // errand rather than something every post should pay for.
@@ -121,16 +123,16 @@ class Reminders(private val context: Context) {
 
     private suspend fun syncLocked(repository: PlannerRepository, firedMinute: Long) {
         val on = enabled
-        val now = LocalDateTime.now()
-        val nowMinute = epochMinute(now.toLocalDate(), TimeSnapper.minuteOfDay(now.toLocalTime()))
+        val nowMinute = Math.floorDiv(TimeSnapper.localNowMillis(), TimeSnapper.MillisPerMinute)
         if (firedMinute >= 0 || mayBeShowing) show(repository, on, nowMinute, firedMinute)
 
         val after = maxOf(nowMinute, firedMinute)
         val event = if (on) nextEvent(repository, after) else NoAlarm
+        val at = if (event == NoAlarm) 0L else millisAt(dateOf(event), minuteOf(event))
         // Most writes (a rename, an edit on another day) leave the next moment alone,
         // and with reminders off there is never anything to arm. Both land here, and
         // neither reaches a system service.
-        if (event == armedFor) return
+        if (event == armedFor && at == armedAt) return
         val alarms = context.getSystemService(AlarmManager::class.java)
         if (event == NoAlarm) {
             // Nothing to arm, so only touch the pending intent if one already exists.
@@ -139,10 +141,10 @@ class Reminders(private val context: Context) {
                 it.cancel()
             }
             armedFor = NoAlarm
+            armedAt = 0L
             return
         }
         val alarm = alarmIntent(event, PendingIntent.FLAG_UPDATE_CURRENT)!!
-        val at = millisAt(dateOf(event), minuteOf(event))
         try {
             alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
         } catch (_: SecurityException) {
@@ -150,6 +152,7 @@ class Reminders(private val context: Context) {
             alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
         }
         armedFor = event
+        armedAt = at
     }
 
     // The first block after `after` owns the nearest moment: its warning if that has
@@ -194,13 +197,18 @@ class Reminders(private val context: Context) {
         if (due.isEmpty()) return
 
         if (!channelsReady) {
-            LegacyChannels.forEach(manager::deleteNotificationChannel)
-            manager.createNotificationChannels(
-                listOf(
-                    channel(UpcomingChannel, "Coming up", "reminder_upcoming"),
-                    channel(StartChannel, "Starting now", "reminder_start")
+            // One query rather than a delete per legacy channel and a create in every
+            // process: after the first run there is nothing to change.
+            val ids = manager.notificationChannels.map { it.id }
+            if (ids.size != 2 || UpcomingChannel !in ids || StartChannel !in ids) {
+                LegacyChannels.forEach(manager::deleteNotificationChannel)
+                manager.createNotificationChannels(
+                    listOf(
+                        channel(UpcomingChannel, "Coming up", "reminder_upcoming"),
+                        channel(StartChannel, "Starting now", "reminder_start")
+                    )
                 )
-            )
+            }
             channelsReady = true
         }
         val postedAt = System.currentTimeMillis()
@@ -303,9 +311,13 @@ private fun showsAt(block: PlannerBlock, nowMinute: Long, upcoming: Boolean): Bo
 private suspend fun PlannerRepository.startAfter(minute: Long): Long? =
     getNextStart(dayOf(minute + 1), minuteOf(minute + 1))
 
-private fun millisAt(date: LocalDate, minutes: Int): Long =
-    date.atStartOfDay(ZoneId.systemDefault())
+// Minutes are wall-clock minutes, so they are added before the zone is applied: on a
+// daylight-saving day, elapsed minutes from midnight land an hour off after the change.
+// A minute inside a skipped hour moves forward by the gap. Internal for tests.
+internal fun millisAt(date: LocalDate, minutes: Int): Long =
+    date.atStartOfDay()
         .plusMinutes(minutes.toLong())
+        .atZone(ZoneId.systemDefault())
         .toInstant()
         .toEpochMilli()
 

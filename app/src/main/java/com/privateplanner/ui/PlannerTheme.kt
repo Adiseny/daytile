@@ -37,8 +37,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
 import kotlinx.coroutines.delay
 
 // Night paper, also the dark scrim behind light system-bar icons.
@@ -235,9 +233,9 @@ private val LocalPlannerColours = compositionLocalOf { MiddayPalette }
 // The minute as a state, not a value: only the grid and the current-time indicator read
 // it, so a tick reaches them and nothing between them and the theme.
 internal val LocalCurrentMinuteOfDay = staticCompositionLocalOf<IntState> {
-    mutableIntStateOf(TimeSnapper.minuteOfDay(LocalTime.now()))
+    mutableIntStateOf(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis()))
 }
-internal val LocalCurrentDate = compositionLocalOf<LocalDate> { LocalDate.now() }
+internal val LocalCurrentDate = compositionLocalOf<LocalDate> { TimeSnapper.dateOf(TimeSnapper.localNowMillis()) }
 
 /** Composition-aware colours for the current time of day. */
 internal val PlannerColours: PlannerPalette
@@ -245,10 +243,8 @@ internal val PlannerColours: PlannerPalette
     @ReadOnlyComposable
     get() = LocalPlannerColours.current
 
-private fun millisUntilNextMinute(now: LocalTime): Long {
-    val millis = (60 - now.second) * 1_000L - now.nano / 1_000_000L
-    return millis.coerceAtLeast(250L)
-}
+private fun millisUntilNextMinute(localMillis: Long): Long =
+    (TimeSnapper.MillisPerMinute - Math.floorMod(localMillis, TimeSnapper.MillisPerMinute)).coerceAtLeast(250L)
 
 /**
  * Single owner of the system-bar style. Sheets must not style the bars
@@ -349,22 +345,21 @@ internal fun colourSchemeFor(palette: PlannerPalette) = if (palette.LightBackgro
 
 @Composable
 internal fun PlannerTheme(content: @Composable () -> Unit) {
-    val initialNow = remember { LocalDateTime.now() }
+    val initialNow = remember { TimeSnapper.localNowMillis() }
     val currentMinute = remember {
-        mutableIntStateOf(TimeSnapper.minuteOfDay(initialNow.toLocalTime()))
+        mutableIntStateOf(TimeSnapper.minuteOfDay(initialNow))
     }
-    var currentDate by remember { mutableStateOf(initialNow.toLocalDate()) }
+    var currentDate by remember { mutableStateOf(TimeSnapper.dateOf(initialNow)) }
     // The clock pauses while the app is not visible and refreshes immediately
     // on return, so backgrounding never wakes the process once a minute.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                val now = LocalDateTime.now()
-                val time = now.toLocalTime()
-                currentMinute.intValue = TimeSnapper.minuteOfDay(time)
-                currentDate = now.toLocalDate()
-                delay(millisUntilNextMinute(time))
+                val now = TimeSnapper.localNowMillis()
+                currentMinute.intValue = TimeSnapper.minuteOfDay(now)
+                currentDate = TimeSnapper.dateOf(now)
+                delay(millisUntilNextMinute(now))
             }
         }
     }

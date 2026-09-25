@@ -39,4 +39,15 @@ class TimeSnapperTest {
         assertEquals(35, TimeSnapper.defaultDurationForStart(9 * 60, 9 * 60 + 35))
         assertEquals(60, TimeSnapper.defaultDurationForStart(9 * 60, 10 * 60 + 15))
     }
+
+    @Test
+    fun localMillisGiveTheWallClockDateAndMinute() {
+        val millis = java.time.LocalDateTime.of(2026, 9, 25, 13, 37, 59)
+            .toEpochSecond(java.time.ZoneOffset.UTC) * 1_000 + 999
+        assertEquals(13 * 60 + 37, TimeSnapper.minuteOfDay(millis))
+        assertEquals(java.time.LocalDate.of(2026, 9, 25), TimeSnapper.dateOf(millis))
+        // Before 1970 the day and minute still count forward from local midnight.
+        assertEquals(23 * 60 + 59, TimeSnapper.minuteOfDay(-1))
+        assertEquals(java.time.LocalDate.of(1969, 12, 31), TimeSnapper.dateOf(-1))
+    }
 }

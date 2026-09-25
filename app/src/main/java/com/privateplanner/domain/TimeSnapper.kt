@@ -1,6 +1,7 @@
 package com.privateplanner.domain
 
-import java.time.LocalTime
+import java.time.LocalDate
+import java.util.TimeZone
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -10,6 +11,7 @@ object TimeSnapper {
     const val SnapMinutes = 5
     const val DefaultDurationMinutes = 60
     const val MinimumDurationMinutes = 10
+    const val MillisPerMinute = 60_000L
 
     fun floorToSnap(minutes: Int): Int {
         return minutes.coerceIn(0, MinutesPerDay - 1) / SnapMinutes * SnapMinutes
@@ -63,5 +65,17 @@ object TimeSnapper {
             .coerceAtMost(MinutesPerDay - startMinutes)
     }
 
-    fun minuteOfDay(time: LocalTime): Int = time.hour * MinutesPerHour + time.minute
+    // The wall clock as milliseconds since the local epoch, from the platform's time zone,
+    // which every process already has loaded. java.time builds its zone rules on first
+    // use, which would put milliseconds of work on the main thread at launch.
+    fun localNowMillis(): Long {
+        val now = System.currentTimeMillis()
+        return now + TimeZone.getDefault().getOffset(now)
+    }
+
+    fun minuteOfDay(localMillis: Long): Int =
+        Math.floorMod(Math.floorDiv(localMillis, MillisPerMinute), MinutesPerDay.toLong()).toInt()
+
+    fun dateOf(localMillis: Long): LocalDate =
+        LocalDate.ofEpochDay(Math.floorDiv(localMillis, MillisPerMinute * MinutesPerDay))
 }

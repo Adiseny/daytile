@@ -23,17 +23,26 @@ class PlannerApp : Application() {
         // open (a few milliseconds with schema validation) in time for the first query to
         // put the day's blocks in the first frame rather than a later one.
         // Only a head start: a failure is left for the real first use to report as before,
-        // rather than crashing a process that may have started for a broadcast. The main
-        // thread starts one thread; that one starts the CPU half, which the first frame
-        // needs too, to run beside the disk half.
+        // rather than crashing a process that may have started for a broadcast. Receivers
+        // read both too, so this runs for every process start.
         thread(name = "planner-warm-up-disk") {
-            thread(name = "planner-warm-up-ui") {
-                runCatching { warmUpInterface() }
-            }
             runCatching {
                 preloadReminderSettings()
                 database.openHelper.writableDatabase
             }
+        }
+    }
+
+    private var interfaceWarmedUp = false
+
+    // The first frame's CPU work, started by the activity rather than here, so a process
+    // woken for a reminder or a reboot never lays out text it will not show. Once per
+    // process; main thread only.
+    fun warmUpInterfaceOnce() {
+        if (interfaceWarmedUp) return
+        interfaceWarmedUp = true
+        thread(name = "planner-warm-up-ui") {
+            runCatching { warmUpInterface() }
         }
     }
 }

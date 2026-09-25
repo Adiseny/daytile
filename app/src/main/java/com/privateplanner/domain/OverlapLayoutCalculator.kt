@@ -1,6 +1,8 @@
 package com.privateplanner.domain
 
-class BlockLayout(
+// Compared by value, so a tile whose column is unchanged skips recomposition when
+// another block moves.
+data class BlockLayout(
     val columnIndex: Int,
     val columnCount: Int
 )

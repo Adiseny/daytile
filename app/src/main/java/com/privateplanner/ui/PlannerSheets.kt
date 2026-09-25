@@ -59,6 +59,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
@@ -77,6 +78,7 @@ import com.privateplanner.domain.TimeFormatter
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
@@ -327,6 +329,7 @@ internal fun BoxScope.DateJumpSheet(
         val today = LocalCurrentDate.current
         val locale = LocalLocale.current.platformLocale
         val titleFormatter = remember(locale) { dateFormatter(MonthTitlePattern, locale) }
+        val spokenFormatter = remember(locale) { dateFormatter(FullDatePattern, locale) }
 
         Column(
             modifier = Modifier
@@ -362,6 +365,7 @@ internal fun BoxScope.DateJumpSheet(
                 visibleMonth = visibleMonth,
                 selectedDate = selectedDate,
                 today = today,
+                spokenFormatter = spokenFormatter,
                 onSelect = onSelect
             )
 
@@ -497,6 +501,7 @@ private fun MonthGrid(
     visibleMonth: YearMonth,
     selectedDate: LocalDate,
     today: LocalDate,
+    spokenFormatter: DateTimeFormatter,
     onSelect: (LocalDate) -> Unit
 ) {
     val leadingBlanks = visibleMonth.atDay(1).dayOfWeek.value - 1
@@ -516,6 +521,7 @@ private fun MonthGrid(
                             date = date,
                             isSelected = date == selectedDate,
                             isToday = date == today,
+                            spokenFormatter = spokenFormatter,
                             onSelect = onSelect,
                             modifier = Modifier.weight(1f)
                         )
@@ -537,6 +543,7 @@ private fun DateCell(
     date: LocalDate,
     isSelected: Boolean,
     isToday: Boolean,
+    spokenFormatter: DateTimeFormatter,
     onSelect: (LocalDate) -> Unit,
     modifier: Modifier
 ) {
@@ -555,8 +562,11 @@ private fun DateCell(
         modifier = modifier
             .height(48.dp)
             .clickable { onSelect(date) }
+            // Spoken as a date, not as ISO digits, with the ring and fill as states.
             .semantics {
-                contentDescription = date.toString()
+                val spoken = date.format(spokenFormatter)
+                contentDescription = if (isToday) "Today, $spoken" else spoken
+                selected = isSelected
             }
             .padding(3.dp)
             .clip(shape)

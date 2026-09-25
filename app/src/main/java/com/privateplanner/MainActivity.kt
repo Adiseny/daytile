@@ -14,12 +14,13 @@ import com.privateplanner.ui.PlannerTheme
 import com.privateplanner.ui.PlannerViewModel
 import com.privateplanner.ui.applyPlannerSystemBars
 import com.privateplanner.ui.displayedPaletteForMinute
-import java.time.LocalTime
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        val app = application as PlannerApp
+        app.warmUpInterfaceOnce()
         // Before the window is attached, so the first frame already has the paper and bars.
-        applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(LocalTime.now())))
+        applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())))
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // The timeline is already at its final position. Reveal it without the
@@ -27,7 +28,6 @@ class MainActivity : ComponentActivity() {
             splashScreen.setOnExitAnimationListener { it.remove() }
         }
 
-        val app = application as PlannerApp
         // An explicit key: the default one is built from the class's canonical name by
         // reflection on every lookup.
         val plannerViewModel = ViewModelProvider(
