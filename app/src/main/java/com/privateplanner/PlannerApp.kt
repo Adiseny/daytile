@@ -21,9 +21,13 @@ class PlannerApp : Application() {
         // reminders switch is in memory when the planner first reads it, and SQLite is
         // open (a few milliseconds with schema validation) in time for the first query to
         // put the day's blocks in the first frame rather than a later one.
+        // Only a head start: a failure is left for the real first use to report as before,
+        // rather than crashing a process that may have started for a broadcast.
         thread(name = "planner-warm-up") {
-            preloadReminderSettings()
-            database.openHelper.writableDatabase
+            runCatching {
+                preloadReminderSettings()
+                database.openHelper.writableDatabase
+            }
         }
     }
 }
