@@ -73,6 +73,10 @@ android {
 
     androidResources {
         localeFilters += setOf("en")
+        // The reminder chime is played from a file descriptor, which a deflated
+        // entry cannot give. aapt2 stores .ogg and .wav uncompressed already but
+        // has no such rule for .flac.
+        noCompress += "flac"
     }
 
     packaging {

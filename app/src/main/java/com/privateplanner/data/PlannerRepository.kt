@@ -9,6 +9,7 @@ import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 class PlannerRepository private constructor(
@@ -30,9 +31,10 @@ class PlannerRepository private constructor(
     )
 
     fun observeBlocksForDate(date: LocalDate): Flow<List<PlannerBlock>> {
-        return dao.observeBlocksForDate(date.toEpochDay()).map { entities ->
-            entities.map { it.toDomain() }
-        }
+        // Room invalidates the table even when a write only affects another day.
+        return dao.observeBlocksForDate(date.toEpochDay())
+            .distinctUntilChanged()
+            .map { entities -> entities.map { it.toDomain() } }
     }
 
     suspend fun getBlocksForDate(date: LocalDate): List<PlannerBlock> {

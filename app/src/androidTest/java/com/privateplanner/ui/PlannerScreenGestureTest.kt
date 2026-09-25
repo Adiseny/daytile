@@ -27,8 +27,11 @@ import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.privateplanner.Reminders
 import com.privateplanner.data.PlannerBlockEntity
 import com.privateplanner.data.PlannerDatabase
@@ -152,6 +155,65 @@ class PlannerScreenGestureTest {
     }
 
     @Test
+    fun scrollingTileShowsThroughStatusBarAndHeaderAfterSheetDismissal() {
+        val viewModel = setPlannerContent()
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val empty = checkNotNull(automation.takeScreenshot())
+        val statusHeight = compose.runOnUiThread {
+            checkNotNull(ViewCompat.getRootWindowInsets(compose.activity.window.decorView))
+                .getInsets(WindowInsetsCompat.Type.statusBars()).top
+        }
+        assertTrue("Status icons must remain visible", statusHeight > 0)
+        // Away from the camera, clock, notification icons and right-hand icons.
+        val x = (empty.width * 0.7f).toInt()
+        val statusY = statusHeight / 2
+        val headingY = statusHeight + 6
+        val paper = empty.getPixel(x, statusY)
+        empty.recycle()
+
+        runBlocking {
+            checkNotNull(database).insertBlock("Glass regression", 0, TimeSnapper.MinutesPerDay)
+        }
+        compose.waitUntilBlockExists("Glass regression")
+        // Push the top of the tile past the status bar, including near midnight.
+        compose.onRoot().performTouchInput { swipeUp() }
+        compose.waitForIdle()
+
+        fun assertContinuousGlass() {
+            // A Compose-only capture misses Android's opaque protection overlay.
+            val screen = checkNotNull(automation.takeScreenshot())
+            try {
+                val status = screen.getPixel(x, statusY)
+                val heading = screen.getPixel(x, headingY)
+                val channels = listOf<(Int) -> Int>(
+                    android.graphics.Color::red,
+                    android.graphics.Color::green,
+                    android.graphics.Color::blue
+                )
+                assertTrue(
+                    "Tile must be visible behind the system status icons",
+                    channels.sumOf { kotlin.math.abs(it(status) - it(paper)) } > 20
+                )
+                channels.forEach { channel ->
+                    assertTrue(
+                        "Status bar and heading must share one continuous tint",
+                        kotlin.math.abs(channel(status) - channel(heading)) <= 5
+                    )
+                }
+            } finally {
+                screen.recycle()
+            }
+        }
+
+        assertContinuousGlass()
+        compose.onNode(hasContentDescription("Jump date", substring = true)).performClick()
+        compose.onNode(hasContentDescription("Dismiss Choose date")).assertExists()
+        compose.runOnUiThread { viewModel.dismissSheet() }
+        compose.waitForIdle()
+        assertContinuousGlass()
+    }
+
+    @Test
     fun largeFontCreateAndActionFlowRemainReachable() {
         setPlannerContent(fontScale = 2f)
 
@@ -219,6 +281,11 @@ class PlannerScreenGestureTest {
         compose.onNode(hasContentDescription("Dismiss Choose date")).performClick()
 
         val timeline = hasContentDescription("Day timeline", substring = true)
+        // Park at the top of the day first. The timeline opens scrolled to the
+        // current time, so late in the evening it is already at its end and a swipe
+        // up moves nothing — which made this assertion pass or fail on the clock.
+        repeat(4) { compose.onRoot().performTouchInput { swipeDown() } }
+        compose.waitForIdle()
         val initialTimelineDescription = compose.onNode(timeline)
             .fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
         compose.onRoot().performTouchInput { swipeUp() }

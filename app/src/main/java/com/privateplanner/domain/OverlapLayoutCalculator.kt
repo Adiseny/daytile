@@ -8,6 +8,7 @@ class BlockLayout(
 private val BlockLayoutOrder = compareBy<PlannerBlock> { it.startMinutes }
     .thenBy { it.endMinutes }
     .thenBy { it.id }
+private val SingleColumnLayout = BlockLayout(columnIndex = 0, columnCount = 1)
 
 object OverlapLayoutCalculator {
     fun calculate(blocks: List<PlannerBlock>): Map<Long, BlockLayout> {
@@ -41,6 +42,10 @@ object OverlapLayoutCalculator {
         result: MutableMap<Long, BlockLayout>
     ) {
         val size = endIndex - startIndex
+        if (size == 1) {
+            result[sorted[startIndex].id] = SingleColumnLayout
+            return
+        }
         val assignedColumns = IntArray(size)
         val columnEnds = IntArray(size)
         var columnCount = 0

@@ -50,6 +50,18 @@ class OverlapPlacementTest {
     }
 
     @Test
+    fun transientOverlapAtStartDoesNotHideInvalidOverlapLater() {
+        val blocks = (1L..7L).map { id -> block(id, 9 * 60, 60) } +
+            block(8, 9 * 60 + 30, 30)
+        assertPlacementMatchesOverlapPolicy(
+            existingBlocks = blocks,
+            active = block(99, 12 * 60, 60),
+            targetStart = 9 * 60,
+            targetDuration = 60
+        )
+    }
+
+    @Test
     fun invalidCandidatesAreRejectedBeforeOverlapCalculation() {
         val policy = OverlapPolicy.from(
             blocks = listOf(block(1, 9 * 60, 60)),

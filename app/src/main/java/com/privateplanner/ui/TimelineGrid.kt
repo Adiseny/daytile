@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -83,8 +85,7 @@ internal fun TimelineGrid(hiddenLabelMinutes: Int?) {
     val quarterTick = PlannerColours.QuarterTick
     val hourColour = PlannerColours.TimeText
     val halfHourColour = PlannerColours.MutedText
-    val hiddenHour = hiddenLabelMinutes?.takeIf { it % 60 == 0 }?.div(60)
-    val hiddenHalfHour = hiddenLabelMinutes?.takeIf { it % 60 == 30 }?.div(60)
+    val currentHiddenLabel by rememberUpdatedState(hiddenLabelMinutes)
     Spacer(
         modifier = Modifier
             .fillMaxSize()
@@ -133,6 +134,8 @@ internal fun TimelineGrid(hiddenLabelMinutes: Int?) {
                 val fiveMinTickColour = quarterTick.copy(alpha = FiveMinuteTickAlpha)
                 val stroke = Stroke(width = strokePx)
                 onDrawBehind {
+                    // Clock ticks change label visibility, not the cached grid paths.
+                    val hidden = currentHiddenLabel
                     drawPath(hourPath, hourLine, style = stroke)
                     drawPath(halfHourPath, halfHourLine, style = stroke)
                     drawPath(quarterPath, quarterTick, style = stroke)
@@ -142,7 +145,7 @@ internal fun TimelineGrid(hiddenLabelMinutes: Int?) {
                         colour = hourColour,
                         labelWidthPx = labelWidthPx,
                         labelHeightPx = hourLabelHeightPx,
-                        hiddenHour = hiddenHour
+                        hiddenHour = hidden?.takeIf { it % 60 == 0 }?.div(60)
                     ) { hour ->
                         (hourHeight * hour - hourLabelHeightPx / 2f).coerceAtLeast(0f)
                     }
@@ -151,7 +154,7 @@ internal fun TimelineGrid(hiddenLabelMinutes: Int?) {
                         colour = halfHourColour,
                         labelWidthPx = labelWidthPx,
                         labelHeightPx = halfHourLabelHeightPx,
-                        hiddenHour = hiddenHalfHour
+                        hiddenHour = hidden?.takeIf { it % 60 == 30 }?.div(60)
                     ) { hour ->
                         hourHeight * hour + hourHeight / 2f - halfHourLabelHeightPx / 2f
                     }

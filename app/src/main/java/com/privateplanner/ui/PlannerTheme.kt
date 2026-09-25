@@ -256,23 +256,30 @@ private fun millisUntilNextMinute(now: LocalTime): Long {
 internal fun PlannerSystemBarsEffect(dimmed: Boolean) {
     val view = LocalView.current
     val palette = PlannerColours
-    val paper = palette.Paper
-    val baseArgb = paper.toArgb()
-    val dimmedArgb = palette.Scrim.compositeOver(paper).toArgb()
-    val lightBackground = palette.LightBackground
     val activity = remember(view) { view.context.findComponentActivity() }
-    DisposableEffect(activity, dimmed, baseArgb, dimmedArgb, lightBackground) {
-        val style = when {
-            dimmed -> SystemBarStyle.dark(dimmedArgb)
-            lightBackground -> SystemBarStyle.light(baseArgb, PaperBackgroundDarkArgb)
-            else -> SystemBarStyle.dark(baseArgb)
-        }
-        activity?.enableEdgeToEdge(
-            statusBarStyle = style,
-            navigationBarStyle = style
-        )
+    DisposableEffect(activity, dimmed, palette) {
+        activity?.applyPlannerSystemBars(palette, dimmed)
         onDispose { }
     }
+}
+
+internal fun ComponentActivity.applyPlannerSystemBars(palette: PlannerPalette, dimmed: Boolean = false) {
+    val background = if (dimmed) palette.Scrim.compositeOver(palette.Paper) else palette.Paper
+    val darkIcons = palette.LightBackground && !dimmed
+    // The Compose header owns the tint behind the status icons. An opaque
+    // scrim here also creates an opaque ColorProtection on Android 15+.
+    enableEdgeToEdge(
+        statusBarStyle = if (darkIcons) {
+            SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        },
+        navigationBarStyle = if (darkIcons) {
+            SystemBarStyle.light(background.toArgb(), PaperBackgroundDarkArgb)
+        } else {
+            SystemBarStyle.dark(background.toArgb())
+        }
+    )
 }
 
 private tailrec fun Context.findComponentActivity(): ComponentActivity? {

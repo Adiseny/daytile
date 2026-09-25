@@ -2,17 +2,15 @@ package com.privateplanner
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.ViewModelProvider
 import com.privateplanner.domain.TimeSnapper
-import com.privateplanner.ui.PaperBackgroundDarkArgb
 import com.privateplanner.ui.PlannerScreen
 import com.privateplanner.ui.PlannerTheme
 import com.privateplanner.ui.PlannerViewModel
+import com.privateplanner.ui.applyPlannerSystemBars
 import com.privateplanner.ui.displayedPaletteForMinute
 import java.time.LocalTime
 
@@ -22,15 +20,7 @@ class MainActivity : ComponentActivity() {
         val launchPalette = displayedPaletteForMinute(minute)
         val launchBackground = launchPalette.Paper.toArgb()
         window.setBackgroundDrawable(launchBackground.toDrawable())
-        val systemBarStyle = if (launchPalette.LightBackground) {
-            SystemBarStyle.light(launchBackground, PaperBackgroundDarkArgb)
-        } else {
-            SystemBarStyle.dark(launchBackground)
-        }
-        enableEdgeToEdge(
-            statusBarStyle = systemBarStyle,
-            navigationBarStyle = systemBarStyle
-        )
+        applyPlannerSystemBars(launchPalette)
         super.onCreate(savedInstanceState)
 
         val app = application as PlannerApp

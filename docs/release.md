@@ -36,12 +36,15 @@ Run the complete host-side release checks:
 
 ```bash
 ./gradlew \
-  :app:testDebugUnitTest \
-  :app:testReleaseUnitTest \
+  :app:test \
   :app:lintRelease \
   :app:verifyPrivacy \
   :app:assembleRelease
 ```
+
+`:app:test` replaces the old `:app:testDebugUnitTest` and `:app:testReleaseUnitTest`.
+AGP 9 builds unit tests only for the `testBuildType`, so those per-variant task
+names no longer exist and naming them fails the build.
 
 With a non-production Android device connected, also run:
 

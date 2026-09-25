@@ -10,6 +10,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.domain.PlannerBlock
@@ -23,19 +25,33 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 private const val Store = "reminders"
 private const val EnabledKey = "enabled"
-private const val Channel = "reminders"
+// A channel's sound is fixed when it is created, so the two moments need two
+// channels rather than one. That also lets the warning be silenced on its own
+// while the start stays audible. Channels replaced along the way are deleted
+// rather than left behind in system settings.
+private const val UpcomingChannel = "reminders.upcoming"
+private const val StartChannel = "reminders.start"
+private val LegacyChannels = listOf("reminders", "reminders.2")
 private const val ExtraEpochMinute = "minute"
 
 // Enough warning to finish what you are doing and get to the next thing.
 private const val LeadMinutes = 5
 
-// One switch, one pending alarm. When reminders are on, the next block to start is
-// armed; firing it shows whatever begins at that minute and arms the block after.
-// A reboot, a clock change and every write all reduce to the same `sync` call, so
-// there is no per-block alarm state to drift, leak or reconcile.
+// No real event minute can collide with either: one means "nothing to arm", the
+// other "we have not looked yet".
+private const val NoAlarm = Long.MIN_VALUE
+private const val UnknownAlarm = Long.MAX_VALUE
+
+// One switch, one pending alarm. A block has two moments worth a notification: the
+// warning, LeadMinutes before it starts, and the start itself. Reminders arm the
+// nearer of those two moments across all blocks; firing it posts whatever is due at
+// that minute and arms the moment after. A reboot, a clock change and every write
+// all reduce to the same `sync` call, so there is no per-block alarm state to drift,
+// leak or reconcile.
 class Reminders(private val context: Context) {
     private val preferences by lazy(LazyThreadSafetyMode.NONE) {
         context.getSharedPreferences(Store, Context.MODE_PRIVATE)
@@ -46,10 +62,29 @@ class Reminders(private val context: Context) {
     @Volatile
     private var mayBeShowing = true
 
-    // Anything that clears alarms behind our back (reboot, update, force-stop) also
-    // kills the process, so remembering the armed minute cannot go stale.
+    // The intent never varies, so this is one ActivityManager round trip per process
+    // rather than one per posting sync.
+    private val open by lazy(LazyThreadSafetyMode.NONE) {
+        PendingIntent.getActivity(
+            context,
+            0,
+            Intent(context, MainActivity::class.java)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    // Alarms outlive the process, so like `mayBeShowing` this starts pessimistic:
+    // the first sync settles it, and afterwards a write that changes nothing costs
+    // no binder traffic at all. Anything that clears alarms behind our back (reboot,
+    // update, force-stop) also kills the process, so it cannot go stale.
     @Volatile
-    private var armedFor = Long.MIN_VALUE
+    private var armedFor = UnknownAlarm
+
+    // Channels persist across restarts, so declaring them is a once-per-process
+    // errand rather than something every post should pay for.
+    @Volatile
+    private var channelsReady = false
 
     var enabled: Boolean
         get() = preferences.getBoolean(EnabledKey, false)
@@ -66,35 +101,48 @@ class Reminders(private val context: Context) {
         val nowMinute = epochMinute(now.toLocalDate(), TimeSnapper.minuteOfDay(now.toLocalTime()))
         if (firedMinute >= 0 || mayBeShowing) show(repository, on, nowMinute, firedMinute)
 
-        val from = maxOf(nowMinute, firedMinute) + 1
-        val next = if (on) repository.getNextBlock(dateOf(from), minuteOf(from)) else null
+        val after = maxOf(nowMinute, firedMinute)
+        val event = if (on) nextEvent(repository, after) else NoAlarm
+        // Most writes (a rename, an edit on another day) leave the next moment alone,
+        // and with reminders off there is never anything to arm. Both land here, and
+        // neither reaches a system service.
+        if (event == armedFor) return@withContext
         val alarms = context.getSystemService(AlarmManager::class.java)
-        if (next == null) {
+        if (event == NoAlarm) {
             // Nothing to arm, so only touch the pending intent if one already exists.
             alarmIntent(0L, PendingIntent.FLAG_NO_CREATE)?.let {
                 alarms.cancel(it)
                 it.cancel()
             }
-            armedFor = Long.MIN_VALUE
+            armedFor = NoAlarm
             return@withContext
         }
-        // Most writes (a rename, an edit on another day) leave the next block alone.
-        val target = epochMinute(next.date, next.startMinutes)
-        if (target == armedFor) return@withContext
-        val alarm = alarmIntent(target, PendingIntent.FLAG_UPDATE_CURRENT)!!
-        val warnAt = millisAt(next.date, next.startMinutes) - LeadMinutes * 60_000L
+        val alarm = alarmIntent(event, PendingIntent.FLAG_UPDATE_CURRENT)!!
+        val at = millisAt(dateOf(event), minuteOf(event))
         try {
-            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, warnAt, alarm)
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
         } catch (_: SecurityException) {
             // Exact alarms revoked in system settings: still deliver, just not to the minute.
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, warnAt, alarm)
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm)
         }
-        armedFor = target
+        armedFor = event
     }
 
-    // What is showing is made to equal what should be showing: every block inside its
-    // reminder window, and nothing else. Re-posting an id updates it in place, so a
-    // block that is moved or resized corrects itself instead of going stale.
+    // The first block after `after` owns the nearest moment: its warning if that has
+    // not passed, otherwise its start. Only when the warning has passed can a later
+    // block's warning still land first, which is the one extra lookup.
+    private suspend fun nextEvent(repository: PlannerRepository, after: Long): Long {
+        val first = repository.startAfter(after) ?: return NoAlarm
+        if (first - LeadMinutes > after) return first - LeadMinutes
+        val later = repository.startAfter(after + LeadMinutes) ?: return first
+        return minOf(first, later - LeadMinutes)
+    }
+
+    // What is showing is made to equal what should be showing: every block inside one of
+    // its two windows, and nothing else. The countdown notification is posted under the
+    // block's negated id so that both can stand at once and each is cancelled on its own
+    // terms. Re-posting an id updates it in place, so a block that is moved or resized
+    // corrects itself instead of going stale.
     private suspend fun show(
         repository: PlannerRepository,
         on: Boolean,
@@ -102,14 +150,17 @@ class Reminders(private val context: Context) {
         firedMinute: Long
     ) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        val due = LinkedHashMap<Int, PlannerBlock>(2)
+        val due = LinkedHashMap<Int, PlannerBlock>(4)
         if (on && firedMinute >= 0) {
             repository.getBlocksStartingAt(dateOf(firedMinute), minuteOf(firedMinute))
                 .forEach { due[it.id.toInt()] = it }
+            val warned = firedMinute + LeadMinutes
+            repository.getBlocksStartingAt(dateOf(warned), minuteOf(warned))
+                .forEach { due[-it.id.toInt()] = it }
         }
         manager.activeNotifications.forEach { posted ->
-            val block = if (on) repository.getBlock(posted.id.toLong()) else null
-            if (block != null && showsAt(block, nowMinute)) {
+            val block = if (on) repository.getBlock(abs(posted.id).toLong()) else null
+            if (block != null && showsAt(block, nowMinute, posted.id < 0)) {
                 due[posted.id] = block
             } else {
                 manager.cancel(posted.id)
@@ -118,34 +169,42 @@ class Reminders(private val context: Context) {
         mayBeShowing = due.isNotEmpty()
         if (due.isEmpty()) return
 
-        manager.createNotificationChannel(
-            NotificationChannel(Channel, "Reminders", NotificationManager.IMPORTANCE_HIGH)
-        )
-        val open = PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java)
-                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        if (!channelsReady) {
+            LegacyChannels.forEach(manager::deleteNotificationChannel)
+            manager.createNotificationChannels(
+                listOf(
+                    channel(UpcomingChannel, "Coming up", "reminder_upcoming"),
+                    channel(StartChannel, "Starting now", "reminder_start")
+                )
+            )
+            channelsReady = true
+        }
         val postedAt = System.currentTimeMillis()
         due.forEach { (id, block) ->
-            val endsAt = millisAt(block.date, block.endMinutes)
-            val remaining = endsAt - postedAt
+            val upcoming = id < 0
+            val until = millisAt(
+                block.date,
+                if (upcoming) block.startMinutes else block.endMinutes
+            )
+            val remaining = until - postedAt
             if (remaining <= 0) return@forEach
+            val length = " · " + TimeFormatter.duration(block.durationMinutes)
             manager.notify(
                 id,
-                Notification.Builder(context, Channel)
+                Notification.Builder(context, if (upcoming) UpcomingChannel else StartChannel)
                     .setSmallIcon(R.drawable.ic_bell)
                     .setContentTitle(block.title)
                     .setContentText(
-                        TimeFormatter.range(block.startMinutes, block.durationMinutes) +
-                            " · " + TimeFormatter.duration(block.durationMinutes)
+                        if (upcoming) {
+                            "Starts " + TimeFormatter.time(block.startMinutes) + length
+                        } else {
+                            TimeFormatter.range(block.startMinutes, block.durationMinutes) + length
+                        }
                     )
-                    // Countdown to the end, ticked by the system: no wakeups, no redraw
-                    // work, nothing for the app to keep alive, and the system withdraws
-                    // it when the block is over.
-                    .setWhen(endsAt)
+                    // Countdown to the start, then to the end, ticked by the system: no
+                    // wakeups, no redraw work, nothing for the app to keep alive, and the
+                    // system withdraws each one as its moment arrives.
+                    .setWhen(until)
                     .setUsesChronometer(true)
                     .setChronometerCountDown(true)
                     .setTimeoutAfter(remaining)
@@ -159,6 +218,20 @@ class Reminders(private val context: Context) {
             )
         }
     }
+
+    // Addressed by name rather than by id: a channel stores its sound URI forever,
+    // so a numeric id baked into one breaks the moment resource ids shift. The
+    // resource shrinker retains these dynamically loaded sounds via raw/keep.xml.
+    private fun channel(id: String, name: String, sound: String) =
+        NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply {
+            setSound(
+                Uri.parse("android.resource://${context.packageName}/raw/$sound"),
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .build()
+            )
+        }
 
     private fun alarmIntent(minute: Long, flags: Int): PendingIntent? {
         return PendingIntent.getBroadcast(
@@ -192,10 +265,21 @@ internal fun Context.postNotificationsGranted(): Boolean =
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
         PackageManager.PERMISSION_GRANTED
 
-// A reminder stands for "this block is imminent or running".
-private fun showsAt(block: PlannerBlock, nowMinute: Long): Boolean =
-    nowMinute >= epochMinute(block.date, block.startMinutes) - LeadMinutes &&
-        nowMinute < epochMinute(block.date, block.endMinutes)
+// One reminder stands for "this block is imminent", the other for "this block is
+// running", and the start is the seam where the first hands over to the second.
+private fun showsAt(block: PlannerBlock, nowMinute: Long, upcoming: Boolean): Boolean {
+    val start = epochMinute(block.date, block.startMinutes)
+    return if (upcoming) {
+        nowMinute >= start - LeadMinutes && nowMinute < start
+    } else {
+        nowMinute >= start && nowMinute < epochMinute(block.date, block.endMinutes)
+    }
+}
+
+// The first block starting strictly after `minute`, as an epoch minute.
+private suspend fun PlannerRepository.startAfter(minute: Long): Long? =
+    getNextBlock(dateOf(minute + 1), minuteOf(minute + 1))
+        ?.let { epochMinute(it.date, it.startMinutes) }
 
 private fun millisAt(date: LocalDate, minutes: Int): Long =
     date.atStartOfDay(ZoneId.systemDefault())

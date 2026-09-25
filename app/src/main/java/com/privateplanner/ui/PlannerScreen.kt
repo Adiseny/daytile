@@ -41,13 +41,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -209,9 +210,8 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
             TimelineHeader(
                 selectedDate = uiState.selectedDate,
                 onDateClick = viewModel::openDateJump,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .onSizeChanged { headerHeightPx = it.height }
+                onContentHeight = { headerHeightPx = it },
+                modifier = Modifier.align(Alignment.TopCenter)
             )
         }
 
@@ -321,10 +321,17 @@ private fun PlannerSnackbar(data: SnackbarData) {
     }
 }
 
+// A single translucent tint spans the status bar and heading. It never becomes
+// opaque, so scrolling tiles remain visible behind the system icons too.
+private const val HeaderTintAlpha = 0.68f
+private val HeaderFadeHeight = 56.dp
+private const val ScrimSteps = 32
+
 @Composable
 private fun TimelineHeader(
     selectedDate: LocalDate,
     onDateClick: () -> Unit,
+    onContentHeight: (Int) -> Unit,
     modifier: Modifier
 ) {
     val today = LocalCurrentDate.current
@@ -353,32 +360,39 @@ private fun TimelineHeader(
         }
     }
     val typography = MaterialTheme.typography
+    val paper = PlannerColours.Paper
     val titleStyle = remember(typography) {
         typography.headlineMedium.copy(fontSize = 22.sp, lineHeight = 27.sp)
     }
     val subtitleStyle = remember(typography) {
         typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp)
     }
-    val paper = PlannerColours.Paper
-    val background = remember(paper) {
-        Brush.verticalGradient(
-            colorStops = arrayOf(
-                0f to paper,
-                0.72f to paper,
-                0.9f to paper.copy(alpha = 0.72f),
-                1f to paper.copy(alpha = 0f)
-            )
-        )
-    }
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(background)
+            .drawWithCache {
+                val fadeHeight = HeaderFadeHeight.toPx()
+                // Smootherstep meets the constant tint and transparent timeline
+                // with zero slope. Cache the brush until size or paper changes;
+                // scrolling only redraws this small strip, with no blur buffers.
+                val glaze = Brush.verticalGradient(
+                    colorStops = Array(ScrimSteps + 1) { index ->
+                        val t = index.toFloat() / ScrimSteps
+                        val eased = t * t * t * (t * (t * 6f - 15f) + 10f)
+                        t to paper.copy(alpha = HeaderTintAlpha * (1f - eased))
+                    },
+                    startY = size.height - fadeHeight,
+                    endY = size.height
+                )
+                onDrawBehind { drawRect(glaze) }
+            }
+            .padding(bottom = HeaderFadeHeight)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .onSizeChanged { onContentHeight(it.height) }
                 .statusBarsPadding()
                 .padding(top = 4.dp, bottom = 14.dp)
                 .clip(HeaderButtonShape)
@@ -397,7 +411,7 @@ private fun TimelineHeader(
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    color = PlannerColours.MutedText,
+                    color = PlannerColours.PrimaryText,
                     style = subtitleStyle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

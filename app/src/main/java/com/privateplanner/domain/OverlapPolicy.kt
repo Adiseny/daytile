@@ -11,17 +11,23 @@ class OverlapPolicy private constructor(
     private val minutesPerSlot: Int
 ) {
     fun placement(startMinutes: Int, durationMinutes: Int): MovePlacement {
-        val maxOverlap = maxIncludingCandidate(startMinutes, durationMinutes)
-            ?: return MovePlacement.Invalid
-        return when {
-            maxOverlap <= MaxSavedOverlap -> MovePlacement.Savable
-            maxOverlap <= MaxTransientOverlap -> MovePlacement.TransientOnly
-            else -> MovePlacement.Invalid
+        if (!isValidCandidate(startMinutes, durationMinutes)) return MovePlacement.Invalid
+        var result = MovePlacement.Savable
+        val endSlot = (startMinutes + durationMinutes) / minutesPerSlot
+        for (slot in startMinutes / minutesPerSlot until endSlot) {
+            if (counts[slot] >= MaxTransientOverlap) return MovePlacement.Invalid
+            if (counts[slot] >= MaxSavedOverlap) result = MovePlacement.TransientOnly
         }
+        return result
     }
 
     fun canPlace(startMinutes: Int, durationMinutes: Int): Boolean {
-        return placement(startMinutes, durationMinutes) == MovePlacement.Savable
+        if (!isValidCandidate(startMinutes, durationMinutes)) return false
+        val endSlot = (startMinutes + durationMinutes) / minutesPerSlot
+        for (slot in startMinutes / minutesPerSlot until endSlot) {
+            if (counts[slot] >= MaxSavedOverlap) return false
+        }
+        return true
     }
 
     fun largestValidDuration(startMinutes: Int, preferredDurationMinutes: Int): Int? {
@@ -41,17 +47,6 @@ class OverlapPolicy private constructor(
             }
         }
         return duration
-    }
-
-    private fun maxIncludingCandidate(startMinutes: Int, durationMinutes: Int): Int? {
-        if (!isValidCandidate(startMinutes, durationMinutes)) return null
-        val startSlot = startMinutes / minutesPerSlot
-        val endSlot = (startMinutes + durationMinutes) / minutesPerSlot
-        var maxOverlap = 1
-        for (slot in startSlot until endSlot) {
-            maxOverlap = maxOf(maxOverlap, counts[slot] + 1)
-        }
-        return maxOverlap
     }
 
     companion object {

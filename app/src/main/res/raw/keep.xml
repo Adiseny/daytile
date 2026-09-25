@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification channels persist name-based sound URIs across app upgrades. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/reminder_upcoming,@raw/reminder_start" />

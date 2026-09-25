@@ -5,6 +5,7 @@ import com.privateplanner.domain.PlannerBlock
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -12,6 +13,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlannerRepositoryTest {
+    @Test
+    fun unchangedDatabaseResultsDoNotEmitButEveryEditDoes() = runBlocking {
+        val date = LocalDate.of(2026, 5, 29)
+        val original = entity(1, date.toString(), "Focus", 9 * 60, 60)
+        val renamed = original.copy(title = "Renamed")
+        val moved = renamed.copy(startMinutes = 10 * 60)
+        val resized = moved.copy(durationMinutes = 30)
+        val dao = object : PlannerBlockDao by FakePlannerBlockDao(emptyList()) {
+            override fun observeBlocksForDate(dateEpochDay: Long) = flowOf(
+                listOf(original),
+                listOf(original.copy()), // Room creates fresh entities after invalidation.
+                listOf(renamed),
+                listOf(moved),
+                listOf(resized),
+                listOf(resized.copy()),
+                emptyList()
+            )
+        }
+
+        val updates = PlannerRepository(dao).observeBlocksForDate(date).toList()
+
+        assertEquals(5, updates.size)
+        assertEquals("Focus", updates[0].single().title)
+        assertEquals("Renamed", updates[1].single().title)
+        assertEquals(10 * 60, updates[2].single().startMinutes)
+        assertEquals(30, updates[3].single().durationMinutes)
+        assertTrue(updates[4].isEmpty())
+    }
+
     @Test
     fun createBlockReusesPreviousDurationForSameTitleIgnoringCase() = runBlocking {
         val dao = FakePlannerBlockDao(

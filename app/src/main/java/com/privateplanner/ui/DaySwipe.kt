@@ -23,7 +23,6 @@ internal fun Modifier.axisLockedDaySwipe(
             val touchSlop = viewConfiguration.touchSlop
             var total = Offset.Zero
             var horizontal = false
-            var vertical = false
 
             while (true) {
                 val event = awaitPointerEvent()
@@ -34,18 +33,13 @@ internal fun Modifier.axisLockedDaySwipe(
 
                 if (
                     !horizontal &&
-                    !vertical &&
                     total.getDistanceSquared() > touchSlop * touchSlop
                 ) {
                     if (abs(total.x) > abs(total.y)) {
                         horizontal = true
                     } else {
-                        vertical = true
+                        return@awaitEachGesture
                     }
-                }
-
-                if (vertical) {
-                    return@awaitEachGesture
                 }
 
                 if (horizontal) {
