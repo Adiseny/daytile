@@ -13,6 +13,7 @@
 - Dragging a block towards the top or bottom of the screen now scrolls relative to what is visible: scrolling builds to full speed at the bottom of the heading and at the top of the navigation bar, so the finger never has to cover either, and both zones follow font size and navigation mode. Full speed at the bottom was previously out of reach.
 - A tap on empty time is no longer lost when it lands just after a block is dropped or changed.
 - The date sheet reads calendar days aloud as dates and announces today and the selected day.
+- Launching no longer flashes through the system's black or white splash: on Android 13 and later the splash takes the planner's own light or dark paper, with matching status and navigation bars, as it was when the app was last left. Earlier versions follow the system's dark theme setting.
 
 ### Responsiveness and efficiency
 

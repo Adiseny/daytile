@@ -1,7 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.Daytile" parent="@android:style/Theme.Material.Light.NoActionBar">
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- One launch theme per palette polarity. The system draws the splash from these before
+         any of the app runs, so each sets the splash and both bars, not just the window. -->
+    <style name="Theme.Daytile.Day" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">#F6F2EC</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">#F6F2EC</item>
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     </style>
+
+    <style name="Theme.Daytile.Night" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#15120D</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">#15120D</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    </style>
+
+    <!-- Follows the system's light or dark setting until MainActivity records the palette. -->
+    <style name="Theme.Daytile" parent="Theme.Daytile.Day" />
 </resources>

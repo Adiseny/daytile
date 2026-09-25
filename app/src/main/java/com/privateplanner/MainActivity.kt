@@ -14,6 +14,7 @@ import com.privateplanner.ui.PlannerTheme
 import com.privateplanner.ui.PlannerViewModel
 import com.privateplanner.ui.applyPlannerSystemBars
 import com.privateplanner.ui.displayedPaletteForMinute
+import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,4 +44,29 @@ class MainActivity : ComponentActivity() {
         applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())))
         findViewById<View>(android.R.id.content).filterTouchesWhenObscured = true
     }
+
+    // The system draws the splash before any of the app runs, so by itself it follows the
+    // phone's light or dark setting, not the palette: a dark phone opened a light planner
+    // through a black splash. Leaving records the polarity on screen for the next launch;
+    // only the first launch after 07:00 or 20:00 can still differ. Off the main thread, and
+    // the system call, which persists the theme, is made only when the polarity changed.
+    override fun onStop() {
+        super.onStop()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val light = displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())).LightBackground
+        val splash = splashScreen
+        val app = applicationContext
+        thread(name = "planner-splash") {
+            runCatching {
+                val launch = app.getSharedPreferences(LaunchStore, MODE_PRIVATE)
+                if (!launch.contains(SplashLightKey) || launch.getBoolean(SplashLightKey, true) != light) {
+                    splash.setSplashScreenTheme(if (light) R.style.Theme_Daytile_Day else R.style.Theme_Daytile_Night)
+                    launch.edit().putBoolean(SplashLightKey, light).apply()
+                }
+            }
+        }
+    }
 }
+
+private const val LaunchStore = "launch"
+private const val SplashLightKey = "splashLight"
