@@ -3,6 +3,7 @@ package com.privateplanner
 import android.app.Application
 import com.privateplanner.data.PlannerDatabase
 import com.privateplanner.data.PlannerRepository
+import com.privateplanner.ui.warmUpInterface
 import kotlin.concurrent.thread
 
 class PlannerApp : Application() {
@@ -22,8 +23,13 @@ class PlannerApp : Application() {
         // open (a few milliseconds with schema validation) in time for the first query to
         // put the day's blocks in the first frame rather than a later one.
         // Only a head start: a failure is left for the real first use to report as before,
-        // rather than crashing a process that may have started for a broadcast.
-        thread(name = "planner-warm-up") {
+        // rather than crashing a process that may have started for a broadcast. The main
+        // thread starts one thread; that one starts the CPU half, which the first frame
+        // needs too, to run beside the disk half.
+        thread(name = "planner-warm-up-disk") {
+            thread(name = "planner-warm-up-ui") {
+                runCatching { warmUpInterface() }
+            }
             runCatching {
                 preloadReminderSettings()
                 database.openHelper.writableDatabase

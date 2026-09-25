@@ -46,11 +46,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
@@ -66,14 +71,54 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.privateplanner.R
 import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+
+private const val MonthTitlePattern = "MMMM yyyy"
+private val WeekdayLabels = ConcurrentHashMap<Locale, List<String>>()
+
+private fun weekdayLabels(locale: Locale): List<String> = WeekdayLabels.getOrPut(locale) {
+    DayOfWeek.entries.map { day -> day.getDisplayName(java.time.format.TextStyle.NARROW, locale) }
+}
+
+// The bell from res/drawable/ic_bell.xml (still the notification icon), built from the
+// same path data in code so opening the date sheet parses no XML and the slashed variant
+// needs no drawable. Stroke-only, as the XML is: its transparent fill draws nothing.
+private fun bell(slashed: Boolean): ImageVector = ImageVector.Builder(
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+).apply {
+    val ink = SolidColor(Color.White)
+    addPath(
+        addPathNodes("M12,3.2C8.9,3.2 6.8,5.6 6.8,9v3.6L5.2,15.4h13.6l-1.6,-2.8V9c0,-3.4 -2.1,-5.8 -5.2,-5.8z"),
+        stroke = ink,
+        strokeLineWidth = 1.6f,
+        strokeLineCap = StrokeCap.Round,
+        strokeLineJoin = StrokeJoin.Round
+    )
+    addPath(addPathNodes("M10.1,18.1a1.9,1.9 0 0 0 3.8,0"), stroke = ink, strokeLineWidth = 1.6f, strokeLineCap = StrokeCap.Round)
+    if (slashed) {
+        addPath(addPathNodes("M4.6,4.6L19.4,19.4"), stroke = ink, strokeLineWidth = 1.6f, strokeLineCap = StrokeCap.Round)
+    }
+}.build()
+
+private val BellOn = bell(slashed = false)
+private val BellOff = bell(slashed = true)
+
+// Called on the launch warm-up thread: builds the bells (with this file's other
+// constants) and loads the month and weekday text the date sheet shows.
+internal fun prepareDateSheet(locale: Locale, date: LocalDate) {
+    date.format(dateFormatter(MonthTitlePattern, locale))
+    weekdayLabels(locale)
+}
 
 private val SheetShape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
 private val SheetButtonShape = RoundedCornerShape(8.dp)
@@ -93,31 +138,48 @@ internal fun BoxScope.BlockInputSheet(
     onDismiss: () -> Unit,
     errorText: String?
 ) {
+    // Held out here, so a keystroke recomposes only the sheet's content below and the
+    // field and button colours are built once rather than on every keystroke.
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var value by remember(title) {
+        mutableStateOf(
+            TextFieldValue(
+                text = title,
+                selection = TextRange(0, title.length)
+            )
+        )
+    }
+    val fieldColours = TextFieldDefaults.colors(
+        focusedContainerColor = Color.Transparent,
+        unfocusedContainerColor = Color.Transparent,
+        focusedIndicatorColor = Color.Transparent,
+        unfocusedIndicatorColor = Color.Transparent,
+        errorIndicatorColor = Color.Transparent,
+        cursorColor = PlannerColours.PrimaryText
+    )
+    val buttonColours = ButtonDefaults.buttonColors(
+        containerColor = PlannerColours.PrimaryText,
+        contentColor = PlannerColours.Sheet,
+        disabledContainerColor = PlannerColours.AddButtonDisabled,
+        disabledContentColor = PlannerColours.MutedText
+    )
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboard?.show()
+    }
+
     PlannerSheetSurface(
         accessibilityTitle = "$buttonLabel block",
         onDismiss = onDismiss
     ) {
-        val focusRequester = remember { FocusRequester() }
-        val keyboard = LocalSoftwareKeyboardController.current
-        var value by remember(title) {
-            mutableStateOf(
-                TextFieldValue(
-                    text = title,
-                    selection = TextRange(0, title.length)
-                )
-            )
-        }
         val canSubmit = value.text.isNotBlank() && value.text.length <= MaxTitleLength
 
         fun submit() {
             if (canSubmit) {
                 onSubmit(value.text)
             }
-        }
-
-        LaunchedEffect(Unit) {
-            focusRequester.requestFocus()
-            keyboard?.show()
         }
 
         Column(
@@ -154,14 +216,7 @@ internal fun BoxScope.BlockInputSheet(
                         imeAction = ImeAction.Done
                     ),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        errorIndicatorColor = Color.Transparent,
-                        cursorColor = PlannerColours.PrimaryText
-                    ),
+                    colors = fieldColours,
                     textStyle = TitleInputStyle,
                     modifier = Modifier
                         .weight(1f)
@@ -171,12 +226,7 @@ internal fun BoxScope.BlockInputSheet(
                 Button(
                     onClick = { submit() },
                     enabled = canSubmit,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PlannerColours.PrimaryText,
-                        contentColor = PlannerColours.Sheet,
-                        disabledContainerColor = PlannerColours.AddButtonDisabled,
-                        disabledContentColor = PlannerColours.MutedText
-                    ),
+                    colors = buttonColours,
                     modifier = Modifier
                         .padding(start = 10.dp)
                         .height(48.dp)
@@ -276,9 +326,7 @@ internal fun BoxScope.DateJumpSheet(
         var visibleMonth by remember(selectedDate) { mutableStateOf(YearMonth.from(selectedDate)) }
         val today = LocalCurrentDate.current
         val locale = LocalLocale.current.platformLocale
-        val titleFormatter = remember(locale) {
-            DateTimeFormatter.ofPattern("MMMM yyyy", locale)
-        }
+        val titleFormatter = remember(locale) { dateFormatter(MonthTitlePattern, locale) }
 
         Column(
             modifier = Modifier
@@ -335,9 +383,7 @@ internal fun BoxScope.DateJumpSheet(
                     }
                 ) {
                     Icon(
-                        painter = painterResource(
-                            if (remindersOn) R.drawable.ic_bell else R.drawable.ic_bell_off
-                        ),
+                        painter = rememberVectorPainter(if (remindersOn) BellOn else BellOff),
                         contentDescription = null,
                         tint = reminderColour,
                         modifier = Modifier.size(18.dp)
@@ -431,11 +477,7 @@ private fun MonthChevron(
 @Composable
 private fun WeekdayRow() {
     val locale = LocalLocale.current.platformLocale
-    val labels = remember(locale) {
-        DayOfWeek.entries.map { day ->
-            day.getDisplayName(java.time.format.TextStyle.NARROW, locale)
-        }
-    }
+    val labels = remember(locale) { weekdayLabels(locale) }
 
     Row(modifier = Modifier.fillMaxWidth()) {
         labels.forEach { label ->

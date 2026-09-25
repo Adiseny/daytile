@@ -22,10 +22,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val app = application as PlannerApp
+        // An explicit key: the default one is built from the class's canonical name by
+        // reflection on every lookup.
         val plannerViewModel = ViewModelProvider(
             this,
             viewModelFactory { initializer { PlannerViewModel(app.repository, app.reminders) } }
-        )[PlannerViewModel::class.java]
+        )["planner", PlannerViewModel::class.java]
         setContent {
             PlannerTheme {
                 PlannerScreen(viewModel = plannerViewModel)

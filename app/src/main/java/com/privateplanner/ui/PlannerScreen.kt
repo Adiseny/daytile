@@ -1,6 +1,7 @@
 package com.privateplanner.ui
 
 import android.Manifest
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -89,7 +90,10 @@ import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
 import com.privateplanner.postNotificationsGranted
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
@@ -126,8 +130,7 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
     }
     PlannerSystemBarsEffect(dimmed = sheet != null)
 
-    // The host only ever shows the current snackbar: clearing it cancels the effect
-    // below, which takes it off screen as well.
+    // The host only ever shows the current snackbar, so clearing it is enough.
     BackHandler(enabled = sheet != null || currentSnackbar != null || uiState.selectedDate != today) {
         when {
             sheet != null -> viewModel.dismissSheet()
@@ -136,8 +139,10 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
         }
     }
 
-    LaunchedEffect(currentSnackbar?.id) {
-        val message = currentSnackbar ?: return@LaunchedEffect
+    // Composed only while there is a snackbar: clearing it cancels this, which takes it
+    // off screen, and no effect runs while there is none.
+    if (currentSnackbar != null) LaunchedEffect(currentSnackbar.id) {
+        val message = currentSnackbar
         val result = snackbarHostState.showSnackbar(
             message = when (message) {
                 is PlannerSnackbar.Deleted -> "Deleted"
@@ -175,14 +180,13 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
             blocks = selectedBlocks,
             scrollState = timelineScrollState,
             headerHeightPx = headerHeightPx,
-            scrollTargetMinutes = uiState.scrollTargetMinutes,
+            takeScrollTarget = viewModel::takeScrollTarget,
             onEmptyTimeTap = viewModel::openCreate,
             onBlockTap = viewModel::openActions,
             onBlockRename = viewModel::openRename,
             onBlockDelete = deleteBlockWithHaptic,
             onBlockMove = viewModel::moveBlock,
             onBlockResize = viewModel::resizeBlock,
-            onScrollTargetConsumed = viewModel::consumeScrollTarget,
             modifier = backgroundSemantics
         )
 
@@ -304,6 +308,26 @@ private fun PlannerSnackbar(data: SnackbarData) {
     }
 }
 
+private const val HeadingDatePattern = "EEEE, d MMMM"
+private val DateFormatters = ConcurrentHashMap<Pair<String, Locale>, DateTimeFormatter>()
+
+// Each pattern is parsed once per locale and shared, including with the launch warm-up.
+internal fun dateFormatter(pattern: String, locale: Locale): DateTimeFormatter =
+    DateFormatters.getOrPut(pattern to locale) { DateTimeFormatter.ofPattern(pattern, locale) }
+
+// Launch's main-thread work that can be done ahead, on the warm-up thread: the time
+// zone's rules (the first clock read loads them), the palettes with their colour spaces
+// and Material's colour tokens, the grid labels, and the locale's day and month names
+// (the first format loads them). Whatever is not ready in time is done where it was.
+internal fun Context.warmUpInterface() {
+    val now = LocalDateTime.now()
+    colourSchemeFor(displayedPaletteForMinute(TimeSnapper.minuteOfDay(now.toLocalTime())))
+    prepareGridLabels()
+    val locale = Locale.getDefault()
+    now.toLocalDate().format(dateFormatter(HeadingDatePattern, locale))
+    prepareDateSheet(locale, now.toLocalDate())
+}
+
 // A single translucent tint spans the status bar and heading. It never becomes
 // opaque, so scrolling tiles remain visible behind the system icons too.
 private const val HeaderTintAlpha = 0.68f
@@ -319,9 +343,7 @@ private fun TimelineHeader(
 ) {
     val today = LocalCurrentDate.current
     val locale = LocalLocale.current.platformLocale
-    val dateFormatter = remember(locale) {
-        DateTimeFormatter.ofPattern("EEEE, d MMMM", locale)
-    }
+    val dateFormatter = remember(locale) { dateFormatter(HeadingDatePattern, locale) }
     // Relative days show their date underneath; other years (rare) add the year.
     val (title, subtitle) = remember(selectedDate, today, dateFormatter) {
         val relative = when (selectedDate) {
@@ -333,9 +355,7 @@ private fun TimelineHeader(
         when {
             relative != null -> relative to selectedDate.format(dateFormatter)
             selectedDate.year == today.year -> selectedDate.format(dateFormatter) to null
-            else -> selectedDate.format(
-                DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", dateFormatter.locale)
-            ) to null
+            else -> selectedDate.format(dateFormatter("EEEE, d MMMM yyyy", locale)) to null
         }
     }
     val paper = PlannerColours.Paper
@@ -398,14 +418,13 @@ private fun Timeline(
     blocks: List<PlannerBlock>,
     scrollState: ScrollState,
     headerHeightPx: IntState,
-    scrollTargetMinutes: Int?,
+    takeScrollTarget: () -> Int?,
     onEmptyTimeTap: (Int) -> Unit,
     onBlockTap: (Long) -> Unit,
     onBlockRename: (Long) -> Unit,
     onBlockDelete: (Long) -> Unit,
     onBlockMove: (Long, Int) -> Boolean,
     onBlockResize: (Long, Int) -> Boolean,
-    onScrollTargetConsumed: () -> Unit,
     modifier: Modifier
 ) {
     val density = LocalDensity.current
@@ -427,37 +446,42 @@ private fun Timeline(
     }
     // Only the grid and the indicator read the minute clock, so a tick never recomposes this.
     val isToday = selectedDate == LocalCurrentDate.current
-    var viewportHeightPx by remember { mutableIntStateOf(0) }
+    // Read only by gestures, when they start, and by the accessibility focus below, so a
+    // new viewport height recomposes nothing.
+    val viewportHeightPx = remember { mutableIntStateOf(0) }
     val accessibilityFocusMinutes = remember(scrollState, hourHeightPx, topClearancePx) {
         derivedStateOf {
             val focusY = scrollState.value +
-                viewportHeightPx * CurrentTimeViewportFraction -
+                viewportHeightPx.intValue * CurrentTimeViewportFraction -
                 topClearancePx
             TimeSnapper.minutesFromY(focusY.coerceAtLeast(0f), hourHeightPx)
-        }
-    }
-
-    LaunchedEffect(scrollTargetMinutes, viewportHeightPx, hourHeightPx, topClearancePx) {
-        val target = scrollTargetMinutes
-        if (target != null && viewportHeightPx > 0) {
-            val targetPx = (topClearancePx + target / 60f * hourHeightPx).roundToInt()
-            val visibleLeadPx = if (isToday) {
-                (viewportHeightPx * CurrentTimeViewportFraction).roundToInt()
-            } else {
-                0
-            }
-            val maxScrollPx = (topClearancePx + 24f * hourHeightPx - viewportHeightPx)
-                .roundToInt()
-                .coerceAtLeast(0)
-            scrollState.scrollTo((targetPx - visibleLeadPx).coerceIn(0, maxScrollPx))
-            onScrollTargetConsumed()
         }
     }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .onSizeChanged { viewportHeightPx = it.height }
+            // Runs inside the first layout pass, after the scroll range is measured and
+            // before the content is placed: the launch scroll lands in the very first
+            // frame, rather than a frame showing midnight and then a jump to now.
+            .onSizeChanged { size ->
+                viewportHeightPx.intValue = size.height
+                if (size.height > 0) {
+                    takeScrollTarget()?.let { target ->
+                        val targetPx = (topClearancePx + target / 60f * hourHeightPx).roundToInt()
+                        val visibleLeadPx = if (isToday) {
+                            (size.height * CurrentTimeViewportFraction).roundToInt()
+                        } else {
+                            0
+                        }
+                        val maxScrollPx = (topClearancePx + 24f * hourHeightPx - size.height)
+                            .roundToInt()
+                            .coerceAtLeast(0)
+                        val to = (targetPx - visibleLeadPx).coerceIn(0, maxScrollPx)
+                        scrollState.dispatchRawDelta((to - scrollState.value).toFloat())
+                    }
+                }
+            }
             .verticalScroll(scrollState)
     ) {
         BoxWithConstraints(
@@ -500,7 +524,7 @@ private fun Timeline(
             }
 
             if (isToday) {
-                CurrentTimeIndicator(timelineWidthPx = constraints.maxWidth)
+                CurrentTimeIndicator()
             }
         }
     }
@@ -514,7 +538,7 @@ private fun TimeBlock(
     timelineWidth: Dp,
     scrollState: ScrollState,
     headerHeightPx: IntState,
-    viewportHeightPx: Int,
+    viewportHeightPx: IntState,
     hourHeightPx: Float,
     onTap: () -> Unit,
     onRename: () -> Unit,
@@ -564,8 +588,9 @@ private fun TimeBlock(
         TimeFormatter.duration(displayedDurationMinutes)
     }
     val active = moveActive || resizeActive
-    val titleFollowOffset: Density.() -> Int = if (visualHeight < LongTitlePinMinHeight) {
-        { 0 }
+    // Only long tiles pin their title; the rest carry no offset node at all.
+    val titleFollowOffset: (Density.() -> Int)? = if (visualHeight < LongTitlePinMinHeight) {
+        null
     } else {
         {
             val followStart =
@@ -713,7 +738,7 @@ private fun Modifier.blockMoveInput(
     latestVisualOffset: () -> Dp,
     hourHeightPx: Float,
     scrollState: ScrollState,
-    viewportHeightPx: Int,
+    viewportHeightPx: IntState,
     haptics: HapticFeedback,
     onTap: () -> Unit,
     onMoveActiveChange: (Boolean) -> Unit,
@@ -724,7 +749,7 @@ private fun Modifier.blockMoveInput(
     onResizePreview: (Int?) -> Unit,
     onResize: (Int) -> Boolean
 ): Modifier {
-    return pointerInput(blockId, hourHeightPx, viewportHeightPx) {
+    return pointerInput(blockId, hourHeightPx) {
         coroutineScope gestureScope@{
             awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -823,7 +848,7 @@ private fun Modifier.blockMoveInput(
                         initialPointerY = downYInVisual,
                         hourHeightPx = hourHeightPx,
                         scrollState = scrollState,
-                        viewportHeightPx = viewportHeightPx,
+                        viewportHeightPx = viewportHeightPx.intValue,
                         haptics = haptics,
                         onResizeActiveChange = onResizeActiveChange,
                         onResizePreview = onResizePreview,
@@ -868,7 +893,7 @@ private fun Modifier.blockMoveInput(
                 updateMoveFromGesture()
                 autoScrollJob = this@gestureScope.launchEdgeAutoScroll(
                     pointerViewportY = { pointerViewportY },
-                    viewportHeightPx = viewportHeightPx,
+                    viewportHeightPx = viewportHeightPx.intValue,
                     scrollState = scrollState,
                     density = this,
                     enabled = { hasDraggedAfterHold },

@@ -1,11 +1,14 @@
 package com.privateplanner.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -22,13 +26,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFontFamilyResolver
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.font.createFontFamilyResolver
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -38,7 +48,6 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private val CurrentTimeLabelShape = RoundedCornerShape(7.dp)
-private val CurrentTimeLabelLeft = 6.dp
 private val HourLabels = List(24) { hour -> TimeFormatter.time(hour * 60) }
 private val HalfHourLabels = List(24) { hour -> TimeFormatter.time(hour * 60 + 30) }
 private val HourLabelStyle = TextStyle(
@@ -53,6 +62,34 @@ private val HalfHourLabelStyle = TextStyle(
     lineHeight = 14.sp,
     fontWeight = FontWeight.SemiBold
 )
+// The 48 label layouts, measured once. Layout depends only on text, style, density, font
+// scale and direction, so layouts measured on the launch warm-up thread with the
+// window's values draw exactly as ones measured in composition.
+private class GridLabels(measurer: TextMeasurer, val density: Density, val direction: LayoutDirection) {
+    val hours = HourLabels.map { measurer.measure(text = it, style = HourLabelStyle, maxLines = 1) }
+    val halfHours = HalfHourLabels.map { measurer.measure(text = it, style = HalfHourLabelStyle, maxLines = 1) }
+
+    fun fits(density: Density, direction: LayoutDirection): Boolean =
+        this.density.density == density.density &&
+            this.density.fontScale == density.fontScale &&
+            this.direction == direction
+}
+
+@Volatile
+private var preparedGridLabels: GridLabels? = null
+
+// Runs on the launch warm-up thread, so the first frame draws the labels instead of
+// laying them out on the main thread. Composition falls back to measuring if the
+// window's density or direction differ.
+internal fun Context.prepareGridLabels() {
+    val density = Density(this)
+    preparedGridLabels = GridLabels(
+        TextMeasurer(createFontFamilyResolver(this), density, LayoutDirection.Ltr, cacheSize = 0),
+        density,
+        LayoutDirection.Ltr
+    )
+}
+
 private const val HourLabelCollisionMinutes = 14
 private const val HalfHourLabelCollisionMinutes = 13
 
@@ -76,22 +113,18 @@ internal fun TimelineGrid(showsNow: Boolean) {
     val hiddenLabel = remember(showsNow, minute) {
         derivedStateOf { if (showsNow) hiddenGridLabelMinutes(minute.intValue) else null }
     }
-    val textMeasurer = rememberTextMeasurer(cacheSize = 0)
-    val hourLayouts = remember(textMeasurer) {
-        HourLabels.map { label ->
-            textMeasurer.measure(text = label, style = HourLabelStyle, maxLines = 1)
-        }
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    val fontFamilyResolver = LocalFontFamilyResolver.current
+    val labels = remember(density, direction, fontFamilyResolver) {
+        preparedGridLabels?.takeIf { it.fits(density, direction) }
+            ?: GridLabels(TextMeasurer(fontFamilyResolver, density, direction, cacheSize = 0), density, direction)
     }
-    val halfHourLayouts = remember(textMeasurer) {
-        HalfHourLabels.map { label ->
-            textMeasurer.measure(text = label, style = HalfHourLabelStyle, maxLines = 1)
-        }
-    }
-    val hourLine = PlannerColours.HourLine
-    val halfHourLine = PlannerColours.HalfHourLine
-    val quarterTick = PlannerColours.QuarterTick
-    val hourColour = PlannerColours.TimeText
-    val halfHourColour = PlannerColours.MutedText
+    val hourLayouts = labels.hours
+    val halfHourLayouts = labels.halfHours
+    // Read in the draw pass, so a palette step redraws the grid without rebuilding its
+    // cached paths.
+    val palette = rememberUpdatedState(PlannerColours)
     Spacer(
         modifier = Modifier
             .fillMaxSize()
@@ -137,18 +170,18 @@ internal fun TimelineGrid(showsNow: Boolean) {
                     }
                 }
 
-                val fiveMinTickColour = quarterTick.copy(alpha = FiveMinuteTickAlpha)
                 val stroke = Stroke(width = strokePx)
                 onDrawBehind {
                     // Clock ticks change label visibility, not the cached grid paths.
                     val hidden = hiddenLabel.value
-                    drawPath(hourPath, hourLine, style = stroke)
-                    drawPath(halfHourPath, halfHourLine, style = stroke)
-                    drawPath(quarterPath, quarterTick, style = stroke)
-                    drawPath(fiveMinutePath, fiveMinTickColour, style = stroke)
+                    val colours = palette.value
+                    drawPath(hourPath, colours.HourLine, style = stroke)
+                    drawPath(halfHourPath, colours.HalfHourLine, style = stroke)
+                    drawPath(quarterPath, colours.QuarterTick, style = stroke)
+                    drawPath(fiveMinutePath, colours.QuarterTick.copy(alpha = FiveMinuteTickAlpha), style = stroke)
                     drawTimelineLabels(
                         layouts = hourLayouts,
-                        colour = hourColour,
+                        colour = colours.TimeText,
                         labelWidthPx = labelWidthPx,
                         labelHeightPx = hourLabelHeightPx,
                         hiddenHour = hidden?.takeIf { it % 60 == 0 }?.div(60)
@@ -157,7 +190,7 @@ internal fun TimelineGrid(showsNow: Boolean) {
                     }
                     drawTimelineLabels(
                         layouts = halfHourLayouts,
-                        colour = halfHourColour,
+                        colour = colours.MutedText,
                         labelWidthPx = labelWidthPx,
                         labelHeightPx = halfHourLabelHeightPx,
                         hiddenHour = hidden?.takeIf { it % 60 == 30 }?.div(60)
@@ -169,11 +202,10 @@ internal fun TimelineGrid(showsNow: Boolean) {
     )
 }
 
-// The label also draws the line and dot, outside its own bounds, rather than laying out
-// a day-tall canvas for them. Its placement is whole pixels, so shifting the day
-// coordinates by it draws exactly the same pixels.
+// One node: the full-width start of its chain draws the line and dot in the day's own
+// x coordinates, and the rest narrows to the label, with no day-tall canvas beside it.
 @Composable
-internal fun CurrentTimeIndicator(timelineWidthPx: Int) {
+internal fun CurrentTimeIndicator() {
     val minutes = LocalCurrentMinuteOfDay.current.intValue
     val timeText = remember(minutes) { TimeFormatter.time(minutes) }
     val indicatorColour = PlannerColours.Delete
@@ -188,18 +220,18 @@ internal fun CurrentTimeIndicator(timelineWidthPx: Int) {
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,
         modifier = Modifier
-            .offset(x = CurrentTimeLabelLeft, y = labelTop)
-            .width(58.dp)
+            .offset(y = labelTop)
+            .fillMaxWidth()
             .height(HourLabelHeight)
             .zIndex(4f)
             .drawBehind {
-                val left = CurrentTimeLabelLeft.roundToPx()
+                // Placement is whole pixels, so this is the day's rounded y exactly.
                 val lineY = y.toPx().roundToInt().toFloat() - labelTop.roundToPx()
-                val gutter = TimelineGutter.toPx() - left
+                val gutter = TimelineGutter.toPx()
                 drawLine(
                     color = indicatorColour,
                     start = Offset(gutter, lineY),
-                    end = Offset((timelineWidthPx - left).toFloat(), lineY),
+                    end = Offset(size.width, lineY),
                     strokeWidth = 2.dp.toPx()
                 )
                 drawCircle(
@@ -208,6 +240,8 @@ internal fun CurrentTimeIndicator(timelineWidthPx: Int) {
                     center = Offset(gutter, lineY)
                 )
             }
+            .padding(start = 6.dp)
+            .width(58.dp)
             .background(PlannerColours.Sheet, CurrentTimeLabelShape)
             .border(1.dp, indicatorColour.copy(alpha = 0.35f), CurrentTimeLabelShape)
             .semantics {

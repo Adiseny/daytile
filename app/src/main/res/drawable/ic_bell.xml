@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Stroked to match the weight of the sheet's other glyphs; also the
-     notification's status-bar icon, where it stays crisp at small sizes. -->
+<!-- The notification's status-bar icon, stroked so it stays crisp at small sizes.
+     The date sheet draws the same paths in code (PlannerSheets.kt). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"

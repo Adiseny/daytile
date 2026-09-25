@@ -27,7 +27,6 @@ data class PlannerUiState(
     val sheet: PlannerSheet?,
     val snackbar: PlannerSnackbar?,
     val sheetError: String?,
-    val scrollTargetMinutes: Int?,
     val remindersOn: Boolean
 )
 
@@ -56,21 +55,25 @@ class PlannerViewModel(
     private val repository: PlannerRepository,
     private val reminders: Reminders
 ) : ViewModel() {
+    private val launchedAt = LocalDateTime.now()
     private val mutableUiState = MutableStateFlow(
-        LocalDateTime.now().let { now ->
-            PlannerUiState(
-                selectedDate = now.toLocalDate(),
-                blocksByDate = emptyMap(),
-                sheet = null,
-                snackbar = null,
-                sheetError = null,
-                scrollTargetMinutes = TimeSnapper.minuteOfDay(now.toLocalTime()),
-                // Already in memory: PlannerApp starts loading it before the activity exists.
-                remindersOn = reminders.enabled
-            )
-        }
+        PlannerUiState(
+            selectedDate = launchedAt.toLocalDate(),
+            blocksByDate = emptyMap(),
+            sheet = null,
+            snackbar = null,
+            sheetError = null,
+            // Already in memory: PlannerApp starts loading it before the activity exists.
+            remindersOn = reminders.enabled
+        )
     )
     val uiState: StateFlow<PlannerUiState> = mutableUiState.asStateFlow()
+
+    // Where the timeline opens, taken once by its first layout. Outside the UI state, so
+    // taking it publishes nothing and recomposes nothing.
+    private var scrollTarget: Int? = TimeSnapper.minuteOfDay(launchedAt.toLocalTime())
+
+    fun takeScrollTarget(): Int? = scrollTarget.also { scrollTarget = null }
 
     private val pendingTimeUpdates = mutableMapOf<Long, PendingTimeUpdate>()
     private val timeWriteJobs = mutableMapOf<Long, Job>()
@@ -257,10 +260,6 @@ class PlannerViewModel(
 
     fun notificationsBlocked() {
         showMessage("Turn on notifications in system settings")
-    }
-
-    fun consumeScrollTarget() {
-        mutableUiState.update { it.copy(scrollTargetMinutes = null) }
     }
 
     private fun setDate(date: LocalDate) {

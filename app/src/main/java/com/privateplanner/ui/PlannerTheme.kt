@@ -341,7 +341,7 @@ private val plannerTypography = Typography(
 
 // Only the slots the text field, text buttons and selection handles read; every
 // surface and container colour is drawn from the palette directly.
-private fun colourSchemeFor(palette: PlannerPalette) = if (palette.LightBackground) {
+internal fun colourSchemeFor(palette: PlannerPalette) = if (palette.LightBackground) {
     lightColorScheme(primary = palette.PrimaryText, onSurface = palette.PrimaryText, error = palette.Delete)
 } else {
     darkColorScheme(primary = palette.PrimaryText, onSurface = palette.PrimaryText, error = palette.Delete)

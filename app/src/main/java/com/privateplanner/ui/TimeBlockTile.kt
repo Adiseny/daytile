@@ -75,7 +75,7 @@ internal fun TimeBlockForeground(
     durationText: String,
     tileWidth: Dp,
     visualHeight: Dp,
-    titleFollowOffset: Density.() -> Int,
+    titleFollowOffset: (Density.() -> Int)?,
     modifier: Modifier
 ) {
     val paper = PlannerColours.Paper
@@ -196,7 +196,7 @@ private fun BlockContent(
     durationText: String,
     tileWidth: Dp,
     height: Dp,
-    titleFollowOffset: Density.() -> Int,
+    titleFollowOffset: (Density.() -> Int)?,
     ink: Color
 ) {
     val compact = height < 48.dp
@@ -244,7 +244,7 @@ private fun BlockPrimaryContent(
     rangeText: () -> String,
     height: Dp,
     endPadding: Dp,
-    titleFollowOffset: Density.() -> Int,
+    titleFollowOffset: (Density.() -> Int)?,
     ink: Color
 ) {
     when {
@@ -316,12 +316,12 @@ private fun BlockTwoLineContent(
     metaLineHeight: TextUnit,
     ink: Color,
     modifier: Modifier,
-    titleFollowOffset: Density.() -> Int
+    titleFollowOffset: (Density.() -> Int)?
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
-            .offset { IntOffset(0, titleFollowOffset()) }
+            .then(if (titleFollowOffset != null) Modifier.offset { IntOffset(0, titleFollowOffset()) } else Modifier)
     ) {
         Text(
             text = title,
