@@ -1,21 +1,25 @@
 package com.privateplanner.domain
 
 object TimeFormatter {
-    fun time(minutes: Int): String {
+    fun time(minutes: Int): String = buildString(capacity = 5) { appendTime(minutes) }
+
+    private fun StringBuilder.appendTime(minutes: Int) {
         val clamped = minutes.coerceIn(0, TimeSnapper.MinutesPerDay)
         val hour = clamped / TimeSnapper.MinutesPerHour
         val minute = clamped % TimeSnapper.MinutesPerHour
-        return buildString(capacity = 5) {
-            append(hour)
-            append(':')
-            if (minute < 10) append('0')
-            append(minute)
-        }
+        append(hour)
+        append(':')
+        if (minute < 10) append('0')
+        append(minute)
     }
 
     // An en dash on screen; read aloud, " to ".
     fun range(startMinutes: Int, durationMinutes: Int, separator: String = " \u2013 "): String {
-        return time(startMinutes) + separator + time(startMinutes + durationMinutes)
+        return buildString(capacity = 10 + separator.length) {
+            appendTime(startMinutes)
+            append(separator)
+            appendTime(startMinutes + durationMinutes)
+        }
     }
 
     fun duration(durationMinutes: Int): String {

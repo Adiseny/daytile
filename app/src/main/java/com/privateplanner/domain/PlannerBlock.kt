@@ -7,7 +7,7 @@ const val MaxTitleLength = 120
 
 @Immutable
 data class PlannerBlock(
-    val id: Long,
+    val id: Long = 0,
     val date: LocalDate,
     val title: String,
     val startMinutes: Int,

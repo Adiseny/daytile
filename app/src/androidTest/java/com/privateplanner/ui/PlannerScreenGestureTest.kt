@@ -1,5 +1,6 @@
 package com.privateplanner.ui
 
+import com.privateplanner.domain.PlannerBlock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
@@ -13,6 +14,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -32,7 +35,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.privateplanner.Reminders
-import com.privateplanner.data.PlannerBlockEntity
 import com.privateplanner.data.PlannerDatabase
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.domain.MaxTitleLength
@@ -154,6 +156,38 @@ class PlannerScreenGestureTest {
     }
 
     @Test
+    fun denseDayKeepsOnlyNearbyTilesAndScrollsToBothEnds() {
+        setPlannerContent {
+            withTransaction {
+                for (start in 0 until 1440 step 10) {
+                    repeat(7) { column -> insertBlock("Dense $start/$column", start, 10) }
+                }
+            }
+        }
+        compose.waitUntilBlockExists("Dense")
+        fun tileCount() = compose.onAllNodes(hasContentDescription("Dense", substring = true))
+            .fetchSemanticsNodes().size
+        assertTrue("Offscreen tiles should be released; kept ${tileCount()}", tileCount() < 700)
+
+        val timeline = compose.onNode(hasScrollAction())
+        timeline.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -100_000f) }
+        compose.waitUntilBlockExists("Dense 0/0")
+        assertTrue(tileCount() < 700)
+        timeline.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+        compose.waitUntilBlockExists("Dense 1430/6")
+        assertTrue(tileCount() < 700)
+
+        // Editing a tile that was composed after scrolling still persists normally.
+        val actions = compose.onNode(hasContentDescription("Dense 1430/6", substring = true))
+            .fetchSemanticsNode().config[SemanticsActions.CustomActions]
+        assertTrue(actions.first { it.label == "Delete" }.action())
+        waitUntilStoredBlockMissing("Dense 1430/6")
+        compose.waitUntilNodeWithText("Undo")
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitUntilBlockExists("Dense 1430/6")
+    }
+
+    @Test
     fun scrollingTileShowsThroughStatusBarAndHeaderAfterSheetDismissal() {
         val viewModel = setPlannerContent()
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
@@ -174,8 +208,11 @@ class PlannerScreenGestureTest {
             checkNotNull(database).insertBlock("Glass regression", 0, TimeSnapper.MinutesPerDay)
         }
         compose.waitUntilBlockExists("Glass regression")
-        // Push the top of the tile past the status bar, including near midnight.
-        compose.onRoot().performTouchInput { swipeUp() }
+        // Scroll in the gutter: near midnight the default swipe starts on the
+        // full-day tile's resize handle and shortens it instead of scrolling.
+        compose.onRoot().performTouchInput {
+            swipe(Offset(20f, height * 0.8f), Offset(20f, height * 0.2f), 300)
+        }
         compose.waitForIdle()
 
         fun assertContinuousGlass() {
@@ -190,7 +227,7 @@ class PlannerScreenGestureTest {
                     android.graphics.Color::blue
                 )
                 assertTrue(
-                    "Tile must be visible behind the system status icons",
+                    "Tile must be visible behind the system status icons: paper=${paper.toUInt().toString(16)}, status=${status.toUInt().toString(16)}, heading=${heading.toUInt().toString(16)}",
                     channels.sumOf { kotlin.math.abs(it(status) - it(paper)) } > 20
                 )
                 channels.forEach { channel ->
@@ -357,9 +394,9 @@ class PlannerScreenGestureTest {
         startMinutes: Int,
         durationMinutes: Int
     ) {
-        blockDao().insertBlock(
-            PlannerBlockEntity(
-                dateEpochDay = LocalDate.now().toEpochDay(),
+        insertBlock(
+            PlannerBlock(
+                date = LocalDate.now(),
                 title = title,
                 startMinutes = startMinutes,
                 durationMinutes = durationMinutes
@@ -377,10 +414,10 @@ class PlannerScreenGestureTest {
             step TimeSnapper.MinimumDurationMinutes
         ) {
             repeat(OverlapPolicy.MaxSavedOverlap) {
-                blockDao().insertBlock(
-                    PlannerBlockEntity(
+                insertBlock(
+                    PlannerBlock(
                         id = id++,
-                        dateEpochDay = today,
+                        date = LocalDate.ofEpochDay(today),
                         title = "Load $id",
                         startMinutes = start,
                         durationMinutes = TimeSnapper.MinimumDurationMinutes
@@ -399,14 +436,14 @@ class PlannerScreenGestureTest {
             .coerceIn(0, latestSafeStart)
     }
 
-    private fun storedBlock(title: String): PlannerBlockEntity {
+    private fun storedBlock(title: String): PlannerBlock {
         return checkNotNull(findStoredBlock(title)) { "No stored block titled $title" }
     }
 
-    private fun findStoredBlock(title: String): PlannerBlockEntity? {
+    private fun findStoredBlock(title: String): PlannerBlock? {
         val db = checkNotNull(database)
         return runBlocking {
-            db.blockDao()
+            db
                 .getBlocksForDate(LocalDate.now().toEpochDay())
                 .firstOrNull { block -> block.title == title }
         }
@@ -414,9 +451,9 @@ class PlannerScreenGestureTest {
 
     private fun waitUntilStoredBlock(
         title: String,
-        predicate: (PlannerBlockEntity) -> Boolean
-    ): PlannerBlockEntity {
-        var observed: PlannerBlockEntity? = null
+        predicate: (PlannerBlock) -> Boolean
+    ): PlannerBlock {
+        var observed: PlannerBlock? = null
         compose.waitUntil(timeoutMillis = 3_000) {
             findStoredBlock(title)?.also { observed = it }?.let(predicate) == true
         }

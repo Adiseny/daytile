@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
+import androidx.collection.LongObjectMap
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.domain.BlockLayout
 import com.privateplanner.domain.OverlapLayoutCalculator
@@ -90,6 +91,11 @@ class Reminders(private val context: Context) {
     // errand rather than something every post should pay for.
     private var channelsReady = false
 
+    // Once switching off has cleared persistent alarms and notifications, planner writes
+    // need no coroutine, clock read or system call until the switch changes again.
+    @Volatile
+    private var settledOff = false
+
     // Writes, the switch and broadcasts all sync here and may overlap, so the lock keeps
     // one sync at a time (and publishes the fields above between them): each reads state
     // only once it holds it, so the last sync always reflects the latest write.
@@ -100,7 +106,10 @@ class Reminders(private val context: Context) {
 
     var enabled: Boolean
         get() = preferences.getBoolean(EnabledKey, false)
-        set(value) = preferences.edit().putBoolean(EnabledKey, value).apply()
+        set(value) {
+            settledOff = false
+            preferences.edit().putBoolean(EnabledKey, value).apply()
+        }
 
     // Fire and forget: the caller, usually a write the user is waiting on, returns at
     // once and the reminder follows a moment later, entirely off the interaction path.
@@ -109,6 +118,10 @@ class Reminders(private val context: Context) {
         firedMinute: Long = -1L,
         then: () -> Unit = {}
     ) {
+        if (settledOff && !enabled) {
+            then()
+            return
+        }
         scope.launch {
             try {
                 sync(repository, firedMinute)
@@ -125,6 +138,8 @@ class Reminders(private val context: Context) {
 
     private suspend fun syncLocked(repository: PlannerRepository, firedMinute: Long) {
         val on = enabled
+        if (!on && settledOff) return
+        settledOff = false
         val nowMinute = Math.floorDiv(TimeSnapper.localNowMillis(), TimeSnapper.MillisPerMinute)
         if (firedMinute >= 0 || mayBeShowing) show(repository, on, nowMinute, firedMinute)
 
@@ -134,7 +149,10 @@ class Reminders(private val context: Context) {
         // Most writes (a rename, an edit on another day) leave the next moment alone,
         // and with reminders off there is never anything to arm. Both land here, and
         // neither reaches a system service.
-        if (event == armedFor && at == armedAt) return
+        if (event == armedFor && at == armedAt) {
+            settledOff = !on
+            return
+        }
         val alarms = context.getSystemService(AlarmManager::class.java)
         if (event == NoAlarm) {
             // Nothing to arm, so only touch the pending intent if one already exists.
@@ -144,6 +162,7 @@ class Reminders(private val context: Context) {
             }
             armedFor = NoAlarm
             armedAt = 0L
+            settledOff = !on
             return
         }
         val alarm = alarmIntent(event, PendingIntent.FLAG_UPDATE_CURRENT)!!
@@ -216,7 +235,7 @@ class Reminders(private val context: Context) {
         val postedAt = System.currentTimeMillis()
         // A tile's shade follows its column among overlapping blocks, so the accent comes
         // from the same layout the timeline draws.
-        val layouts = HashMap<LocalDate, Map<Long, BlockLayout>>(2)
+        val layouts = HashMap<LocalDate, LongObjectMap<BlockLayout>>(2)
         due.forEach { (id, block) ->
             val upcoming = id < 0
             val until = millisAt(

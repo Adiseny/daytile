@@ -7,50 +7,45 @@ enum class MovePlacement {
 }
 
 class OverlapPolicy private constructor(
-    private val counts: IntArray,
+    private val limits: IntArray?,
     private val minutesPerSlot: Int
 ) {
     fun placement(startMinutes: Int, durationMinutes: Int): MovePlacement {
         if (!isValidCandidate(startMinutes, durationMinutes)) return MovePlacement.Invalid
-        var result = MovePlacement.Savable
+        val limit = limits?.get(startMinutes / minutesPerSlot) ?: return MovePlacement.Savable
         val endSlot = (startMinutes + durationMinutes) / minutesPerSlot
-        for (slot in startMinutes / minutesPerSlot until endSlot) {
-            if (counts[slot] >= MaxTransientOverlap) return MovePlacement.Invalid
-            if (counts[slot] >= MaxSavedOverlap) result = MovePlacement.TransientOnly
+        return when {
+            endSlot > (limit and 0xffff) -> MovePlacement.Invalid
+            endSlot > (limit ushr 16) -> MovePlacement.TransientOnly
+            else -> MovePlacement.Savable
         }
-        return result
     }
 
     fun canPlace(startMinutes: Int, durationMinutes: Int): Boolean =
         placement(startMinutes, durationMinutes) == MovePlacement.Savable
 
     fun largestValidDuration(startMinutes: Int, preferredDurationMinutes: Int): Int? {
+        if (!isValidCandidate(startMinutes, TimeSnapper.MinimumDurationMinutes)) return null
         val duration = TimeSnapper.clampDuration(
             startMinutes,
             TimeSnapper.snapDurationToNearest(preferredDurationMinutes)
         )
-        if (!isValidCandidate(startMinutes, duration)) return null
-
-        val startSlot = startMinutes / minutesPerSlot
-        val endSlot = (startMinutes + duration) / minutesPerSlot
-        for (slot in startSlot until endSlot) {
-            if (counts[slot] >= MaxSavedOverlap) {
-                val validDuration = (slot * minutesPerSlot - startMinutes) /
-                    TimeSnapper.SnapMinutes * TimeSnapper.SnapMinutes
-                return validDuration.takeIf { it >= TimeSnapper.MinimumDurationMinutes }
-            }
-        }
-        return duration
+        val limit = limits?.get(startMinutes / minutesPerSlot) ?: return duration
+        val available = ((limit ushr 16) * minutesPerSlot - startMinutes) /
+            TimeSnapper.SnapMinutes * TimeSnapper.SnapMinutes
+        return minOf(duration, available).takeIf { it >= TimeSnapper.MinimumDurationMinutes }
     }
 
     companion object {
         const val MaxSavedOverlap = 7
         const val MaxTransientOverlap = 8
+        private val Unrestricted = OverlapPolicy(null, TimeSnapper.SnapMinutes)
 
         fun from(
             blocks: List<PlannerBlock>,
             excludedBlockId: Long
         ): OverlapPolicy {
+            if (blocks.size < MaxSavedOverlap) return Unrestricted
             var minutesPerSlot = TimeSnapper.SnapMinutes
             for (block in blocks) {
                 if (
@@ -77,9 +72,22 @@ class OverlapPolicy private constructor(
             }
 
             var active = 0
+            var peak = 0
             for (slot in counts.indices) {
                 active += counts[slot]
+                peak = maxOf(peak, active)
                 counts[slot] = active
+            }
+            if (peak < MaxSavedOverlap) return Unrestricted
+            // Reuse the counts array for the next blocked slot at each threshold. Both
+            // indices fit in 16 bits (at most 1,440); each drag/resize check is one lookup,
+            // including on legacy days whose boundaries do not fall on five minutes.
+            var nextSaved = slotCount
+            var nextTransient = slotCount
+            for (slot in counts.lastIndex downTo 0) {
+                if (counts[slot] >= MaxSavedOverlap) nextSaved = slot
+                if (counts[slot] >= MaxTransientOverlap) nextTransient = slot
+                counts[slot] = (nextSaved shl 16) or nextTransient
             }
             return OverlapPolicy(counts, minutesPerSlot)
         }
@@ -87,7 +95,7 @@ class OverlapPolicy private constructor(
         private fun isValidCandidate(startMinutes: Int, durationMinutes: Int): Boolean {
             return startMinutes >= 0 &&
                 durationMinutes >= TimeSnapper.MinimumDurationMinutes &&
-                startMinutes + durationMinutes <= TimeSnapper.MinutesPerDay &&
+                startMinutes <= TimeSnapper.MinutesPerDay - durationMinutes &&
                 startMinutes % TimeSnapper.SnapMinutes == 0 &&
                 durationMinutes % TimeSnapper.SnapMinutes == 0
         }

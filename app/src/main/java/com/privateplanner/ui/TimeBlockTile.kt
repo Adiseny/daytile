@@ -246,7 +246,6 @@ private fun BlockPrimaryContent(
     ink: Color
 ) {
     when {
-        height < 14.dp -> Unit
         height < 32.dp -> BlockOneLineContent(
             title = title,
             titleFontSize = 10.sp,

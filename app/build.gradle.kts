@@ -21,8 +21,8 @@ android {
         applicationId = "com.privateplanner"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.3.1"
+        versionCode = 8
+        versionName = "1.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -101,7 +101,13 @@ android {
                 "META-INF/*.kotlin_module",
                 "kotlin/**",
                 "DebugProbesKt.bin",
-                "kotlin-tooling-metadata.json"
+                "kotlin-tooling-metadata.json",
+                // Identical licenses retained once, with all four component names,
+                // in src/main/resources/META-INF/LICENSE-androidx.txt.
+                "META-INF/androidx/annotation/annotation/LICENSE.txt",
+                "META-INF/androidx/collection/collection-ktx/LICENSE.txt",
+                "META-INF/androidx/collection/collection/LICENSE.txt",
+                "META-INF/androidx/lifecycle/lifecycle-common/LICENSE.txt"
             )
         }
     }
@@ -123,6 +129,7 @@ dependencies {
 
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.collection:collection:1.5.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material:material-ripple")
     // Lifecycle 2.11 requires compileSdk 37 and AGP 9.1, which this toolchain cannot use.

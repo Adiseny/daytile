@@ -9,9 +9,12 @@ import com.privateplanner.data.PlannerDatabase
 import com.privateplanner.data.PlannerRepository
 import java.time.LocalDate
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,6 +36,28 @@ class ReminderSchedulingTest {
     fun tearDown() {
         database.close()
         clearArmedAlarm()
+    }
+
+    @Test
+    fun settledDisabledRemindersCompleteWithoutSchedulingAndCanBeEnabledAgain() = runBlocking {
+        val reminders = Reminders(context).apply { enabled = false }
+        val repository = PlannerRepository(database)
+        reminders.sync(repository)
+        repeat(20) {
+            var finished = false
+            reminders.syncSoon(repository) { finished = true }
+            assertTrue("A settled disabled sync must finish immediately", finished)
+        }
+
+        repository.createBlock(LocalDate.now().plusDays(1), 540, "Future")
+        reminders.enabled = true
+        val finished = CompletableDeferred<Unit>()
+        reminders.syncSoon(repository) { finished.complete(Unit) }
+        withTimeout(5_000) { finished.await() }
+        assertNotNull("Enabling must invalidate the disabled shortcut", armedAlarm())
+        reminders.enabled = false
+        reminders.sync(repository)
+        assertNull(armedAlarm())
     }
 
     @Test

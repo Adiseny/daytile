@@ -1,5 +1,6 @@
 package com.privateplanner.ui
 
+import androidx.collection.longObjectMapOf
 import com.privateplanner.domain.BlockLayout
 import com.privateplanner.domain.PlannerBlock
 import java.time.LocalDate
@@ -22,7 +23,7 @@ class TimelineGeometryTest {
     fun hitTestExpandsShortBlocksToMinimumTouchTarget() {
         val shortBlock = block(startMinutes = 9 * 60, durationMinutes = 5)
         val blocks = listOf(shortBlock)
-        val layouts = mapOf(1L to BlockLayout(columnIndex = 0, columnCount = 1))
+        val layouts = longObjectMapOf(1L, BlockLayout(columnIndex = 0, columnCount = 1))
         fun hit(y: Float): Boolean {
             return TimelineGeometry.hitTestBlock(
                 x = 100f,
@@ -51,9 +52,9 @@ class TimelineGeometryTest {
             block(id = 1, startMinutes = 9 * 60, durationMinutes = 30),
             target
         )
-        val layouts = mapOf(
-            1L to BlockLayout(columnIndex = 0, columnCount = 2),
-            2L to BlockLayout(columnIndex = 1, columnCount = 2)
+        val layouts = longObjectMapOf(
+            1L, BlockLayout(columnIndex = 0, columnCount = 2),
+            2L, BlockLayout(columnIndex = 1, columnCount = 2)
         )
 
         assertTrue(
@@ -92,9 +93,9 @@ class TimelineGeometryTest {
             block(id = 1, startMinutes = 9 * 60, durationMinutes = 30),
             block(id = 2, startMinutes = 9 * 60, durationMinutes = 30)
         )
-        val layouts = mapOf(
-            1L to BlockLayout(columnIndex = 0, columnCount = 2),
-            2L to BlockLayout(columnIndex = 1, columnCount = 2)
+        val layouts = longObjectMapOf(
+            1L, BlockLayout(columnIndex = 0, columnCount = 2),
+            2L, BlockLayout(columnIndex = 1, columnCount = 2)
         )
 
         assertFalse(
@@ -122,7 +123,7 @@ class TimelineGeometryTest {
                 x = 118f,
                 y = 9 * 120f,
                 blocks = listOf(target),
-                layoutById = mapOf(1L to BlockLayout(columnIndex = 0, columnCount = 7)),
+                layoutById = longObjectMapOf(1L, BlockLayout(columnIndex = 0, columnCount = 7)),
                 timelineWidthPx = 400f,
                 gutterPx = 72f,
                 timelineEndPaddingPx = 10f,

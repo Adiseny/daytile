@@ -1,23 +1,15 @@
 package com.privateplanner.data
 
+import com.privateplanner.domain.PlannerBlock
 import kotlinx.coroutines.flow.Flow
-
-// One row of the `blocks` table (see PlannerDatabase). An id of 0 asks for a new one.
-data class PlannerBlockEntity(
-    val id: Long = 0,
-    val dateEpochDay: Long,
-    val title: String,
-    val startMinutes: Int,
-    val durationMinutes: Int
-)
 
 // The planner's queries, implemented by PlannerDatabase on SQLite and by a fake in the
 // unit tests. Titles compare case-insensitively (the column is COLLATE NOCASE).
 interface PlannerBlockDao {
     // A day's blocks by start then id, re-read after every write.
-    fun observeBlocksForDate(dateEpochDay: Long): Flow<List<PlannerBlockEntity>>
+    fun observeBlocksForDate(dateEpochDay: Long): Flow<List<PlannerBlock>>
 
-    suspend fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlockEntity>
+    suspend fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlock>
 
     // Blocks on the day that overlap [startMinutes, endMinutes), other than the excluded one.
     suspend fun getPotentiallyOverlappingBlocks(
@@ -25,7 +17,7 @@ interface PlannerBlockDao {
         startMinutes: Int,
         endMinutes: Int,
         excludedBlockId: Long
-    ): List<PlannerBlockEntity>
+    ): List<PlannerBlock>
 
     // The earliest start on the day after startMinutes, if any.
     suspend fun getNextStartMinutes(dateEpochDay: Long, startMinutes: Int): Int?
@@ -38,12 +30,12 @@ interface PlannerBlockDao {
     ): Int?
 
     // Fails on a clashing id rather than replacing the row.
-    suspend fun insertBlock(block: PlannerBlockEntity)
+    suspend fun insertBlock(block: PlannerBlock)
 
     // The epoch minute of the next block starting at or after the given day and minute.
     suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long?
 
-    suspend fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int): List<PlannerBlockEntity>
+    suspend fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int): List<PlannerBlock>
 
     // The update and delete calls return the number of rows changed.
     suspend fun updateTitle(id: Long, title: String): Int
@@ -52,5 +44,5 @@ interface PlannerBlockDao {
 
     suspend fun deleteBlockById(id: Long): Int
 
-    suspend fun getBlock(id: Long): PlannerBlockEntity?
+    suspend fun getBlock(id: Long): PlannerBlock?
 }

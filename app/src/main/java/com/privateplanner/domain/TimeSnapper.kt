@@ -22,8 +22,8 @@ object TimeSnapper {
     }
 
     fun snapDurationToNearest(minutes: Int): Int {
-        return ((minutes + SnapMinutes / 2) / SnapMinutes * SnapMinutes)
-            .coerceIn(MinimumDurationMinutes, MinutesPerDay)
+        return (minutes.coerceIn(MinimumDurationMinutes, MinutesPerDay) + SnapMinutes / 2) /
+            SnapMinutes * SnapMinutes
     }
 
     fun minutesFromY(yPx: Float, hourHeightPx: Float): Int {

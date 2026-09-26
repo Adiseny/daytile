@@ -305,7 +305,9 @@ class PlannerViewModel(
             startMinutes = startMinutes,
             durationMinutes = durationMinutes
         )
-        updatedBlocks.sortWith(PlannerBlockOrder)
+        if (startMinutes != state.blocks[blockIndex].startMinutes) {
+            updatedBlocks.sortWith(PlannerBlockOrder)
+        }
         publish(state.selectedDate, updatedBlocks)
     }
 

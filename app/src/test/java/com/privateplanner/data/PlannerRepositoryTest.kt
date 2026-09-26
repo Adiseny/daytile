@@ -15,6 +15,18 @@ import org.junit.Test
 
 class PlannerRepositoryTest {
     @Test
+    fun creationChecksTheRoundedEndAgainstLegacyBlocks() = runBlocking {
+        val date = LocalDate.of(2026, 5, 29)
+        val dao = FakePlannerBlockDao(
+            List(7) { index -> entity(index + 1L, date.toString(), "Legacy", 554, 60) }
+        )
+
+        assertEquals(PlannerWriteResult.Success, PlannerRepository(dao).createBlock(date, 540, "New"))
+        // The 14-minute gap rounds to 15; that final minute cannot make an eighth overlap.
+        assertEquals(10, dao.inserted.single().durationMinutes)
+    }
+
+    @Test
     fun unchangedDatabaseResultsDoNotEmitButEveryEditDoes() = runBlocking {
         val date = LocalDate.of(2026, 5, 29)
         val original = entity(1, date.toString(), "Focus", 9 * 60, 60)
@@ -457,18 +469,18 @@ class PlannerRepositoryTest {
     }
 
     private class FakePlannerBlockDao(
-        initialBlocks: List<PlannerBlockEntity>
+        initialBlocks: List<PlannerBlock>
     ) : PlannerBlockDao {
         private val blocks = initialBlocks.toMutableList()
-        val inserted = mutableListOf<PlannerBlockEntity>()
+        val inserted = mutableListOf<PlannerBlock>()
         val overlapQueries = mutableListOf<OverlapQuery>()
         var nextUpdateTimeRowCount: Int? = null
 
-        override fun observeBlocksForDate(dateEpochDay: Long): Flow<List<PlannerBlockEntity>> {
+        override fun observeBlocksForDate(dateEpochDay: Long): Flow<List<PlannerBlock>> {
             return flowOf(getSortedBlocksForDate(dateEpochDay))
         }
 
-        override suspend fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlockEntity> {
+        override suspend fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlock> {
             return getSortedBlocksForDate(dateEpochDay)
         }
 
@@ -477,10 +489,10 @@ class PlannerRepositoryTest {
             startMinutes: Int,
             endMinutes: Int,
             excludedBlockId: Long
-        ): List<PlannerBlockEntity> {
+        ): List<PlannerBlock> {
             val result = blocks
                 .filter { block ->
-                    block.dateEpochDay == dateEpochDay &&
+                    block.date.toEpochDay() == dateEpochDay &&
                         block.id != excludedBlockId &&
                         block.startMinutes < endMinutes &&
                         block.startMinutes + block.durationMinutes > startMinutes
@@ -498,7 +510,7 @@ class PlannerRepositoryTest {
         override suspend fun getNextStartMinutes(dateEpochDay: Long, startMinutes: Int): Int? {
             return blocks
                 .asSequence()
-                .filter { block -> block.dateEpochDay == dateEpochDay && block.startMinutes > startMinutes }
+                .filter { block -> block.date.toEpochDay() == dateEpochDay && block.startMinutes > startMinutes }
                 .minOfOrNull { block -> block.startMinutes }
         }
 
@@ -511,11 +523,11 @@ class PlannerRepositoryTest {
                 .asSequence()
                 .filter { block -> block.title.equals(title, ignoreCase = true) }
                 .filter { block ->
-                    block.dateEpochDay < dateEpochDay ||
-                        (block.dateEpochDay == dateEpochDay && block.startMinutes < startMinutes)
+                    block.date.toEpochDay() < dateEpochDay ||
+                        (block.date.toEpochDay() == dateEpochDay && block.startMinutes < startMinutes)
                 }
                 .maxWithOrNull(
-                    compareBy<PlannerBlockEntity> { it.dateEpochDay }
+                    compareBy<PlannerBlock> { it.date.toEpochDay() }
                         .thenBy { it.startMinutes }
                         .thenBy { it.id }
                 )
@@ -524,15 +536,15 @@ class PlannerRepositoryTest {
 
         override suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int) =
             blocks.filter {
-                it.dateEpochDay > dateEpochDay ||
-                    (it.dateEpochDay == dateEpochDay && it.startMinutes >= startMinutes)
-            }.minOfOrNull { it.dateEpochDay * TimeSnapper.MinutesPerDay + it.startMinutes }
+                it.date.toEpochDay() > dateEpochDay ||
+                    (it.date.toEpochDay() == dateEpochDay && it.startMinutes >= startMinutes)
+            }.minOfOrNull { it.date.toEpochDay() * TimeSnapper.MinutesPerDay + it.startMinutes }
 
         override suspend fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int) =
-            blocks.filter { it.dateEpochDay == dateEpochDay && it.startMinutes == startMinutes }
+            blocks.filter { it.date.toEpochDay() == dateEpochDay && it.startMinutes == startMinutes }
                 .sortedBy { it.id }
 
-        override suspend fun insertBlock(block: PlannerBlockEntity) {
+        override suspend fun insertBlock(block: PlannerBlock) {
             blocks += block
             inserted += block
         }
@@ -542,9 +554,9 @@ class PlannerRepositoryTest {
             blocks.replaceAll { existing ->
                 if (existing.id == id) {
                     updated = 1
-                    PlannerBlockEntity(
+                    PlannerBlock(
                         id = existing.id,
-                        dateEpochDay = existing.dateEpochDay,
+                        date = existing.date,
                         title = title,
                         startMinutes = existing.startMinutes,
                         durationMinutes = existing.durationMinutes
@@ -565,9 +577,9 @@ class PlannerRepositoryTest {
             blocks.replaceAll { existing ->
                 if (existing.id == id) {
                     updated = 1
-                    PlannerBlockEntity(
+                    PlannerBlock(
                         id = existing.id,
-                        dateEpochDay = existing.dateEpochDay,
+                        date = existing.date,
                         title = existing.title,
                         startMinutes = startMinutes,
                         durationMinutes = durationMinutes
@@ -585,14 +597,14 @@ class PlannerRepositoryTest {
             return before - blocks.size
         }
 
-        override suspend fun getBlock(id: Long): PlannerBlockEntity? {
+        override suspend fun getBlock(id: Long): PlannerBlock? {
             return blocks.firstOrNull { it.id == id }
         }
 
-        private fun getSortedBlocksForDate(dateEpochDay: Long): List<PlannerBlockEntity> {
+        private fun getSortedBlocksForDate(dateEpochDay: Long): List<PlannerBlock> {
             return blocks
-                .filter { it.dateEpochDay == dateEpochDay }
-                .sortedWith(compareBy<PlannerBlockEntity> { it.startMinutes }.thenBy { it.id })
+                .filter { it.date.toEpochDay() == dateEpochDay }
+                .sortedWith(compareBy<PlannerBlock> { it.startMinutes }.thenBy { it.id })
         }
     }
 
@@ -610,10 +622,10 @@ private fun entity(
     title: String,
     startMinutes: Int,
     durationMinutes: Int
-): PlannerBlockEntity {
-    return PlannerBlockEntity(
+): PlannerBlock {
+    return PlannerBlock(
         id = id,
-        dateEpochDay = LocalDate.parse(date).toEpochDay(),
+        date = LocalDate.parse(date),
         title = title,
         startMinutes = startMinutes,
         durationMinutes = durationMinutes

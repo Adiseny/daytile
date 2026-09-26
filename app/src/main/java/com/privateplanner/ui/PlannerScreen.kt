@@ -2,6 +2,7 @@ package com.privateplanner.ui
 
 import android.Manifest
 import android.content.Context
+import androidx.collection.LongObjectMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -524,9 +525,22 @@ private fun Timeline(
     }
     // Only the grid and the indicator read the minute clock, so a tick never recomposes this.
     val isToday = selectedDate == LocalCurrentDate.current
-    // Read only by gestures, when they start, and by the accessibility focus below, so a
-    // new viewport height recomposes nothing.
+    // Shared by gestures, accessibility and the window of tiles kept on dense days.
     val viewportHeightPx = remember { mutableIntStateOf(0) }
+    var activeBlockId by remember { mutableLongStateOf(0) }
+    val visibleMinutes = remember(scrollState, hourHeightPx, topClearancePx) {
+        derivedStateOf {
+            if (viewportHeightPx.intValue == 0) {
+                0..TimeSnapper.MinutesPerDay
+            } else {
+                val hour = ((scrollState.value - topClearancePx).coerceAtLeast(0f) / hourHeightPx).toInt()
+                val visibleHours = kotlin.math.ceil(viewportHeightPx.intValue / hourHeightPx).toInt()
+                // One hour of lead on either side, plus the current hour's remainder.
+                // Scrolling changes this only on hour boundaries, never every frame.
+                (hour - 1) * 60..(hour + visibleHours + 2) * 60
+            }
+        }
+    }
     // The viewport's bottom edge above the navigation bar, read when a drag starts.
     val navigationBars = WindowInsets.navigationBars
     val visibleBottomPx = remember(navigationBars, density) {
@@ -586,12 +600,18 @@ private fun Timeline(
             val timelineWidth = maxWidth
             TimelineGrid(showsNow = isToday)
 
+            // Small days need no scrolling recompositions. Dense days retain only nearby
+            // tiles, including long tiles crossing the window and any active gesture.
+            val window = if (blocks.size > 64) visibleMinutes.value else null
             for (block in blocks) {
+                if (window != null && block.id != activeBlockId &&
+                    (block.endMinutes < window.first || block.startMinutes > window.last)
+                ) continue
                 key(block.id) {
                     TimeBlock(
                         block = block,
                         validatorForBlock = overlapPolicyForBlock,
-                        layout = layoutById.getValue(block.id),
+                        layout = layoutById[block.id]!!,
                         timelineWidth = timelineWidth,
                         scrollState = scrollState,
                         headerHeightPx = headerHeightPx,
@@ -601,7 +621,8 @@ private fun Timeline(
                         onRename = { onBlockRename(block.id) },
                         onDelete = { onBlockDelete(block.id) },
                         onMove = { start -> onBlockMove(block.id, start) },
-                        onResize = { onBlockResize(block.id, it) }
+                        onResize = { onBlockResize(block.id, it) },
+                        onActiveChange = { activeBlockId = if (it) block.id else 0 }
                     )
                 }
             }
@@ -627,7 +648,8 @@ private fun TimeBlock(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onMove: (Int) -> Boolean,
-    onResize: (Int) -> Boolean
+    onResize: (Int) -> Boolean,
+    onActiveChange: (Boolean) -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
     val latestBlock by rememberUpdatedState(block)
@@ -767,11 +789,17 @@ private fun TimeBlock(
                 visibleBottomPx = visibleBottomPx,
                 haptics = haptics,
                 onTap = onTap,
-                onMoveActiveChange = { moveActive = it },
+                onMoveActiveChange = {
+                    moveActive = it
+                    onActiveChange(it)
+                },
                 onMovePreview = { previewStartMinutes = it ?: NoPreviewMinutes },
                 onMoveVisualOffsetPx = { moveOffsetPx.floatValue = it },
                 onMove = onMove,
-                onResizeActiveChange = { resizeActive = it },
+                onResizeActiveChange = {
+                    resizeActive = it
+                    onActiveChange(it)
+                },
                 onResizePreview = {
                     previewDurationMinutes = it ?: NoPreviewMinutes
                 },
@@ -788,7 +816,7 @@ private fun TimeBlock(
 // change of blocks, such as the write after a drop, cannot drop a tap in progress.
 private fun Modifier.timelineTapInput(
     blocks: State<List<PlannerBlock>>,
-    layoutById: State<Map<Long, BlockLayout>>,
+    layoutById: State<LongObjectMap<BlockLayout>>,
     onEmptyTimeTap: (Int) -> Unit
 ): Modifier {
     return pointerInput(onEmptyTimeTap) {

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.2 — 26 September 2026
 
 ### Reminders
 
@@ -13,6 +13,7 @@
 - Dragging a block towards the top or bottom of the screen now scrolls relative to what is visible: scrolling builds to full speed at the bottom of the heading and at the top of the navigation bar, so the finger never has to cover either, and both zones follow font size and navigation mode. Full speed at the bottom was previously out of reach.
 - A tap on empty time is no longer lost when it lands just after a block is dropped or changed.
 - A block moved just after swiping to its day no longer briefly jumps back when that day's prefetch finishes late.
+- Creating a block beside older, unsnapped blocks now checks the rounded end time against the overlap limit.
 - The date sheet reads calendar days aloud as dates and announces today and the selected day.
 - Launching no longer flashes through the system's black or white splash: on Android 13 and later the splash takes the planner's own light or dark paper, with matching status and navigation bars, as it was when the app was last left. Earlier versions follow the system's dark theme setting.
 
@@ -31,7 +32,11 @@
 - Removed an unused native graphics library, which with its page alignment took about 75 KB of the APK across four processor architectures.
 - Removed the Material 3 library. The title field, buttons, ripple and snackbar it provided are now a few hundred lines of the app's own, drawn pixel for pixel as before, and the APK is about 59 KB smaller.
 - Replaced the Room database library with the platform's SQLite on the same file, version and schema, so existing planners open unchanged. Opening no longer checks the schema, a write no longer logs itself to a tracking table for observers, and the APK is about 43 KB smaller.
-- Regenerated the baseline profile for the changed code.
+- Reminder and title-history queries now seek directly to the requested day and minute in the existing indices; frequently used database statements are reused.
+- Crowded-day layouts reuse their scratch arrays and store block IDs without boxed keys or individual hash-map entries.
+- Empty-space taps skip column lookups for blocks outside the tapped time, and gutter taps no longer scan the day's blocks.
+- Once disabled reminders have cleared their alarm and notifications, subsequent planner writes skip reminder scheduling entirely.
+- Replaced the generated baseline-profile method list with two package rules expanded by the release build, eliminating stale signatures and manual regeneration.
 
 ## 1.3.1 — 25 September 2026
 

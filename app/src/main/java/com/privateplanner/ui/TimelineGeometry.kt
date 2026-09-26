@@ -1,5 +1,6 @@
 package com.privateplanner.ui
 
+import androidx.collection.LongObjectMap
 import com.privateplanner.domain.BlockLayout
 import com.privateplanner.domain.PlannerBlock
 
@@ -8,7 +9,7 @@ internal object TimelineGeometry {
         x: Float,
         y: Float,
         blocks: List<PlannerBlock>,
-        layoutById: Map<Long, BlockLayout>,
+        layoutById: LongObjectMap<BlockLayout>,
         timelineWidthPx: Float,
         gutterPx: Float,
         timelineEndPaddingPx: Float,
@@ -16,22 +17,22 @@ internal object TimelineGeometry {
         hourHeightPx: Float,
         minimumTouchTargetPx: Float
     ): Boolean {
+        if (x < gutterPx) return false
         val blockAreaWidth = (timelineWidthPx - gutterPx - timelineEndPaddingPx).coerceAtLeast(1f)
         val dayHeight = 24f * hourHeightPx
         return blocks.any { block ->
-            val layout = layoutById.getValue(block.id)
-            val columnWidth = blockAreaWidth / layout.columnCount.coerceAtLeast(1)
-            val left = gutterPx + columnWidth * layout.columnIndex
-            val blockWidth = (columnWidth - blockColumnGapPx).coerceAtLeast(minimumTouchTargetPx)
-            val right = left + blockWidth
-            if (x !in left..right) return@any false
-
             val visualTop = block.startMinutes / 60f * hourHeightPx
             val visualHeight = block.durationMinutes / 60f * hourHeightPx
             val touchHeight = maxOf(visualHeight, minimumTouchTargetPx)
             val touchTop = (visualTop - (touchHeight - visualHeight) / 2f)
                 .coerceIn(0f, (dayHeight - touchHeight).coerceAtLeast(0f))
-            y in touchTop..(touchTop + touchHeight)
+            // Only tiles at the tapped time need a column lookup and horizontal geometry.
+            if (y !in touchTop..(touchTop + touchHeight)) return@any false
+            val layout = layoutById[block.id]!!
+            val columnWidth = blockAreaWidth / layout.columnCount.coerceAtLeast(1)
+            val left = gutterPx + columnWidth * layout.columnIndex
+            val blockWidth = (columnWidth - blockColumnGapPx).coerceAtLeast(minimumTouchTargetPx)
+            x in left..(left + blockWidth)
         }
     }
 

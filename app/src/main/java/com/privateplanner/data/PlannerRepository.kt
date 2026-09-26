@@ -9,7 +9,6 @@ import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 
 enum class PlannerWriteResult {
     Success,
@@ -28,7 +27,7 @@ class PlannerRepository private constructor(
     private val onWrite: suspend () -> Unit = {}
 ) {
     constructor(database: PlannerDatabase, onWrite: suspend () -> Unit = {}) : this(
-        dao = database.blockDao(),
+        dao = database,
         inTransaction = { block -> database.withTransaction { block() } },
         onWrite = onWrite
     )
@@ -42,11 +41,10 @@ class PlannerRepository private constructor(
         // Every write re-reads, even one that only changed another day.
         return dao.observeBlocksForDate(date.toEpochDay())
             .distinctUntilChanged()
-            .map { entities -> entities.map { it.toDomain(date) } }
     }
 
     suspend fun getBlocksForDate(date: LocalDate): List<PlannerBlock> {
-        return dao.getBlocksForDate(date.toEpochDay()).map { it.toDomain(date) }
+        return dao.getBlocksForDate(date.toEpochDay())
     }
 
     // Snapping and clamping below always yield a valid time, so only restoring a
@@ -59,7 +57,7 @@ class PlannerRepository private constructor(
             inTransaction transaction@{
                 val nextStart = dao.getNextStartMinutes(dateKey, start)
                 val previousDuration = dao.getLatestPreviousDurationForTitle(normalizedTitle, dateKey, start)
-                val duration = if (previousDuration != null) {
+                val preferredDuration = if (previousDuration != null) {
                     TimeSnapper.capDurationAtNextStart(
                         startMinutes = start,
                         durationMinutes = TimeSnapper.clampDuration(start, previousDuration),
@@ -68,12 +66,14 @@ class PlannerRepository private constructor(
                 } else {
                     TimeSnapper.defaultDurationForStart(start, nextStart)
                 }
+                // A legacy boundary may round up: query the entire interval we will save.
+                val duration = TimeSnapper.snapDurationToNearest(preferredDuration)
                 val fittedDuration = overlapPolicy(date, start, start + duration, 0)
                     .largestValidDuration(start, duration)
                     ?: return@transaction PlannerWriteResult.NoSpace
                 dao.insertBlock(
-                    PlannerBlockEntity(
-                        dateEpochDay = dateKey,
+                    PlannerBlock(
+                        date = date,
                         title = normalizedTitle,
                         startMinutes = start,
                         durationMinutes = fittedDuration
@@ -101,7 +101,7 @@ class PlannerRepository private constructor(
                     startMinutes = start,
                     durationMinutes = TimeSnapper.snapDurationToNearest(durationMinutes)
                 )
-                if (!overlapPolicy(LocalDate.ofEpochDay(current.dateEpochDay), start, start + duration, id).canPlace(start, duration)) {
+                if (!overlapPolicy(current.date, start, start + duration, id).canPlace(start, duration)) {
                     PlannerWriteResult.RejectedOverlap
                 } else {
                     rowResult(dao.updateTime(id, start, duration))
@@ -126,29 +126,21 @@ class PlannerRepository private constructor(
                 require(
                     block.startMinutes >= 0 &&
                         block.durationMinutes >= TimeSnapper.MinimumDurationMinutes &&
-                        block.endMinutes <= TimeSnapper.MinutesPerDay
+                        block.startMinutes <= TimeSnapper.MinutesPerDay - block.durationMinutes
                 )
                 if (!overlapPolicy(block.date, block.startMinutes, block.endMinutes, block.id)
                         .canPlace(block.startMinutes, block.durationMinutes)
                 ) {
                     return@transaction PlannerWriteResult.RejectedOverlap
                 }
-                dao.insertBlock(
-                    PlannerBlockEntity(
-                        id = block.id,
-                        dateEpochDay = block.date.toEpochDay(),
-                        title = title,
-                        startMinutes = block.startMinutes,
-                        durationMinutes = block.durationMinutes
-                    )
-                )
+                dao.insertBlock(block.copy(title = title))
                 PlannerWriteResult.Success
             }
         }
     }
 
     suspend fun getBlock(id: Long): PlannerBlock? {
-        return dao.getBlock(id)?.toDomain()
+        return dao.getBlock(id)
     }
 
     suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long? {
@@ -156,7 +148,7 @@ class PlannerRepository private constructor(
     }
 
     suspend fun getBlocksStartingAt(date: LocalDate, startMinutes: Int): List<PlannerBlock> {
-        return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes).map { it.toDomain(date) }
+        return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes)
     }
 
     private suspend fun overlapPolicy(
@@ -165,8 +157,7 @@ class PlannerRepository private constructor(
         endMinutes: Int,
         excludedBlockId: Long
     ): OverlapPolicy = OverlapPolicy.from(
-        dao.getPotentiallyOverlappingBlocks(date.toEpochDay(), startMinutes, endMinutes, excludedBlockId)
-            .map { it.toDomain(date) },
+        dao.getPotentiallyOverlappingBlocks(date.toEpochDay(), startMinutes, endMinutes, excludedBlockId),
         excludedBlockId
     )
 
@@ -196,15 +187,4 @@ private fun normalizeTitle(title: String): String {
     require(normalized.isNotEmpty())
     require(normalized.length <= MaxTitleLength)
     return normalized
-}
-
-// Rows read for one day share that day's date rather than each building their own.
-private fun PlannerBlockEntity.toDomain(date: LocalDate = LocalDate.ofEpochDay(dateEpochDay)): PlannerBlock {
-    return PlannerBlock(
-        id = id,
-        date = date,
-        title = title,
-        startMinutes = startMinutes,
-        durationMinutes = durationMinutes
-    )
 }
