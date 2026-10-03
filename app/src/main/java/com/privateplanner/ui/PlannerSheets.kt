@@ -38,19 +38,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.paint
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.addPathNodes
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
@@ -92,33 +92,36 @@ private fun weekdayLabels(locale: Locale): List<String> = WeekdayLabels.getOrPut
     DayOfWeek.entries.map { day -> day.getDisplayName(java.time.format.TextStyle.NARROW, locale) }
 }
 
-// The bell from res/drawable/ic_bell.xml (still the notification icon), built from the
-// same path data in code so opening the date sheet parses no XML and the slashed variant
-// needs no drawable. Stroke-only, as the XML is: its transparent fill draws nothing.
-private fun bell(slashed: Boolean): ImageVector = ImageVector.Builder(
-    defaultWidth = 24.dp,
-    defaultHeight = 24.dp,
-    viewportWidth = 24f,
-    viewportHeight = 24f
-).apply {
-    val ink = SolidColor(Color.White)
-    addPath(
-        addPathNodes("M12,3.2C8.9,3.2 6.8,5.6 6.8,9v3.6L5.2,15.4h13.6l-1.6,-2.8V9c0,-3.4 -2.1,-5.8 -5.2,-5.8z"),
-        stroke = ink,
-        strokeLineWidth = 1.6f,
-        strokeLineCap = StrokeCap.Round,
-        strokeLineJoin = StrokeJoin.Round
-    )
-    addPath(addPathNodes("M10.1,18.1a1.9,1.9 0 0 0 3.8,0"), stroke = ink, strokeLineWidth = 1.6f, strokeLineCap = StrokeCap.Round)
-    if (slashed) {
-        addPath(addPathNodes("M4.6,4.6L19.4,19.4"), stroke = ink, strokeLineWidth = 1.6f, strokeLineCap = StrokeCap.Round)
+// The bell from res/drawable/ic_bell.xml (still the notification icon), stroked straight
+// onto the sheet from the same path data in its 24-unit viewport. No XML is parsed and no
+// vector is built, cached in a bitmap and tinted: it is drawn in its colour.
+private val BellPath = Path().apply {
+    moveTo(12f, 3.2f)
+    cubicTo(8.9f, 3.2f, 6.8f, 5.6f, 6.8f, 9f)
+    relativeLineTo(0f, 3.6f)
+    lineTo(5.2f, 15.4f)
+    relativeLineTo(13.6f, 0f)
+    relativeLineTo(-1.6f, -2.8f)
+    lineTo(17.2f, 9f)
+    relativeCubicTo(0f, -3.4f, -2.1f, -5.8f, -5.2f, -5.8f)
+    close()
+    // The clapper: the lower half of a circle of radius 1.9 about (12, 18.1).
+    arcTo(Rect(10.1f, 16.2f, 13.9f, 20f), 180f, -180f, forceMoveTo = true)
+}
+private const val BellViewport = 24f
+private const val BellStrokeWidth = 1.6f
+private val BellStroke = Stroke(BellStrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+private fun Modifier.bell(colour: Color, slashed: Boolean): Modifier = drawBehind {
+    scale(size.minDimension / BellViewport, pivot = Offset.Zero) {
+        drawPath(BellPath, colour, style = BellStroke)
+        if (slashed) {
+            drawLine(colour, Offset(4.6f, 4.6f), Offset(19.4f, 19.4f), BellStrokeWidth, StrokeCap.Round)
+        }
     }
-}.build()
+}
 
-private val BellOn = bell(slashed = false)
-private val BellOff = bell(slashed = true)
-
-// Called on the launch warm-up thread: builds the bells (with this file's other
+// Called on the launch warm-up thread: builds the bell (with this file's other
 // constants) and loads the month and weekday text the date sheet shows.
 internal fun prepareDateSheet(locale: Locale, date: LocalDate) {
     date.format(dateFormatter(MonthTitlePattern, locale))
@@ -440,15 +443,10 @@ internal fun BoxScope.DateJumpSheet(
                         stateDescription = if (remindersOn) "On" else "Off"
                     }
                 ) {
-                    val bellTint = remember(reminderColour) { ColorFilter.tint(reminderColour) }
-                    Box(
+                    Spacer(
                         modifier = Modifier
                             .size(18.dp)
-                            .paint(
-                                rememberVectorPainter(if (remindersOn) BellOn else BellOff),
-                                colorFilter = bellTint,
-                                contentScale = ContentScale.Fit
-                            )
+                            .bell(reminderColour, slashed = !remindersOn)
                     )
                     Spacer(modifier = Modifier.width(7.dp))
                     Text(text = "Reminders", color = reminderColour)

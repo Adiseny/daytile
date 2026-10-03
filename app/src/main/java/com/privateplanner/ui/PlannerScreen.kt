@@ -4,8 +4,7 @@ import android.Manifest
 import android.content.Context
 import androidx.collection.LongObjectMap
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ScrollState
@@ -16,7 +15,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -65,10 +63,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalAccessibilityManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -223,23 +221,18 @@ internal fun PlannerScreen(viewModel: PlannerViewModel) {
                 )
             }
             PlannerSheet.DateJump -> {
-                // Registered only while the sheet that asks is open: registering draws a
-                // random key, and the first draw seeds SecureRandom, which launch should
-                // not wait for.
-                val context = LocalContext.current
-                val permissionLauncher = rememberLauncherForActivityResult(
-                    ActivityResultContracts.RequestPermission()
-                ) { granted ->
-                    if (granted) viewModel.setRemindersOn(true) else viewModel.notificationsBlocked()
-                }
+                // Asked through the platform itself; MainActivity hears the answer. An
+                // activity-result launcher would draw a random key to register under, and
+                // the first draw seeds SecureRandom on the main thread as the sheet opens.
+                val activity = LocalActivity.current
                 DateJumpSheet(
                     selectedDate = uiState.selectedDate,
                     remindersOn = uiState.remindersOn,
                     onToggleReminders = { on ->
-                        if (!on || context.postNotificationsGranted()) {
+                        if (!on || activity == null || activity.postNotificationsGranted()) {
                             viewModel.setRemindersOn(on)
                         } else {
-                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
                         }
                     },
                     onSelect = viewModel::jumpTo,
@@ -527,6 +520,11 @@ private fun Timeline(
     val isToday = selectedDate == LocalCurrentDate.current
     // Shared by gestures, accessibility and the window of tiles kept on dense days.
     val viewportHeightPx = remember { mutableIntStateOf(0) }
+    // The timeline spans the window, whose width is known before anything is measured, so
+    // the tiles compose with it in the first frame and need no subcomposition to wait for
+    // layout. The measured width replaces it wherever the two differ.
+    val resources = LocalResources.current
+    val timelineWidthPx = remember { mutableIntStateOf(resources.displayMetrics.widthPixels) }
     var activeBlockId by remember { mutableLongStateOf(0) }
     val visibleMinutes = remember(scrollState, hourHeightPx, topClearancePx) {
         derivedStateOf {
@@ -562,6 +560,7 @@ private fun Timeline(
             // before the content is placed: the launch scroll lands in the very first
             // frame, rather than a frame showing midnight and then a jump to now.
             .onSizeChanged { size ->
+                timelineWidthPx.intValue = size.width
                 viewportHeightPx.intValue = size.height
                 if (size.height > 0) {
                     takeScrollTarget()?.let { target ->
@@ -581,7 +580,7 @@ private fun Timeline(
             }
             .verticalScroll(scrollState)
     ) {
-        BoxWithConstraints(
+        Box(
             modifier = Modifier
                 .padding(top = TimelineTopClearance)
                 .height(DayHeight)
@@ -597,7 +596,7 @@ private fun Timeline(
                 }
                 .timelineTapInput(latestBlocks, latestLayoutById, onEmptyTimeTap)
         ) {
-            val timelineWidth = maxWidth
+            val timelineWidth = with(density) { timelineWidthPx.intValue.toDp() }
             TimelineGrid(showsNow = isToday)
 
             // Small days need no scrolling recompositions. Dense days retain only nearby

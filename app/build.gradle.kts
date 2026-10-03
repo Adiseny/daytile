@@ -21,8 +21,8 @@ android {
         applicationId = "com.privateplanner"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.3.2"
+        versionCode = 9
+        versionName = "1.3.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -52,7 +52,21 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             signingConfigs.findByName("release")?.let { signingConfig = it }
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles("proguard-rules.pro")
+            // Keep rules of libraries that only arrive through others and that nothing here
+            // uses: they pinned icon and remote-action parcelling, foldable reflection guards
+            // and the initializers of the startup provider the manifest removes. Without
+            // them R8 drops the classes; what is used stays reachable from the code using it.
+            optimization {
+                keepRules {
+                    ignoreFrom(
+                        "androidx.versionedparcelable:versionedparcelable",
+                        "androidx.window:window",
+                        "androidx.window:window-core-android",
+                        "androidx.startup:startup-runtime"
+                    )
+                }
+            }
             // The source is public; the APK need not carry a record of the checkout.
             vcsInfo.include = false
         }

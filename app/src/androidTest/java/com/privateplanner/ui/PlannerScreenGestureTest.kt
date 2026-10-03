@@ -3,7 +3,10 @@ package com.privateplanner.ui
 import com.privateplanner.domain.PlannerBlock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -30,6 +33,8 @@ import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -108,6 +113,23 @@ class PlannerScreenGestureTest {
             listOf(HapticFeedbackType.SegmentTick, HapticFeedbackType.SegmentTick),
             recordedHaptics
         )
+    }
+
+    // The timeline starts from the window's width and takes the measured one where the two
+    // differ. Hosted narrower than the window, a tile must be sized for the host.
+    @Test
+    fun tilesFollowTheMeasuredWidthWhereItDiffersFromTheWindow() {
+        setPlannerContent(hostWidth = 260.dp) {
+            insertVisibleBlock(title = "Narrow")
+        }
+
+        compose.waitUntilBlockExists("Narrow")
+        val density = compose.density.density
+        val tile = compose.onNode(hasContentDescription("Narrow", substring = true))
+            .fetchSemanticsNode().boundsInRoot
+        // One column: the host less the gutter (72), the end padding (10) and the column gap (4).
+        assertEquals("Tile left", 72f * density, tile.left, 1f)
+        assertEquals("Tile width", (260f - 72f - 10f - 4f) * density, tile.width, 1f)
     }
 
     @Test
@@ -356,6 +378,7 @@ class PlannerScreenGestureTest {
 
     private fun setPlannerContent(
         fontScale: Float = 1f,
+        hostWidth: Dp = Dp.Unspecified,
         seed: suspend PlannerDatabase.() -> Unit = {}
     ): PlannerViewModel {
         val db = PlannerDatabase(compose.activity.applicationContext, name = null)
@@ -373,7 +396,10 @@ class PlannerScreenGestureTest {
                 LocalHapticFeedback provides hapticFeedback
             ) {
                 PlannerTheme {
-                    PlannerScreen(viewModel = viewModel)
+                    // An unspecified width leaves the screen filling the window.
+                    Box(Modifier.width(hostWidth)) {
+                        PlannerScreen(viewModel = viewModel)
+                    }
                 }
             }
         }

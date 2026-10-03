@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.3 — 3 October 2026
+
+### Interface and interaction
+
+- Tapping Reminders while notifications are blocked now closes the date sheet, so the message pointing to system settings can be read. It previously appeared underneath the sheet, leaving the tap with no visible result.
+
+### Responsiveness and efficiency
+
+- Timeline tiles are composed with the window's width, known before layout, instead of in a subcomposition that waited for it to be measured. The measured width replaces it wherever the two differ.
+- The date sheet's bell is stroked directly from its path, no longer built as a vector, rendered to a bitmap and tinted.
+- The notification permission is requested through the platform itself. Opening the date sheet no longer registers a result launcher, whose random key seeded the secure random generator on the main thread. The sheet's first frame took a median 8.0 ms of main-thread time on the test emulator, down from 11.5 ms.
+- Release rules keep only what the app needs. The toolchain's defaults kept every getter and setter of every view, and three libraries pinned parcelling, foldable and start-up classes nothing uses. The APK is about 28 KB smaller, with 100 fewer classes and 485 fewer methods.
+
 ## 1.3.2 — 26 September 2026
 
 ### Reminders

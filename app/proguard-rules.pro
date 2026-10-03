@@ -1,4 +1,34 @@
-# Release rules on top of proguard-android-optimize.txt and each library's own rules.
+# Release rules on top of each library's own. AGP's proguard-android-optimize.txt is not
+# applied; the rules below are the parts of it this app needs. Left out are its rules for
+# what the app does not have: view properties animated by name and android:onClick handlers
+# (which kept every getter and setter of every view, 83 unused ones on Compose's root view
+# alone), licensing services, JavaScript interfaces and the old support library.
+-allowaccessmodification
+
+-keepattributes AnnotationDefault,
+                EnclosingMethod,
+                InnerClasses,
+                RuntimeVisibleAnnotations,
+                RuntimeVisibleParameterAnnotations,
+                RuntimeVisibleTypeAnnotations,
+                Signature
+
+# What the platform finds by name: native methods, enum values and parcelable creators.
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+-keepclassmembers class * implements android.os.Parcelable {
+    public static final ** CREATOR;
+}
+
+# Foldable-device libraries that exist only on the devices providing them. Compose's window
+# size code can name them, and nothing in the app reaches it.
+-dontwarn androidx.window.extensions.**
+-dontwarn androidx.window.sidecar.**
 
 # Move every renamed class into a single package so the dex carries no package names.
 # Nothing finds a renamed class by its package: whatever is looked up by name (the

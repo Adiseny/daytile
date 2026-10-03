@@ -1,5 +1,6 @@
 package com.privateplanner
 
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
 import android.view.View
@@ -17,6 +18,8 @@ import com.privateplanner.ui.displayedPaletteForMinute
 import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
+    private lateinit var plannerViewModel: PlannerViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val app = application as PlannerApp
         app.warmUpInterfaceOnce()
@@ -29,7 +32,7 @@ class MainActivity : ComponentActivity() {
 
         // An explicit key: the default one is built from the class's canonical name by
         // reflection on every lookup.
-        val plannerViewModel = ViewModelProvider(
+        plannerViewModel = ViewModelProvider(
             this,
             viewModelFactory { initializer { PlannerViewModel(app.repository, app.reminders) } }
         )["planner", PlannerViewModel::class.java]
@@ -43,6 +46,18 @@ class MainActivity : ComponentActivity() {
         // thread building them while it waits.
         applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())))
         findViewById<View>(android.R.id.content).filterTouchesWhenObscured = true
+    }
+
+    // The answer to the notification permission the date sheet asks for, which is the only
+    // permission requested. A dismissed request arrives with no results, and counts as a no.
+    @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            plannerViewModel.setRemindersOn(true)
+        } else {
+            plannerViewModel.notificationsBlocked()
+        }
     }
 
     // The system draws the splash before any of the app runs, so by itself it follows the

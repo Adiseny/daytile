@@ -259,7 +259,10 @@ class PlannerViewModel(
         reminders.syncSoon(repository)
     }
 
+    // The date sheet that asked covers the bottom of the screen, where the message appears,
+    // so it closes: the message would otherwise come and go unseen beneath it.
     fun notificationsBlocked() {
+        dismissSheet()
         showMessage("Turn on notifications in system settings")
     }
 
