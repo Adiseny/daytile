@@ -1,41 +1,20 @@
 package com.privateplanner.ui
 
-import androidx.collection.LongObjectMap
-import com.privateplanner.domain.BlockLayout
-import com.privateplanner.domain.PlannerBlock
+// Shared by the first layout's tile window and the measured launch position.
+internal fun initialTimelineScroll(
+    targetMinutes: Int,
+    viewportHeightPx: Int,
+    hourHeightPx: Float,
+    topClearancePx: Float,
+    isToday: Boolean
+): Int {
+    val targetPx = Math.round(topClearancePx + targetMinutes / 60f * hourHeightPx)
+    val leadPx = if (isToday) Math.round(viewportHeightPx * CurrentTimeViewportFraction) else 0
+    val maxScrollPx = Math.round(topClearancePx + 24f * hourHeightPx - viewportHeightPx).coerceAtLeast(0)
+    return (targetPx - leadPx).coerceAtLeast(0).coerceAtMost(maxScrollPx)
+}
 
 internal object TimelineGeometry {
-    fun hitTestBlock(
-        x: Float,
-        y: Float,
-        blocks: List<PlannerBlock>,
-        layoutById: LongObjectMap<BlockLayout>,
-        timelineWidthPx: Float,
-        gutterPx: Float,
-        timelineEndPaddingPx: Float,
-        blockColumnGapPx: Float,
-        hourHeightPx: Float,
-        minimumTouchTargetPx: Float
-    ): Boolean {
-        if (x < gutterPx) return false
-        val blockAreaWidth = (timelineWidthPx - gutterPx - timelineEndPaddingPx).coerceAtLeast(1f)
-        val dayHeight = 24f * hourHeightPx
-        return blocks.any { block ->
-            val visualTop = block.startMinutes / 60f * hourHeightPx
-            val visualHeight = block.durationMinutes / 60f * hourHeightPx
-            val touchHeight = maxOf(visualHeight, minimumTouchTargetPx)
-            val touchTop = (visualTop - (touchHeight - visualHeight) / 2f)
-                .coerceIn(0f, (dayHeight - touchHeight).coerceAtLeast(0f))
-            // Only tiles at the tapped time need a column lookup and horizontal geometry.
-            if (y !in touchTop..(touchTop + touchHeight)) return@any false
-            val layout = layoutById[block.id]!!
-            val columnWidth = blockAreaWidth / layout.columnCount.coerceAtLeast(1)
-            val left = gutterPx + columnWidth * layout.columnIndex
-            val blockWidth = (columnWidth - blockColumnGapPx).coerceAtLeast(minimumTouchTargetPx)
-            x in left..(left + blockWidth)
-        }
-    }
-
     fun isInResizeZone(
         x: Float,
         yInVisual: Float,
@@ -86,11 +65,11 @@ internal object TimelineGeometry {
         val bottomStart = visibleBottomPx - bottomReachPx
         return when {
             pointerViewportY < topStart -> {
-                val strength = ((topStart - pointerViewportY) / topReachPx).coerceIn(0f, 1f)
+                val strength = ((topStart - pointerViewportY) / topReachPx).coerceAtLeast(0f).coerceAtMost(1f)
                 -topMaxStepPx * strength * strength
             }
             pointerViewportY > bottomStart -> {
-                val strength = ((pointerViewportY - bottomStart) / bottomReachPx).coerceIn(0f, 1f)
+                val strength = ((pointerViewportY - bottomStart) / bottomReachPx).coerceAtLeast(0f).coerceAtMost(1f)
                 val easedStrength = strength * strength * (3f - 2f * strength)
                 bottomMaxStepPx * easedStrength
             }

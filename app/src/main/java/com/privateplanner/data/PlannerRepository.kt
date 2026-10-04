@@ -6,9 +6,6 @@ import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 enum class PlannerWriteResult {
     Success,
@@ -19,42 +16,25 @@ enum class PlannerWriteResult {
     Failed
 }
 
-class PlannerRepository private constructor(
+// The planner's rules over its queries. Like them, called from one thread at a time.
+class PlannerRepository(
     private val dao: PlannerBlockDao,
-    private val inTransaction: suspend (suspend () -> PlannerWriteResult) -> PlannerWriteResult,
-    // Fired after every successful write so the pending reminder alarm is re-armed
+    // Called after every successful write so the pending reminder alarm is re-armed
     // from one place; no call site can forget to keep reminders in step.
-    private val onWrite: suspend () -> Unit = {}
+    private val onWrite: () -> Unit = {}
 ) {
-    constructor(database: PlannerDatabase, onWrite: suspend () -> Unit = {}) : this(
-        dao = database,
-        inTransaction = { block -> database.withTransaction { block() } },
-        onWrite = onWrite
-    )
-
-    internal constructor(dao: PlannerBlockDao) : this(
-        dao = dao,
-        inTransaction = { block -> block() }
-    )
-
-    fun observeBlocksForDate(date: LocalDate): Flow<List<PlannerBlock>> {
-        // Every write re-reads, even one that only changed another day.
-        return dao.observeBlocksForDate(date.toEpochDay())
-            .distinctUntilChanged()
-    }
-
-    suspend fun getBlocksForDate(date: LocalDate): List<PlannerBlock> {
+    fun getBlocksForDate(date: LocalDate): List<PlannerBlock> {
         return dao.getBlocksForDate(date.toEpochDay())
     }
 
     // Snapping and clamping below always yield a valid time, so only restoring a
     // stored block needs an explicit range check.
-    suspend fun createBlock(date: LocalDate, startMinutes: Int, title: String): PlannerWriteResult {
+    fun createBlock(date: LocalDate, startMinutes: Int, title: String): PlannerWriteResult {
         return writeCatching {
             val normalizedTitle = normalizeTitle(title)
             val start = TimeSnapper.floorToValidStart(startMinutes)
             val dateKey = date.toEpochDay()
-            inTransaction transaction@{
+            dao.withTransaction transaction@{
                 val nextStart = dao.getNextStartMinutes(dateKey, start)
                 val previousDuration = dao.getLatestPreviousDurationForTitle(normalizedTitle, dateKey, start)
                 val preferredDuration = if (previousDuration != null) {
@@ -84,15 +64,15 @@ class PlannerRepository private constructor(
         }
     }
 
-    suspend fun updateTitle(id: Long, title: String): PlannerWriteResult {
+    fun updateTitle(id: Long, title: String): PlannerWriteResult {
         return writeCatching {
             rowResult(dao.updateTitle(id, normalizeTitle(title)))
         }
     }
 
-    suspend fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int): PlannerWriteResult {
+    fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int): PlannerWriteResult {
         return writeCatching {
-            inTransaction transaction@{
+            dao.withTransaction transaction@{
                 val current = dao.getBlock(id)
                     ?: return@transaction PlannerWriteResult.MissingBlock
                 // The clamped duration always fits after the snapped start.
@@ -110,15 +90,15 @@ class PlannerRepository private constructor(
         }
     }
 
-    suspend fun deleteBlock(id: Long): PlannerWriteResult {
+    fun deleteBlock(id: Long): PlannerWriteResult {
         return writeCatching {
             rowResult(dao.deleteBlockById(id))
         }
     }
 
-    suspend fun restoreBlock(block: PlannerBlock): PlannerWriteResult {
+    fun restoreBlock(block: PlannerBlock): PlannerWriteResult {
         return writeCatching {
-            inTransaction transaction@{
+            dao.withTransaction transaction@{
                 if (dao.getBlock(block.id) != null) {
                     return@transaction PlannerWriteResult.MissingBlock
                 }
@@ -139,19 +119,19 @@ class PlannerRepository private constructor(
         }
     }
 
-    suspend fun getBlock(id: Long): PlannerBlock? {
+    fun getBlock(id: Long): PlannerBlock? {
         return dao.getBlock(id)
     }
 
-    suspend fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long? {
+    fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long? {
         return dao.getNextStart(dateEpochDay, startMinutes)
     }
 
-    suspend fun getBlocksStartingAt(date: LocalDate, startMinutes: Int): List<PlannerBlock> {
+    fun getBlocksStartingAt(date: LocalDate, startMinutes: Int): List<PlannerBlock> {
         return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes)
     }
 
-    private suspend fun overlapPolicy(
+    private fun overlapPolicy(
         date: LocalDate,
         startMinutes: Int,
         endMinutes: Int,
@@ -161,11 +141,9 @@ class PlannerRepository private constructor(
         excludedBlockId
     )
 
-    private suspend inline fun writeCatching(block: () -> PlannerWriteResult): PlannerWriteResult {
+    private inline fun writeCatching(block: () -> PlannerWriteResult): PlannerWriteResult {
         val result = try {
             block()
-        } catch (exception: CancellationException) {
-            throw exception
         } catch (_: IllegalArgumentException) {
             PlannerWriteResult.InvalidInput
         } catch (exception: Exception) {

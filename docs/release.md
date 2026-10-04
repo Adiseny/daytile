@@ -65,23 +65,29 @@ The signature check must report a verified signer. The APK manifest must contain
 
 ## 4. Performance checks
 
-Generate an app-specific baseline profile on a JIT-enabled physical test device:
+The interface uses Android views. Compose, the baseline-profile plugin, the profile
+installer and the benchmark module have been removed; their former Gradle tasks are
+not part of this project.
 
-```bash
-./gradlew :app:generateReleaseBaselineProfile
-```
+Use the minified release build for size and timing comparisons. Test copies must use
+separate application IDs and a debug signing key, keeping the production package and
+its data intact. For each comparison:
 
-Run macrobenchmarks only on a dedicated device:
+1. Record unsigned APK size and uncompressed `classes.dex` size. Keep dex uncompressed
+   in the APK so modern Android devices can load it without retaining an extracted copy.
+2. Run `:app:connectedInstrumentedTestAndroidTest`. This includes a 50,400-task migration,
+   deletion and reopening test, a 1,008-task crowded day, native gestures and rendering,
+   reminders, and activity recreation with an unsaved title.
+3. Seed identical histories into the isolated minified copies. Alternate force-stop and
+   `am start -W` runs, discard warm-up runs, and report the median and samples. Do not run
+   Gradle during timing. Report `dumpsys meminfo -s` separately as a process snapshot.
+4. Exercise create, rename, selection and paste, move and edge scrolling, both resizes,
+   delete/undo, day navigation, the calendar, and reminders. Compare screenshots outside
+   the advancing clock regions.
 
-```bash
-./gradlew :benchmark:connectedBenchmarkReleaseAndroidTest
-```
-
-Until a measured profile is committed, `app/src/main/baseline-prof.txt` uses package rules for the app's own classes and methods. AGP expands them against the release bytecode and merges dependency profiles, so code changes cannot leave stale method signatures. Replace these fallback rules once a measured profile covers startup and interactions. The manifest removes androidx.startup, so sideloaded installs get the profile from `PlannerApp`, which calls `ProfileInstaller.writeProfile` a few seconds after launch.
-
-Profile generation and macrobenchmarks temporarily install, clear or remove `com.privateplanner`. They must never run on a device containing plans that need to be retained. Profile generation also requires `dalvik.vm.usejit=true`.
-
-Benchmark traces and results are written to `benchmark/build/outputs/connected_android_test_additional_output/`.
+The measured workload, device, APK sizes and verification results are recorded in
+[optimisation.md](optimisation.md). Keep host microbenchmarks distinct from Android
+launch and frame measurements.
 
 ## 5. Publish
 

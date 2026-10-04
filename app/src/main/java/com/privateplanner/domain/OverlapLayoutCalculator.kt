@@ -1,15 +1,44 @@
 package com.privateplanner.domain
 
-import androidx.collection.LongObjectMap
-import androidx.collection.MutableLongObjectMap
-import androidx.collection.emptyLongObjectMap
-
-// Compared by value, so a tile whose column is unchanged skips recomposition when
-// another block moves.
+// Shared immutable column assignments, so unchanged tiles need no new text layout.
 data class BlockLayout(
     val columnIndex: Int,
     val columnCount: Int
-)
+) {
+    // Short on purpose, as PlannerBlock's is.
+    override fun toString() = "$columnIndex/$columnCount"
+}
+
+// A fixed-size map built once per layout. Only primitive ID lookup is needed: no
+// deletion, iteration, resizing or general collection library. Null values mark empty
+// slots, so every Long ID (including zero and negative legacy IDs) is supported.
+class BlockLayouts internal constructor(blockCount: Int) {
+    private val capacity = if (blockCount == 0) 1 else Integer.highestOneBit(blockCount * 2 - 1) shl 1
+    private val keys = LongArray(capacity)
+    private val values = arrayOfNulls<BlockLayout>(capacity)
+
+    private fun slot(id: Long): Int = ((id xor (id ushr 32)).toInt() * -1640531527) and (capacity - 1)
+
+    operator fun get(id: Long): BlockLayout? {
+        var index = slot(id)
+        while (true) {
+            val value = values[index] ?: return null
+            if (keys[index] == id) return value
+            index = (index + 1) and (capacity - 1)
+        }
+    }
+
+    internal operator fun set(id: Long, layout: BlockLayout) {
+        var index = slot(id)
+        while (values[index] != null && keys[index] != id) index = (index + 1) and (capacity - 1)
+        keys[index] = id
+        values[index] = layout
+    }
+
+    companion object {
+        val Empty = BlockLayouts(0)
+    }
+}
 
 private val BlockLayoutOrder = Comparator<PlannerBlock> { a, b ->
     when {
@@ -25,16 +54,18 @@ private val ColumnLayouts = Array(OverlapPolicy.MaxTransientOverlap) { count ->
 private val EmptyColumns = IntArray(0)
 
 object OverlapLayoutCalculator {
-    fun calculate(blocks: List<PlannerBlock>): LongObjectMap<BlockLayout> {
-        if (blocks.isEmpty()) return emptyLongObjectMap()
+    fun calculate(blocks: List<PlannerBlock>): BlockLayouts {
+        if (blocks.isEmpty()) return BlockLayouts.Empty
 
-        val sorted = if ((1 until blocks.size).all { BlockLayoutOrder.compare(blocks[it - 1], blocks[it]) <= 0 }) {
-            blocks
-        } else {
-            blocks.sortedWith(BlockLayoutOrder)
+        var sorted = blocks
+        for (index in 1 until blocks.size) {
+            if (BlockLayoutOrder.compare(blocks[index - 1], blocks[index]) > 0) {
+                sorted = ArrayList(blocks).apply { sortWith(BlockLayoutOrder) }
+                break
+            }
         }
         // Primitive keys avoid a boxed Long and a map entry for every tile and lookup.
-        val result = MutableLongObjectMap<BlockLayout>(blocks.size)
+        val result = BlockLayouts(blocks.size)
         // Most days need no scratch space; overlapping clusters reuse the same buffers.
         var assignedColumns = EmptyColumns
         var columnEnds = EmptyColumns

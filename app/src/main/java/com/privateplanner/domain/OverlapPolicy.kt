@@ -61,8 +61,8 @@ class OverlapPolicy private constructor(
             val counts = IntArray(slotCount)
             for (block in blocks) {
                 if (block.id == excludedBlockId) continue
-                val start = block.startMinutes.coerceIn(0, TimeSnapper.MinutesPerDay)
-                val end = block.endMinutes.coerceIn(0, TimeSnapper.MinutesPerDay)
+                val start = block.startMinutes.coerceAtLeast(0).coerceAtMost(TimeSnapper.MinutesPerDay)
+                val end = block.endMinutes.coerceAtLeast(0).coerceAtMost(TimeSnapper.MinutesPerDay)
                 if (start >= end) continue
                 counts[start / minutesPerSlot] += 1
                 val endSlot = end / minutesPerSlot

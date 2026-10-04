@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.4.0 — 4 October 2026
+
+### Storage
+
+- The interface uses platform Android views, and database and reminder work runs on one worker thread without the coroutines library. Compose, coroutines, AndroidX, the profile installer and the benchmark and profile build configuration are removed; two interfaces are all that remains of the Kotlin standard library. The unsigned release APK is 116 KB, against 954 KB for 1.3.3, and the installed app about 140 KB against 2.8 MB (7.1 MB once compiled). See `docs/optimisation.md` for the measurements.
+- Schema 7 drops the title index, which was two fifths of the database, and the obsolete Room identity table, preserving tasks and IDs. A year of eight blocks a day takes about 160 KB instead of 250 KB. A new block still takes the duration of the last block with the same title; finding it now reads back through the day index, which for a title never used before takes about 3 ms on the worker thread after ten years of blocks. A migration test checks all 50,400 historical tasks and verifies that the freed pages are returned.
+- A fixed-size primitive lookup replaces the general AndroidX collection dependency, retaining unboxed task IDs and shared column layouts.
+- Dex remains uncompressed in the APK so Android 9 and later can run it without keeping a separate extracted copy.
+- The database uses a rollback journal emptied at commit, and the reminders switch and recorded splash share one settings file. Day and reminder queries stay indexed, and the three-day cache keeps long histories off the interaction path.
+- The bundled licence notice names the Kotlin standard library, the only third-party code left, instead of AndroidX libraries that no longer ship.
+
+### Responsiveness and correctness
+
+- Launch takes about a fifth less main-thread time than 1.3.3 and scrolling about half, measured on the test emulator; processor time for a launch as a whole is unchanged.
+- A write and the re-read of its day make one trip to the worker thread, and the answer returns to the main thread ahead of the frame being prepared. Reminder syncing follows on the same thread once the interface has its answer. A write is no longer cancelled if the screen closes while it is in flight.
+- An open sheet keeps its colours through the day's five-minute colour steps and is rebuilt only at the 07:00 and 20:00 flips, around what it holds.
+- Dense days keep fewer off-screen views, avoid range allocations during scrolling and use a smaller, faster layout lookup. Long titles redraw only when their pinned position changes, and clock ticks reuse each five-minute palette.
+- Detached tiles, stopped screens and dismissed snackbars release gesture, animation and timeout work.
+- The native title field retains its 120-character limit, selection, keyboard and plain-text paste behaviour. Native tests cover the interface, including large fonts, dense days, accessibility, colour steps under a half-typed title and preserving an unsaved title across activity recreation.
+- Active reminders are left untouched when their contents, colour and deadline are unchanged. Edits refresh them; clock changes reset expiry timers; switching reminders off disables their receiver.
+- Prepared statements, transactional writes, overlap rules, nearby-day prefetching and failed-write recovery remain in place.
+
 ## 1.3.3 — 3 October 2026
 
 ### Interface and interaction

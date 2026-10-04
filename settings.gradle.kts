@@ -16,4 +16,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "Daytile"
 include(":app")
-include(":benchmark")

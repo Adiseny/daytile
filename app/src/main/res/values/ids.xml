@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The actions a block offers to accessibility services, which name custom actions by id. -->
+<resources>
+    <item name="block_rename" type="id" />
+    <item name="block_delete" type="id" />
+    <item name="block_earlier" type="id" />
+    <item name="block_later" type="id" />
+    <item name="block_shorten" type="id" />
+    <item name="block_lengthen" type="id" />
+</resources>

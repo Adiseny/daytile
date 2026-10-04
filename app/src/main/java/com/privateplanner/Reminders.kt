@@ -7,15 +7,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
-import androidx.collection.LongObjectMap
+import com.privateplanner.domain.BlockLayouts
 import com.privateplanner.data.PlannerRepository
-import com.privateplanner.domain.BlockLayout
 import com.privateplanner.domain.OverlapLayoutCalculator
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
@@ -23,16 +24,8 @@ import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
 import java.time.LocalDate
 import java.time.ZoneId
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
-private const val Store = "reminders"
 private const val EnabledKey = "enabled"
 // A channel's sound is fixed when it is created, so the two moments need two
 // channels rather than one. That also lets the warning be silenced on its own
@@ -56,27 +49,17 @@ private const val UnknownAlarm = Long.MAX_VALUE
 // nearer of those two moments across all blocks; firing it posts whatever is due at
 // that minute and arms the moment after. A reboot, a clock change and every write
 // all reduce to the same `sync` call, so there is no per-block alarm state to drift,
-// leak or reconcile.
+// leak or reconcile. Apart from the switch itself, everything here runs on the worker
+// thread, one sync at a time: each reads the planner as its turn comes, so the last always
+// reflects the latest write.
 class Reminders(private val context: Context) {
-    private val preferences by lazy(LazyThreadSafetyMode.NONE) {
-        context.getSharedPreferences(Store, Context.MODE_PRIVATE)
-    }
-
     // Notifications outlive the process, so this starts pessimistic: one query settles
     // it, and afterwards writes skip the notification service entirely.
     private var mayBeShowing = true
 
     // The intent never varies, so this is one ActivityManager round trip per process
     // rather than one per posting sync.
-    private val open by lazy(LazyThreadSafetyMode.NONE) {
-        PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java)
-                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
+    private var open: PendingIntent? = null
 
     // Alarms outlive the process, so like `mayBeShowing` this starts pessimistic:
     // the first sync settles it, and afterwards a write that changes nothing costs
@@ -91,57 +74,62 @@ class Reminders(private val context: Context) {
     // errand rather than something every post should pay for.
     private var channelsReady = false
 
+    // The receiver exists for reminders alone, so it is enabled only while the switch is
+    // on. Off, as it is until someone turns it on, a reboot or a clock change no longer
+    // starts the process to find nothing to do. The system keeps the setting across
+    // restarts and updates; the first sync in a process restates it, and later ones know.
+    private var receiverOn: Boolean? = null
+
     // Once switching off has cleared persistent alarms and notifications, planner writes
-    // need no coroutine, clock read or system call until the switch changes again.
+    // need no task, clock read or system call until the switch changes again. Read from
+    // whichever thread asks for a sync.
     @Volatile
     private var settledOff = false
 
-    // Writes, the switch and broadcasts all sync here and may overlap, so the lock keeps
-    // one sync at a time (and publishes the fields above between them): each reads state
-    // only once it holds it, so the last sync always reflects the latest write.
-    private val lock = Mutex()
-
-    // Outlives the screen, so a sync requested as the user leaves still completes.
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     var enabled: Boolean
-        get() = preferences.getBoolean(EnabledKey, false)
+        get() = context.plannerSettings().getBoolean(EnabledKey, false)
         set(value) {
             settledOff = false
-            preferences.edit().putBoolean(EnabledKey, value).apply()
+            context.plannerSettings().edit().putBoolean(EnabledKey, value).apply()
         }
 
-    // Fire and forget: the caller, usually a write the user is waiting on, returns at
-    // once and the reminder follows a moment later, entirely off the interaction path.
+    // Fire and forget: the caller, usually a write the user is waiting on, carries on at
+    // once and the reminder follows on the worker thread, behind what is already queued
+    // there. The work is done even if the screen has gone by then.
     fun syncSoon(
         repository: PlannerRepository,
         firedMinute: Long = -1L,
+        clockChanged: Boolean = false,
         then: () -> Unit = {}
     ) {
         if (settledOff && !enabled) {
             then()
             return
         }
-        scope.launch {
+        Worker.execute {
             try {
-                sync(repository, firedMinute)
+                sync(repository, firedMinute, clockChanged)
             } finally {
                 then()
             }
         }
     }
 
-    // Everything below is binder traffic and disk, so none of it runs on the caller's thread.
-    suspend fun sync(repository: PlannerRepository, firedMinute: Long = -1L) {
-        withContext(Dispatchers.Default) { lock.withLock { syncLocked(repository, firedMinute) } }
-    }
-
-    private suspend fun syncLocked(repository: PlannerRepository, firedMinute: Long) {
+    // Everything below is binder traffic and disk, so it stays on the worker thread.
+    fun sync(repository: PlannerRepository, firedMinute: Long = -1L, clockChanged: Boolean = false) {
         val on = enabled
         if (!on && settledOff) return
         settledOff = false
+        if (receiverOn != on) {
+            context.packageManager.setComponentEnabledSetting(
+                ComponentName(context, ReminderReceiver::class.java),
+                if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            receiverOn = on
+        }
         val nowMinute = Math.floorDiv(TimeSnapper.localNowMillis(), TimeSnapper.MillisPerMinute)
-        if (firedMinute >= 0 || mayBeShowing) show(repository, on, nowMinute, firedMinute)
+        if (firedMinute >= 0 || mayBeShowing) show(repository, on, nowMinute, firedMinute, clockChanged)
 
         val after = maxOf(nowMinute, firedMinute)
         val event = if (on) nextEvent(repository, after) else NoAlarm
@@ -179,7 +167,7 @@ class Reminders(private val context: Context) {
     // The first block after `after` owns the nearest moment: its warning if that has
     // not passed, otherwise its start. Only when the warning has passed can a later
     // block's warning still land first, which is the one extra lookup.
-    private suspend fun nextEvent(repository: PlannerRepository, after: Long): Long {
+    private fun nextEvent(repository: PlannerRepository, after: Long): Long {
         val first = repository.startAfter(after) ?: return NoAlarm
         if (first - LeadMinutes > after) return first - LeadMinutes
         val later = repository.startAfter(after + LeadMinutes) ?: return first
@@ -191,11 +179,12 @@ class Reminders(private val context: Context) {
     // block's negated id so that both can stand at once and each is cancelled on its own
     // terms. Re-posting an id updates it in place, so a block that is moved or resized
     // corrects itself instead of going stale.
-    private suspend fun show(
+    private fun show(
         repository: PlannerRepository,
         on: Boolean,
         nowMinute: Long,
-        firedMinute: Long
+        firedMinute: Long,
+        clockChanged: Boolean
     ) {
         val manager = context.getSystemService(NotificationManager::class.java)
         val due = LinkedHashMap<Int, PlannerBlock>(4)
@@ -206,7 +195,8 @@ class Reminders(private val context: Context) {
             repository.getBlocksStartingAt(dateOf(warned), minuteOf(warned))
                 .forEach { due[-it.id.toInt()] = it }
         }
-        manager.activeNotifications.forEach { posted ->
+        val active = manager.activeNotifications
+        active.forEach { posted ->
             val block = if (on) repository.getBlock(abs(posted.id).toLong()) else null
             if (block != null && showsAt(block, nowMinute, posted.id < 0)) {
                 due[posted.id] = block
@@ -235,7 +225,7 @@ class Reminders(private val context: Context) {
         val postedAt = System.currentTimeMillis()
         // A tile's shade follows its column among overlapping blocks, so the accent comes
         // from the same layout the timeline draws.
-        val layouts = HashMap<LocalDate, LongObjectMap<BlockLayout>>(2)
+        val layouts = HashMap<LocalDate, BlockLayouts>(2)
         due.forEach { (id, block) ->
             val upcoming = id < 0
             val until = millisAt(
@@ -248,18 +238,27 @@ class Reminders(private val context: Context) {
                 OverlapLayoutCalculator.calculate(repository.getBlocksForDate(block.date))
             }[block.id]?.columnIndex ?: 0
             val length = " · " + TimeFormatter.duration(block.durationMinutes)
+            val text = if (upcoming) {
+                "Starts " + TimeFormatter.time(block.startMinutes) + length
+            } else {
+                TimeFormatter.range(block.startMinutes, block.durationMinutes) + length
+            }
+            val colour = blockBackgroundArgb(block.startMinutes, column).toInt()
+            val channel = if (upcoming) UpcomingChannel else StartChannel
+            val previous = active.firstOrNull { it.id == id }?.notification
+            // The system owns the running countdown. An unrelated write needs neither
+            // a new Notification nor another binder call to post the same contents.
+            // Clock changes also reset the timeout: Android expires it by elapsed time.
+            if (!clockChanged && previous != null && previous.channelId == channel && previous.`when` == until &&
+                previous.color == colour && previous.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == block.title &&
+                previous.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() == text
+            ) return@forEach
             manager.notify(
                 id,
-                Notification.Builder(context, if (upcoming) UpcomingChannel else StartChannel)
+                Notification.Builder(context, channel)
                     .setSmallIcon(R.drawable.ic_bell)
                     .setContentTitle(block.title)
-                    .setContentText(
-                        if (upcoming) {
-                            "Starts " + TimeFormatter.time(block.startMinutes) + length
-                        } else {
-                            TimeFormatter.range(block.startMinutes, block.durationMinutes) + length
-                        }
-                    )
+                    .setContentText(text)
                     // Countdown to the start, then to the end, ticked by the system: no
                     // wakeups, no redraw work, nothing for the app to keep alive, and the
                     // system withdraws each one as its moment arrives.
@@ -267,9 +266,17 @@ class Reminders(private val context: Context) {
                     .setUsesChronometer(true)
                     .setChronometerCountDown(true)
                     .setTimeoutAfter(remaining)
-                    .setColor(blockBackgroundArgb(block.startMinutes, column).toInt())
+                    .setColor(colour)
                     .setCategory(Notification.CATEGORY_REMINDER)
-                    .setContentIntent(open)
+                    .setContentIntent(
+                        open ?: PendingIntent.getActivity(
+                            context,
+                            0,
+                            Intent(context, MainActivity::class.java)
+                                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        ).also { open = it }
+                    )
                     .setAutoCancel(true)
                     // Corrections must not buzz again; only the first post alerts.
                     .setOnlyAlertOnce(true)
@@ -308,15 +315,19 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as? PlannerApp ?: return
         val fired = if (intent.action == null) intent.getLongExtra(ExtraEpochMinute, -1L) else -1L
-        app.reminders.syncSoon(app.repository, fired, goAsync()::finish)
+        val pending = goAsync()
+        app.reminders.syncSoon(
+            app.repository, fired,
+            clockChanged = intent.action == Intent.ACTION_TIME_CHANGED,
+            then = { pending.finish() }
+        )
     }
 }
 
-// Starts reading the switch from disk on the platform's loader thread, so the first
-// read of `enabled` finds it in memory.
-internal fun Context.preloadReminderSettings() {
-    getSharedPreferences(Store, Context.MODE_PRIVATE)
-}
+// The planner's one settings file: the reminders switch and the splash MainActivity last
+// recorded. The platform keeps it in memory once read, and the first call starts that read
+// on its loader thread, so PlannerApp calls this as the process starts.
+internal fun Context.plannerSettings(): SharedPreferences = getSharedPreferences("reminders", Context.MODE_PRIVATE)
 
 internal fun Context.postNotificationsGranted(): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -335,7 +346,7 @@ private fun showsAt(block: PlannerBlock, nowMinute: Long, upcoming: Boolean): Bo
 }
 
 // The first block starting strictly after `minute`, as an epoch minute.
-private suspend fun PlannerRepository.startAfter(minute: Long): Long? =
+private fun PlannerRepository.startAfter(minute: Long): Long? =
     getNextStart(dayOf(minute + 1), minuteOf(minute + 1))
 
 // Minutes are wall-clock minutes, so they are added before the zone is applied: on a

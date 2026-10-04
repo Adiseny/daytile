@@ -3,7 +3,6 @@ package com.privateplanner.domain
 import java.time.LocalDate
 import java.util.TimeZone
 import kotlin.math.floor
-import kotlin.math.roundToInt
 
 object TimeSnapper {
     const val MinutesPerDay = 24 * 60
@@ -14,7 +13,7 @@ object TimeSnapper {
     const val MillisPerMinute = 60_000L
 
     fun floorToSnap(minutes: Int): Int {
-        return minutes.coerceIn(0, MinutesPerDay - 1) / SnapMinutes * SnapMinutes
+        return minutes.coerceAtLeast(0).coerceAtMost(MinutesPerDay - 1) / SnapMinutes * SnapMinutes
     }
 
     fun floorToValidStart(minutes: Int): Int {
@@ -22,7 +21,7 @@ object TimeSnapper {
     }
 
     fun snapDurationToNearest(minutes: Int): Int {
-        return (minutes.coerceIn(MinimumDurationMinutes, MinutesPerDay) + SnapMinutes / 2) /
+        return (minutes.coerceAtLeast(MinimumDurationMinutes).coerceAtMost(MinutesPerDay) + SnapMinutes / 2) /
             SnapMinutes * SnapMinutes
     }
 
@@ -32,9 +31,7 @@ object TimeSnapper {
     }
 
     fun deltaMinutesFromY(deltaPx: Float, hourHeightPx: Float): Int {
-        return (deltaPx / hourHeightPx * MinutesPerHour / SnapMinutes)
-            .roundToInt()
-            .times(SnapMinutes)
+        return Math.round(deltaPx / hourHeightPx * MinutesPerHour / SnapMinutes) * SnapMinutes
     }
 
     fun defaultDurationForStart(startMinutes: Int, nextStartMinutes: Int?): Int {
@@ -56,7 +53,7 @@ object TimeSnapper {
     }
 
     fun clampStart(startMinutes: Int, durationMinutes: Int): Int {
-        return startMinutes.coerceIn(0, MinutesPerDay - durationMinutes)
+        return startMinutes.coerceAtLeast(0).coerceAtMost(MinutesPerDay - durationMinutes)
     }
 
     fun clampDuration(startMinutes: Int, durationMinutes: Int): Int {

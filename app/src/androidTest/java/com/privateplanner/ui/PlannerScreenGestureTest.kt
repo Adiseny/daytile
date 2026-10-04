@@ -1,520 +1,251 @@
 package com.privateplanner.ui
 
-import com.privateplanner.domain.PlannerBlock
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.width
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.assertIsFocused
-import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasScrollAction
-import androidx.compose.ui.test.swipe
-import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeDown
-import androidx.compose.ui.test.swipeLeft
-import androidx.compose.ui.test.swipeRight
-import androidx.compose.ui.test.swipeUp
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import android.graphics.Rect
+import android.os.Build
+import android.os.SystemClock
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.EditText
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.ViewActions.pressImeActionButton
+import androidx.test.espresso.action.ViewActions.replaceText
+import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.ViewMatchers.hasFocus
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import com.privateplanner.Reminders
-import com.privateplanner.data.PlannerDatabase
-import com.privateplanner.data.PlannerRepository
+import com.privateplanner.R
 import com.privateplanner.domain.MaxTitleLength
-import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.TimeSnapper
-import java.time.LocalDate
-import java.time.LocalTime
-import kotlinx.coroutines.runBlocking
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Rule
+import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
-class PlannerScreenGestureTest {
-    @get:Rule
-    val compose = createAndroidComposeRule<ComponentActivity>()
+class PlannerScreenGestureTest : PlannerTestHost() {
+    private fun input() = onView(isAssignableFrom(EditText::class.java))
 
-    private var database: PlannerDatabase? = null
-    private val recordedHaptics = mutableListOf<HapticFeedbackType>()
-    private val hapticFeedback = RecordingHapticFeedback(recordedHaptics)
-
-    @After
-    fun closeDatabase() {
-        compose.runOnUiThread { compose.activity.setContent { } }
-        compose.waitForIdle()
-        database?.close()
-        database = null
+    private fun openCreate() = main {
+        assertTrue(screen.descendants().filterIsInstance<DayView>().first()
+            .performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, null))
     }
 
-    @Test
-    fun tapEmptyTimeCreatesBlockAndOpensActions() {
-        setPlannerContent()
-
-        compose.onRoot()
-            .performTouchInput {
-                down(center)
-                up()
-            }
-        compose.onNode(hasSetTextAction()).assertIsFocused()
-        compose.onNode(hasSetTextAction()).performTextInput("Focus")
-        compose.onNodeWithText("Add").performClick()
-
-        compose.waitUntilNodeWithText("Focus")
-        compose.onNodeWithText("Focus").performClick()
-        compose.onNodeWithText("Delete").assertExists()
+    @Test fun tapEmptyTimeCreatesBlockAndOpensActions() {
+        launch()
+        gesture(screen.width * 0.6f, screen.height * 0.5f, 0f, 0f)
+        input().check(matches(hasFocus())).perform(replaceText("Focus"))
+        clickLabel("Add")
+        awaitTile("Focus")
+        main { tile("Focus").performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, null) }
+        assertTrue(main { screen.descendants().filterIsInstance<Label>().any { it.text == "Delete" } })
     }
 
-    @Test
-    fun timelineAccessibilityActionOpensCreateSheet() {
-        setPlannerContent()
-
-        compose.onNode(hasContentDescription("Day timeline", substring = true))
-            .performSemanticsAction(SemanticsActions.OnClick)
-
-        compose.onNode(hasSetTextAction()).assertIsFocused()
+    @Test fun timelineAccessibilityActionOpensCreateSheet() {
+        launch()
+        openCreate()
+        input().check(matches(hasFocus()))
     }
 
-    @Test
-    fun horizontalSwipeChangesDayAndBack() {
-        setPlannerContent()
-
-        compose.onNodeWithText("Today").assertExists()
-        compose.onRoot().performTouchInput { swipeLeft() }
-        compose.waitUntilNodeWithText("Tomorrow")
-        compose.onRoot().performTouchInput { swipeRight() }
-        compose.waitUntilNodeWithText("Today")
-        assertEquals(
-            listOf(HapticFeedbackType.SegmentTick, HapticFeedbackType.SegmentTick),
-            recordedHaptics
-        )
+    @Test fun horizontalSwipeChangesDayAndBack() {
+        launch()
+        val today = main { model.selectedDate }
+        repeat(7) { index ->
+            gesture(screen.width * 0.8f, screen.height * 0.5f, -screen.width * 0.6f, 0f)
+            await { main { model.selectedDate } == today.plusDays(index + 1L) }
+        }
+        repeat(7) { index ->
+            gesture(screen.width * 0.2f, screen.height * 0.5f, screen.width * 0.6f, 0f)
+            await { main { model.selectedDate } == today.plusDays(6L - index) }
+        }
+        assertEquals(List(14) { HapticFeedbackConstants.SEGMENT_TICK }, haptics)
     }
 
-    // The timeline starts from the window's width and takes the measured one where the two
-    // differ. Hosted narrower than the window, a tile must be sized for the host.
-    @Test
-    fun tilesFollowTheMeasuredWidthWhereItDiffersFromTheWindow() {
-        setPlannerContent(hostWidth = 260.dp) {
-            insertVisibleBlock(title = "Narrow")
+    @Test fun tilesFollowMeasuredWidthAndKeepMinimumTouchTargets() {
+        launch(hostWidth = 260) { add("Narrow", duration = 10) }
+        scrollTo(0)
+        awaitTile("Narrow")
+        main {
+            val tile = tile("Narrow")
+            val density = screen.resources.displayMetrics.density
+            assertEquals(72f * density, tile.left.toFloat(), 1f)
+            assertEquals((260f - 72 - 10 - 4) * density, tile.width.toFloat(), 1f)
+            assertEquals(48f * density, tile.height.toFloat(), 1f)
         }
-
-        compose.waitUntilBlockExists("Narrow")
-        val density = compose.density.density
-        val tile = compose.onNode(hasContentDescription("Narrow", substring = true))
-            .fetchSemanticsNode().boundsInRoot
-        // One column: the host less the gutter (72), the end padding (10) and the column gap (4).
-        assertEquals("Tile left", 72f * density, tile.left, 1f)
-        assertEquals("Tile width", (260f - 72f - 10f - 4f) * density, tile.width, 1f)
     }
 
-    @Test
-    fun blockDragResizeAndAccessibilityActionsRemainStable() {
-        setPlannerContent {
-            insertVisibleBlock(title = "Move me")
-        }
-
-        compose.waitUntilBlockExists("Move me")
-        val original = storedBlock("Move me")
-        compose.onNode(hasContentDescription("Move me", substring = true)).performTouchInput {
-            down(center)
-            advanceEventTime(450)
-            moveBy(Offset(0f, 80f))
-            up()
-        }
-
-        val moved = waitUntilStoredBlock("Move me") { block ->
-            block.startMinutes != original.startMinutes
-        }
-        compose.onNode(hasContentDescription("Move me", substring = true)).performTouchInput {
-            down(Offset(centerX, bottom - 4f))
-            moveBy(Offset(0f, 80f))
-            up()
-        }
-
-        val resized = waitUntilStoredBlock("Move me") { block ->
-            block.durationMinutes != moved.durationMinutes
-        }
-        val actions = compose.onNode(hasContentDescription("Move me", substring = true))
-            .fetchSemanticsNode()
-            .config[SemanticsActions.CustomActions]
-        assertTrue(actions.first { it.label == "Lengthen 5 minutes" }.action())
-        val lengthened = waitUntilStoredBlock("Move me") { block ->
-            block.durationMinutes > resized.durationMinutes
-        }
-        assertEquals(resized.durationMinutes + TimeSnapper.SnapMinutes, lengthened.durationMinutes)
+    @Test fun blockDragResizeAndAccessibilityActionsRemainStable() {
+        launch { add("Move me") }
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(480)) })
+        awaitTile("Move me")
+        fun bounds() = main { Rect().also { tile("Move me").getDrawingRect(it); screen.offsetDescendantRectToMyCoords(tile("Move me"), it) } }
+        val before = stored("Move me")!!
+        var area = bounds()
+        gesture(area.exactCenterX(), area.exactCenterY(), 0f, screen.context.dp(40f), hold = 450)
+        await { stored("Move me")!!.startMinutes != before.startMinutes }
+        val moved = stored("Move me")!!
+        area = bounds()
+        gesture(area.exactCenterX(), area.bottom - screen.context.dp(4f), 0f, screen.context.dp(40f))
+        await { stored("Move me")!!.durationMinutes != moved.durationMinutes }
+        val resized = stored("Move me")!!
+        main { assertTrue(tile("Move me").performAccessibilityAction(R.id.block_lengthen, null)) }
+        await { stored("Move me")!!.durationMinutes == resized.durationMinutes + 5 }
     }
 
-    @Test
-    fun crowdedTimelineRenders() {
-        setPlannerContent {
-            seedCrowdedVisibleDay()
+    @Test fun cancelledDragDoesNotSaveOrKeepScrolling() {
+        launch { add("Keep me") }
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(480)) })
+        awaitTile("Keep me")
+        val before = stored("Keep me")!!
+        val area = main { Rect().also { tile("Keep me").getDrawingRect(it); screen.offsetDescendantRectToMyCoords(tile("Keep me"), it) } }
+        gesture(area.exactCenterX(), area.exactCenterY(), 0f, screen.context.dp(40f), hold = 450, cancel = true)
+        assertEquals(before, stored("Keep me"))
+        main {
+            assertEquals(0f, tile("Keep me").translationY)
+            assertEquals(0L, screen.descendants().filterIsInstance<DayView>().first().activeBlockId)
         }
-        compose.waitUntilBlockExists(title = "Load", timeoutMillis = 5_000)
     }
 
-    @Test
-    fun denseDayKeepsOnlyNearbyTilesAndScrollsToBothEnds() {
-        setPlannerContent {
+    @Test fun denseDayKeepsOnlyNearbyTilesAndScrollsToBothEnds() {
+        launch {
             withTransaction {
-                for (start in 0 until 1440 step 10) {
-                    repeat(7) { column -> insertBlock("Dense $start/$column", start, 10) }
-                }
+                for (start in 0 until 1440 step 10) repeat(7) { column -> add("Dense $start/$column", start, 10) }
             }
         }
-        compose.waitUntilBlockExists("Dense")
-        fun tileCount() = compose.onAllNodes(hasContentDescription("Dense", substring = true))
-            .fetchSemanticsNodes().size
-        assertTrue("Offscreen tiles should be released; kept ${tileCount()}", tileCount() < 700)
-
-        val timeline = compose.onNode(hasScrollAction())
-        timeline.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -100_000f) }
-        compose.waitUntilBlockExists("Dense 0/0")
-        assertTrue(tileCount() < 700)
-        timeline.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
-        compose.waitUntilBlockExists("Dense 1430/6")
-        assertTrue(tileCount() < 700)
-
-        // Editing a tile that was composed after scrolling still persists normally.
-        val actions = compose.onNode(hasContentDescription("Dense 1430/6", substring = true))
-            .fetchSemanticsNode().config[SemanticsActions.CustomActions]
-        assertTrue(actions.first { it.label == "Delete" }.action())
-        waitUntilStoredBlockMissing("Dense 1430/6")
-        compose.waitUntilNodeWithText("Undo")
-        compose.onNodeWithText("Undo").performClick()
-        compose.waitUntilBlockExists("Dense 1430/6")
+        fun count() = main { screen.descendants().filterIsInstance<TimeBlockView>().count() }
+        scrollTo(0)
+        awaitTile("Dense 0/0")
+        val limit = main { ((screen.height / screen.context.dp(HourHeight) * 60 + 120) / 10 + 1).toInt() * 7 }
+        assertTrue("Only nearby tiles should be kept: ${count()}", count() <= limit && count() < 700)
+        scrollTo(100_000)
+        awaitTile("Dense 1430/6")
+        assertTrue(count() <= limit && count() < 700)
+        main { tile("Dense 1430/6").performAccessibilityAction(R.id.block_delete, null) }
+        await { stored("Dense 1430/6") == null && main { model.snackbar } != null }
+        clickLabel("Undo")
+        awaitTile("Dense 1430/6")
+        assertEquals(1008, storedToday().size)
     }
 
-    @Test
-    fun scrollingTileShowsThroughStatusBarAndHeaderAfterSheetDismissal() {
-        val viewModel = setPlannerContent()
-        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val empty = checkNotNull(automation.takeScreenshot())
-        val statusHeight = compose.runOnUiThread {
-            checkNotNull(ViewCompat.getRootWindowInsets(compose.activity.window.decorView))
-                .getInsets(WindowInsetsCompat.Type.statusBars()).top
+    @Test fun detachingDuringAHoldCancelsAutoScrollAndKeepsTheSavedBlock() {
+        launch { add("Held", duration = 180) }
+        awaitTile("Held")
+        val saved = stored("Held")
+        val held = main { tile("Held") }
+        main {
+            val now = SystemClock.uptimeMillis()
+            val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, held.width / 2f, 20f, 0)
+            held.onTouchEvent(event)
+            event.recycle()
         }
-        assertTrue("Status icons must remain visible", statusHeight > 0)
-        // Away from the camera, clock, notification icons and right-hand icons.
-        val x = (empty.width * 0.7f).toInt()
-        val statusY = statusHeight / 2
-        val headingY = statusHeight + 6
-        val paper = empty.getPixel(x, statusY)
-        empty.recycle()
-
-        runBlocking {
-            checkNotNull(database).insertBlock("Glass regression", 0, TimeSnapper.MinutesPerDay)
+        await { main { screen.descendants().filterIsInstance<DayView>().first().activeBlockId == saved!!.id } }
+        main {
+            val day = held.parent as DayView
+            day.removeView(held)
+            assertEquals(0L, day.activeBlockId)
+            val autoScroll = TimeBlockView::class.java.getDeclaredField("autoScroll").apply { isAccessible = true }
+            assertNull(autoScroll.get(held))
         }
-        compose.waitUntilBlockExists("Glass regression")
-        // Scroll in the gutter: near midnight the default swipe starts on the
-        // full-day tile's resize handle and shortens it instead of scrolling.
-        compose.onRoot().performTouchInput {
-            swipe(Offset(20f, height * 0.8f), Offset(20f, height * 0.2f), 300)
+        assertEquals(saved, stored("Held"))
+    }
+
+    @Test fun largeFontCreateAndActionFlowRemainReachable() {
+        launch(fontScale = 2f)
+        openCreate()
+        input().perform(replaceText("Large font task"))
+        clickLabel("Add")
+        awaitTile("Large font task")
+        main { tile("Large font task").performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, null) }
+        assertTrue(main { screen.descendants().filterIsInstance<Label>().any { it.text == "Delete" } })
+    }
+
+    @Test fun createTitleInputCapsLongTitleWithoutSplittingEmoji() {
+        launch()
+        openCreate()
+        val title = "A".repeat(MaxTitleLength)
+        input().perform(replaceText(title + "overflow")).check(matches(withText(title)))
+        val beforeEmoji = title.dropLast(1)
+        input().perform(replaceText(beforeEmoji + "\uD83D\uDE00overflow")).check(matches(withText(beforeEmoji)))
+        input().perform(replaceText(title), pressImeActionButton())
+        awaitTile(title)
+    }
+
+    @Test fun completePlanningWorkflowRemainsConsistent() {
+        launch()
+        main { model.openDateJump() }
+        main { screen.descendants().first { it.contentDescription == "Dismiss Choose date" }.performClick() }
+        assertNull(main { model.sheet })
+        openCreate()
+        input().perform(replaceText("Workflow task"))
+        clickLabel("Add")
+        awaitTile("Workflow task")
+        main { tile("Workflow task").performAccessibilityAction(R.id.block_rename, null) }
+        input().check { view, _ ->
+            view as EditText
+            assertEquals("Workflow task", view.text.toString())
+            assertEquals(0, view.selectionStart)
+            assertEquals(view.length(), view.selectionEnd)
         }
-        compose.waitForIdle()
+        input().perform(replaceText("Renamed workflow"), pressImeActionButton())
+        awaitTile("Renamed workflow")
+        main { tile("Renamed workflow").performAccessibilityAction(R.id.block_delete, null) }
+        await { stored("Renamed workflow") == null && main { model.snackbar } != null }
+        clickLabel("Undo")
+        awaitTile("Renamed workflow")
+        main { tile("Renamed workflow").performAccessibilityAction(R.id.block_delete, null) }
+        await { stored("Renamed workflow") == null }
+    }
 
-        fun assertContinuousGlass() {
-            // A Compose-only capture misses Android's opaque protection overlay.
-            val screen = checkNotNull(automation.takeScreenshot())
-            try {
-                val status = screen.getPixel(x, statusY)
-                val heading = screen.getPixel(x, headingY)
-                val channels = listOf<(Int) -> Int>(
-                    android.graphics.Color::red,
-                    android.graphics.Color::green,
-                    android.graphics.Color::blue
-                )
-                assertTrue(
-                    "Tile must be visible behind the system status icons: paper=${paper.toUInt().toString(16)}, status=${status.toUInt().toString(16)}, heading=${heading.toUInt().toString(16)}",
-                    channels.sumOf { kotlin.math.abs(it(status) - it(paper)) } > 20
-                )
-                channels.forEach { channel ->
-                    assertTrue(
-                        "Status bar and heading must share one continuous tint",
-                        kotlin.math.abs(channel(status) - channel(heading)) <= 5
-                    )
-                }
-            } finally {
-                screen.recycle()
-            }
+    // Every write reads its day again; a read that changes nothing must leave the list on
+    // screen as it is, so that nothing is laid out or drawn for it.
+    @Test fun aWriteThatChangesNothingKeepsTheListOnScreen() {
+        launch { add("Same") }
+        awaitTile("Same")
+        val shown = main { model.blocks }
+        main {
+            model.openRename(shown.single().id)
+            model.renameBlock("Same")
         }
-
-        assertContinuousGlass()
-        compose.onNode(hasContentDescription("Jump date", substring = true)).performClick()
-        compose.onNode(hasContentDescription("Dismiss Choose date")).assertExists()
-        compose.runOnUiThread { viewModel.dismissSheet() }
-        compose.waitForIdle()
-        assertContinuousGlass()
+        await { main { model.sheet } == null }
+        assertEquals("Same", stored("Same")!!.title)
+        assertSame(shown, main { model.blocks })
     }
 
-    @Test
-    fun largeFontCreateAndActionFlowRemainReachable() {
-        setPlannerContent(fontScale = 2f)
-
-        compose.onRoot()
-            .performTouchInput {
-                down(center)
-                up()
-            }
-        compose.onNode(hasSetTextAction()).performTextInput("Large font task")
-        compose.onNodeWithText("Add").performClick()
-
-        compose.waitUntilNodeWithText("Large font task")
-        compose.onNodeWithText("Large font task").performClick()
-        compose.onNodeWithText("Delete").assertExists()
-    }
-
-    @Test
-    fun createTitleInputCapsLongTitleBeforeSaving() {
-        val cappedTitle = "A".repeat(MaxTitleLength)
-        setPlannerContent()
-
-        compose.onRoot()
-            .performTouchInput {
-                down(center)
-                up()
-            }
-        val titleInput = compose.onNode(hasSetTextAction())
-        titleInput.performTextInput(cappedTitle + "overflow")
-
-        assertEquals(
-            cappedTitle,
-            titleInput.fetchSemanticsNode().config[SemanticsProperties.EditableText].text
-        )
-        val beforeEmoji = "A".repeat(MaxTitleLength - 1)
-        titleInput.performTextReplacement(beforeEmoji + "\uD83D\uDE00overflow")
-        assertEquals(
-            beforeEmoji,
-            titleInput.fetchSemanticsNode().config[SemanticsProperties.EditableText].text
-        )
-        titleInput.performTextReplacement(cappedTitle)
-        compose.onNodeWithText("Add").performClick()
-        compose.waitUntilBlockExists(cappedTitle)
-    }
-
-    @Test
-    fun completePlanningWorkflowRemainsConsistent() {
-        val viewModel = setPlannerContent()
-        val today = viewModel.uiState.value.selectedDate
-
-        repeat(7) { index ->
-            compose.onRoot().performTouchInput { swipeLeft() }
-            compose.waitUntil {
-                viewModel.uiState.value.selectedDate == today.plusDays(index + 1L)
-            }
+    // The screen is told it shows some other palette, then its clock ticks back to the real one.
+    @Test fun titleSheetStaysThroughAColourStepAndIsRebuiltAroundItsTextWhenLightAndDarkFlip() {
+        launch()
+        openCreate()
+        input().perform(replaceText("Half typed"))
+        fun field() = main { screen.descendants().filterIsInstance<EditText>().first() }
+        val typedInto = field()
+        val shown = main { screen.palette }
+        val others = (0 until TimeSnapper.MinutesPerDay step PaletteStepMinutes).map { paletteForMinute(it) }
+        fun tickFrom(palette: PlannerPalette) = main {
+            PlannerScreen::class.java.getDeclaredField("palette").apply { isAccessible = true }.set(screen, palette)
+            (PlannerScreen::class.java.getDeclaredField("clock").apply { isAccessible = true }.get(screen) as Runnable).run()
+            assertSame(shown, screen.palette)
         }
-        repeat(7) { index ->
-            compose.onRoot().performTouchInput { swipeRight() }
-            compose.waitUntil {
-                viewModel.uiState.value.selectedDate == today.plusDays(6L - index)
-            }
+        tickFrom(others.first { it !== shown && it.LightBackground == shown.LightBackground })
+        assertSame("A step within a ramp must leave the sheet alone", typedInto, field())
+        tickFrom(others.first { it.LightBackground != shown.LightBackground })
+        val rebuilt = field()
+        assertNotSame("The flip between light and dark builds the sheet again", typedInto, rebuilt)
+        assertEquals("Half typed", main { rebuilt.text.toString() })
+    }
+
+    @Test fun clockSchedulesOnlyWhileStartedAndRepeatedStartsDoNotDuplicateObservers() {
+        launch()
+        if (Build.VERSION.SDK_INT < 29) return
+        main {
+            val field = PlannerScreen::class.java.getDeclaredField("clock").apply { isAccessible = true }
+            val clock = field.get(screen) as Runnable
+            assertTrue(screen.handler.hasCallbacks(clock))
+            screen.start()
+            assertTrue(screen.handler.hasCallbacks(clock))
+            screen.stop()
+            assertFalse(screen.handler.hasCallbacks(clock))
+            screen.start()
+            assertTrue(screen.handler.hasCallbacks(clock))
         }
-
-        compose.onNodeWithText("Today").performClick()
-        // The date sheet no longer has a Cancel button; tapping outside closes it.
-        compose.onNode(hasContentDescription("Dismiss Choose date")).performClick()
-
-        val timeline = hasContentDescription("Day timeline", substring = true)
-        // Park at the top of the day first. The timeline opens scrolled to the
-        // current time, so late in the evening it is already at its end and a swipe
-        // up moves nothing — which made this assertion pass or fail on the clock.
-        repeat(4) { compose.onRoot().performTouchInput { swipeDown() } }
-        compose.waitForIdle()
-        val initialTimelineDescription = compose.onNode(timeline)
-            .fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
-        compose.onRoot().performTouchInput { swipeUp() }
-        compose.waitUntil {
-            compose.onNode(timeline).fetchSemanticsNode()
-                .config[SemanticsProperties.ContentDescription] != initialTimelineDescription
-        }
-        compose.onRoot().performTouchInput { swipeDown() }
-
-        compose.onNode(timeline).performSemanticsAction(SemanticsActions.OnClick)
-        compose.onNode(hasSetTextAction()).performTextInput("Workflow task")
-        compose.onNodeWithText("Add").performClick()
-        compose.waitUntilBlockExists("Workflow task")
-
-        compose.onNode(hasContentDescription("Workflow task", substring = true)).performClick()
-        compose.onNode(hasContentDescription("Rename Workflow task")).performClick()
-        compose.onNode(hasSetTextAction()).performTextReplacement("Renamed workflow")
-        compose.onNodeWithText("Rename").performClick()
-        compose.waitUntilBlockExists("Renamed workflow")
-
-        compose.onNode(hasContentDescription("Renamed workflow", substring = true)).performClick()
-        compose.onNodeWithText("Delete").performClick()
-        waitUntilStoredBlockMissing("Renamed workflow")
-        compose.waitUntilNodeWithText("Undo")
-        compose.onNodeWithText("Undo").performClick()
-        compose.waitUntilBlockExists("Renamed workflow")
-
-        compose.onNode(hasContentDescription("Renamed workflow", substring = true)).performClick()
-        compose.onNodeWithText("Delete").performClick()
-        waitUntilStoredBlockMissing("Renamed workflow")
-    }
-
-    private fun setPlannerContent(
-        fontScale: Float = 1f,
-        hostWidth: Dp = Dp.Unspecified,
-        seed: suspend PlannerDatabase.() -> Unit = {}
-    ): PlannerViewModel {
-        val db = PlannerDatabase(compose.activity.applicationContext, name = null)
-        database = db
-        runBlocking { db.seed() }
-
-        val viewModel = PlannerViewModel(
-            PlannerRepository(db),
-            Reminders(compose.activity.applicationContext)
-        )
-        compose.setContent {
-            val density = LocalDensity.current
-            CompositionLocalProvider(
-                LocalDensity provides Density(density = density.density, fontScale = fontScale),
-                LocalHapticFeedback provides hapticFeedback
-            ) {
-                PlannerTheme {
-                    // An unspecified width leaves the screen filling the window.
-                    Box(Modifier.width(hostWidth)) {
-                        PlannerScreen(viewModel = viewModel)
-                    }
-                }
-            }
-        }
-        compose.waitForIdle()
-        return viewModel
-    }
-
-    private suspend fun PlannerDatabase.insertVisibleBlock(title: String) {
-        insertBlock(
-            title = title,
-            startMinutes = visibleStartMinutes(),
-            durationMinutes = TimeSnapper.DefaultDurationMinutes
-        )
-    }
-
-    private suspend fun PlannerDatabase.insertBlock(
-        title: String,
-        startMinutes: Int,
-        durationMinutes: Int
-    ) {
-        insertBlock(
-            PlannerBlock(
-                date = LocalDate.now(),
-                title = title,
-                startMinutes = startMinutes,
-                durationMinutes = durationMinutes
-            )
-        )
-    }
-
-    private suspend fun PlannerDatabase.seedCrowdedVisibleDay() {
-        val today = LocalDate.now().toEpochDay()
-        val firstStart = (visibleStartMinutes() - TimeSnapper.MinutesPerHour)
-            .coerceAtLeast(0)
-        var id = 1L
-        for (start in firstStart until (firstStart + 4 * TimeSnapper.MinutesPerHour)
-            .coerceAtMost(TimeSnapper.MinutesPerDay - TimeSnapper.MinimumDurationMinutes)
-            step TimeSnapper.MinimumDurationMinutes
-        ) {
-            repeat(OverlapPolicy.MaxSavedOverlap) {
-                insertBlock(
-                    PlannerBlock(
-                        id = id++,
-                        date = LocalDate.ofEpochDay(today),
-                        title = "Load $id",
-                        startMinutes = start,
-                        durationMinutes = TimeSnapper.MinimumDurationMinutes
-                    )
-                )
-            }
-        }
-    }
-
-    private fun visibleStartMinutes(): Int {
-        val now = LocalTime.now()
-        val latestSafeStart = TimeSnapper.MinutesPerDay -
-            TimeSnapper.DefaultDurationMinutes -
-            3 * TimeSnapper.MinutesPerHour
-        return TimeSnapper.floorToSnap(now.hour * TimeSnapper.MinutesPerHour + now.minute)
-            .coerceIn(0, latestSafeStart)
-    }
-
-    private fun storedBlock(title: String): PlannerBlock {
-        return checkNotNull(findStoredBlock(title)) { "No stored block titled $title" }
-    }
-
-    private fun findStoredBlock(title: String): PlannerBlock? {
-        val db = checkNotNull(database)
-        return runBlocking {
-            db
-                .getBlocksForDate(LocalDate.now().toEpochDay())
-                .firstOrNull { block -> block.title == title }
-        }
-    }
-
-    private fun waitUntilStoredBlock(
-        title: String,
-        predicate: (PlannerBlock) -> Boolean
-    ): PlannerBlock {
-        var observed: PlannerBlock? = null
-        compose.waitUntil(timeoutMillis = 3_000) {
-            findStoredBlock(title)?.also { observed = it }?.let(predicate) == true
-        }
-        return checkNotNull(observed)
-    }
-
-    private fun waitUntilStoredBlockMissing(title: String) {
-        compose.waitUntil(timeoutMillis = 3_000) {
-            findStoredBlock(title) == null
-        }
-    }
-
-    private fun androidx.compose.ui.test.junit4.ComposeTestRule.waitUntilNodeWithText(
-        text: String,
-        timeoutMillis: Long = 3_000
-    ) {
-        waitUntil(timeoutMillis) {
-            onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
-    private fun androidx.compose.ui.test.junit4.ComposeTestRule.waitUntilBlockExists(
-        title: String,
-        timeoutMillis: Long = 3_000
-    ) {
-        waitUntil(timeoutMillis) {
-            onAllNodes(hasContentDescription(title, substring = true)).fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-}
-
-private class RecordingHapticFeedback(
-    private val events: MutableList<HapticFeedbackType>
-) : HapticFeedback {
-    override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
-        events += hapticFeedbackType
     }
 }

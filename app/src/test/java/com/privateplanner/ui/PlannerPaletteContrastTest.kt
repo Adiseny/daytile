@@ -1,7 +1,5 @@
 package com.privateplanner.ui
 
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
 import org.junit.Assert.assertEquals
@@ -9,6 +7,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlannerPaletteContrastTest {
+
+    @Test
+    fun nativeArgbLuminanceMatchesReferencePrimaries() {
+        assertEquals(0f, luminance(0xFF000000.toInt()), 0.000001f)
+        assertEquals(1f, luminance(0xFFFFFFFF.toInt()), 0.000001f)
+        assertEquals(0.2126f, luminance(0xFFFF0000.toInt()), 0.000001f)
+        assertEquals(0.7152f, luminance(0xFF00FF00.toInt()), 0.000001f)
+        assertEquals(0.0722f, luminance(0xFF0000FF.toInt()), 0.000001f)
+    }
 
     @Test
     fun blockColourPeriodsKeepTheirEstablishedBoundaries() {
@@ -62,7 +69,7 @@ class PlannerPaletteContrastTest {
         forEachMinutePalette(step = 5) { minute, palette ->
             for (hour in 0 until 24) {
                 for (variant in 0 until 3) {
-                    val tile = Color(blockBackgroundArgb(hour * 60, variant))
+                    val tile = blockBackgroundArgb(hour * 60, variant).toInt()
                     for (active in listOf(false, true)) {
                         val surface = compositedTileBackground(tile, palette.Paper, active)
                         val ink = tileInkFor(tile, palette.Paper, active)
@@ -87,10 +94,10 @@ class PlannerPaletteContrastTest {
         val golden = paletteForMinute(19 * 60 + 30)
         val dusk = paletteForMinute(20 * 60)
 
-        assertTrue("03:00 must be dark", !night.LightBackground && night.Paper.luminance() < 0.1f)
+        assertTrue("03:00 must be dark", !night.LightBackground && luminance(night.Paper) < 0.1f)
         assertTrue("07:00 must flip to light", sunrise.LightBackground)
-        assertTrue("13:00 must be bright", midday.Paper.luminance() > 0.7f)
-        assertTrue("20:00 must flip to dark", !dusk.LightBackground && dusk.Paper.luminance() < 0.1f)
+        assertTrue("13:00 must be bright", luminance(midday.Paper) > 0.7f)
+        assertTrue("20:00 must flip to dark", !dusk.LightBackground && luminance(dusk.Paper) < 0.1f)
         assertTrue(
             "The day must move through distinct light, not one static palette",
             sunrise.Paper != midday.Paper && midday.Paper != golden.Paper
@@ -111,13 +118,13 @@ class PlannerPaletteContrastTest {
         }
     }
 
-    private fun contrast(a: Color, b: Color): Float {
-        val first = a.luminance() + 0.05f
-        val second = b.luminance() + 0.05f
+    private fun contrast(a: Int, b: Int): Float {
+        val first = luminance(a) + 0.05f
+        val second = luminance(b) + 0.05f
         return maxOf(first, second) / minOf(first, second)
     }
 
-    private fun assertContrast(minute: Int, label: String, foreground: Color, background: Color, minimum: Float) {
+    private fun assertContrast(minute: Int, label: String, foreground: Int, background: Int, minimum: Float) {
         val ratio = contrast(foreground, background)
         assertTrue("$label ratio $ratio < $minimum at minute $minute", ratio >= minimum)
     }

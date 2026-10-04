@@ -1,151 +1,91 @@
 package com.privateplanner.ui
 
 import android.content.res.Configuration
-import androidx.activity.ComponentActivity
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toPixelMap
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.unit.dp
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.view.View
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertEquals
-import org.junit.Rule
+import androidx.test.platform.app.InstrumentationRegistry
+import kotlin.concurrent.thread
+import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
-class PlannerRenderingTest {
-    @get:Rule
-    val compose = createAndroidComposeRule<ComponentActivity>()
-
-    @Test
-    fun currentTimeBadgeStaysWithinTheGutter() {
-        var density = 0f
-        compose.setContent {
-            density = LocalDensity.current.density
-            PlannerTheme {
-                CompositionLocalProvider(LocalCurrentMinuteOfDay provides mutableIntStateOf(60)) {
-                    Box(Modifier.size(width = 300.dp, height = 240.dp)) {
-                        CurrentTimeIndicator()
-                    }
-                }
-            }
-        }
-
-        val badge = compose.onNode(hasContentDescription("Current time, 1:00"))
-            .fetchSemanticsNode().boundsInRoot
-        assertEquals("Time badge width", 58f * density, badge.width, 1f)
-        assertEquals("Time badge left inset", 6f * density, badge.left, 1f)
-    }
-
-    @Test
-    fun backgroundMeasuredGridMatchesTheNormalMeasurementFallback() {
-        val context = compose.activity.applicationContext
-        // A density mismatch forces normal measurement inside composition.
-        val differentDensity = Configuration(context.resources.configuration).apply {
-            densityDpi += 80
-        }
-        runBlocking(Dispatchers.Default) {
-            context.createConfigurationContext(differentDensity).prepareGridLabels()
-        }
-        val generation = mutableIntStateOf(0)
-        compose.setContent {
-            PlannerTheme {
-                key(generation.intValue) {
-                    Box(Modifier.size(width = 300.dp, height = 360.dp)) {
-                        TimelineGrid(showsNow = false)
-                    }
-                }
-            }
-        }
-        val fallback = compose.onRoot().captureToImage().toPixelMap()
-
-        runBlocking(Dispatchers.Default) { context.prepareGridLabels() }
-        compose.runOnUiThread { generation.intValue++ }
-        val warmed = compose.onRoot().captureToImage().toPixelMap()
-
-        assertEquals(fallback.width, warmed.width)
-        assertEquals(fallback.height, warmed.height)
-        for (y in 0 until fallback.height) {
-            for (x in 0 until fallback.width) {
-                assertEquals("Grid pixel at $x, $y", fallback[x, y], warmed[x, y])
-            }
+class PlannerRenderingTest : PlannerTestHost() {
+    @Test fun currentTimeBadgeStaysWithinTheGutter() {
+        launch()
+        main {
+            val day = screen.descendants().filterIsInstance<DayView>().first()
+            day.minute = 60
+            val badge = day.descendants().first { it.contentDescription == "Current time, 1:00" }
+            val density = screen.resources.displayMetrics.density
+            assertEquals("Time badge width", 58f * density, badge.width.toFloat(), 1f)
+            assertEquals("Time badge left inset", 6f * density, badge.left.toFloat(), 1f)
         }
     }
 
-    @Test
-    fun oneNodeTileDrawsLikeATouchBoxAroundAVisualTile() {
-        // A short tile inside a larger touch target, and a tall one showing its duration.
-        val cases = listOf(Triple(48, 14, 20), Triple(150, 0, 150))
-        val case = mutableIntStateOf(0)
-        val merged = mutableStateOf(false)
-        compose.setContent {
-            PlannerTheme {
-                Box(Modifier.size(width = 240.dp, height = 220.dp)) {
-                    val (touch, offset, visual) = cases[case.intValue]
-                    val place = Modifier.offset(x = 12.dp, y = 30.dp).width(180.dp).height(touch.dp)
-                    if (merged.value) {
-                        TestTile(
-                            visual,
-                            place.wrapContentHeight(Alignment.Top).offset(y = offset.dp).height(visual.dp)
-                        )
-                    } else {
-                        Box(place) {
-                            TestTile(visual, Modifier.offset(y = offset.dp).fillMaxWidth().height(visual.dp))
-                        }
-                    }
-                }
+    @Test fun backgroundMeasuredGridMatchesTheNormalMeasurementFallback() {
+        launch()
+        val context = activity.applicationContext
+        val differentDensity = Configuration(context.resources.configuration).apply { densityDpi += 80 }
+        thread { context.createConfigurationContext(differentDensity).prepareGridLabels() }.join()
+        fun capture(): Bitmap = main {
+            val width = context.px(300f)
+            val height = context.px(360f)
+            val day = DayView(context, screen)
+            day.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), 0)
+            day.layout(0, 0, width, day.measuredHeight)
+            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+                val canvas = Canvas(it)
+                canvas.drawColor(screen.palette.Paper)
+                day.draw(canvas)
             }
         }
-        for (index in cases.indices) {
-            compose.runOnUiThread {
-                case.intValue = index
-                merged.value = false
-            }
-            val nested = compose.onRoot().captureToImage().toPixelMap()
-            compose.runOnUiThread { merged.value = true }
-            val single = compose.onRoot().captureToImage().toPixelMap()
-            for (y in 0 until nested.height) {
-                for (x in 0 until nested.width) {
-                    assertEquals("Tile case $index pixel at $x, $y", nested[x, y], single[x, y])
-                }
-            }
-        }
+        val fallback = capture()
+        thread { context.prepareGridLabels() }.join()
+        val warmed = capture()
+        try { assertTrue("Warm-up must not change any grid pixel", fallback.sameAs(warmed)) }
+        finally { fallback.recycle(); warmed.recycle() }
     }
 
-    @Composable
-    private fun TestTile(visual: Int, modifier: Modifier) {
-        TimeBlockForeground(
-            background = Color(0xFF5E9AC2),
-            shape = RoundedCornerShape(if (visual < 48) 13.dp else 16.dp),
-            active = false,
-            title = "Focus",
-            rangeText = { "9:00 \u2013 9:10" },
-            durationText = "10m",
-            tileWidth = 180.dp,
-            visualHeight = visual.dp,
-            titleFollowOffset = null,
-            modifier = modifier
-        )
+    @Test fun scrollingTileShowsThroughStatusBarAndHeaderAfterSheetDismissal() {
+        launch()
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.waitForIdle(100, 5_000)
+        val empty = checkNotNull(automation.takeScreenshot())
+        val statusHeight = main {
+            @Suppress("DEPRECATION")
+            activity.window.decorView.rootWindowInsets.systemWindowInsetTop
+        }
+        assertTrue(statusHeight > 0)
+        val x = (empty.width * 0.7f).toInt()
+        val paper = empty.getPixel(x, statusHeight / 2)
+        empty.recycle()
+        // Added through the planner, which reads a day again after its own writes.
+        main {
+            model.openCreate(0)
+            model.createBlock("Glass regression")
+        }
+        awaitTile("Glass regression")
+        main { model.resizeBlock(tile("Glass regression").block.id, 1440) }
+        scrollTo(main { screen.context.px(500f) })
+        fun assertGlass() {
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            automation.waitForIdle(100, 5_000)
+            val image = checkNotNull(automation.takeScreenshot())
+            try {
+                val status = image.getPixel(x, statusHeight / 2)
+                val heading = image.getPixel(x, statusHeight + 6)
+                val channels = listOf<(Int) -> Int>(Color::red, Color::green, Color::blue)
+                assertTrue("Tile should show through system bar: paper=$paper status=$status heading=$heading", channels.sumOf { kotlin.math.abs(it(status) - it(paper)) } > 20)
+                channels.forEach { assertTrue("Status and heading tint should be continuous", kotlin.math.abs(it(status) - it(heading)) <= 5) }
+            } finally { image.recycle() }
+        }
+        assertGlass()
+        main { model.openDateJump() }
+        main { model.dismissSheet() }
+        assertGlass()
     }
 }

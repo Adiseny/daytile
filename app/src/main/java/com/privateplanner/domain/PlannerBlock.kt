@@ -1,11 +1,12 @@
 package com.privateplanner.domain
 
-import androidx.compose.runtime.Immutable
 import java.time.LocalDate
 
 const val MaxTitleLength = 120
 
-@Immutable
+// A title of nothing but spaces is no title.
+fun CharSequence?.isBlankTitle(): Boolean = this == null || all { it.isWhitespace() }
+
 data class PlannerBlock(
     val id: Long = 0,
     val date: LocalDate,
@@ -15,6 +16,9 @@ data class PlannerBlock(
 ) {
     val endMinutes: Int
         get() = startMinutes + durationMinutes
+
+    // Short on purpose: the generated one would ship the name of every property.
+    override fun toString() = "$id $title"
 }
 
 // Primitive comparisons: `compareBy` would box every key it compares.

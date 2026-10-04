@@ -76,10 +76,27 @@ class OverlapLayoutCalculatorTest {
     }
 
     @Test
+    fun arbitraryIdsAndHashCollisionsKeepEveryLayoutAndMissingIdsStayAbsent() {
+        val ids = listOf(0L, Long.MIN_VALUE, Long.MAX_VALUE, -1L) +
+            (1L..1008L).map { (it shl 32) or it }
+        val blocks = ids.mapIndexed { index, id -> block(id, index / 7 * 5, 5) }
+        val result = OverlapLayoutCalculator.calculate(blocks.reversed())
+        val order = compareBy<PlannerBlock> { it.startMinutes }.thenBy { it.id }
+        for (cluster in blocks.chunked(7)) {
+            cluster.sortedWith(order).forEachIndexed { column, block ->
+                assertEquals(BlockLayout(column, cluster.size), result[block.id])
+            }
+        }
+        assertEquals(null, result[42L])
+        assertEquals(null, BlockLayouts.Empty[0L])
+    }
+
+    @Test
     fun unsortedAndLegacyOvercrowdedDaysKeepTheirColumns() {
         val blocks = (1L..12L).map { id -> block(id, 0, 60) } + block(13, 60, 60)
         val layouts = OverlapLayoutCalculator.calculate(blocks.reversed())
-        assertEquals(OverlapLayoutCalculator.calculate(blocks), layouts)
+        val expected = OverlapLayoutCalculator.calculate(blocks)
+        for (block in blocks) assertEquals(expected[block.id], layouts[block.id])
         for (id in 1L..12L) {
             assertEquals((id - 1).toInt(), layouts[id]!!.columnIndex)
             assertEquals(12, layouts[id]!!.columnCount)

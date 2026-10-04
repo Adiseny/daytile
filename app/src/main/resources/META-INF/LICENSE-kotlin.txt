@@ -1,8 +1,6 @@
-The following AndroidX components include the identical license reproduced below:
-- androidx/annotation/annotation
-- androidx/collection/collection-ktx
-- androidx/collection/collection
-- androidx/lifecycle/lifecycle-common
+Parts of the Kotlin standard library are compiled into this app.
+Copyright 2010-2025 JetBrains s.r.o. and Kotlin Programming Language contributors.
+It is licensed as reproduced below:
 
 
                                  Apache License

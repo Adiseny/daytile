@@ -11,14 +11,6 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <permission
-        android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-        tools:node="remove" />
-
-    <uses-permission
-        android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-        tools:node="remove" />
-
     <application
         android:name=".PlannerApp"
         android:allowBackup="false"
@@ -30,14 +22,6 @@
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Daytile"
         tools:targetApi="33">
-
-        <!-- No androidx.startup: its provider queries the package manager in every process
-             start, reminders included. Emoji and process-lifecycle setup are not wanted, and
-             PlannerApp installs the baseline profile itself. -->
-        <provider
-            android:name="androidx.startup.InitializationProvider"
-            android:authorities="${applicationId}.androidx-startup"
-            tools:node="remove" />
 
         <activity
             android:name=".MainActivity"
@@ -52,7 +36,8 @@
         </activity>
 
         <!-- Exported so the system can deliver these; all four are protected
-             broadcasts, so nothing else can send them. -->
+             broadcasts, so nothing else can send them. Reminders disables the receiver
+             while its switch is off, so none of them starts the process then. -->
         <receiver
             android:name=".ReminderReceiver"
             android:exported="true">

@@ -1,35 +1,17 @@
 package com.privateplanner.ui
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.privateplanner.Reminders
+import com.privateplanner.Worker
 import com.privateplanner.data.PlannerRepository
 import com.privateplanner.data.PlannerWriteResult
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.PlannerBlockOrder
 import com.privateplanner.domain.TimeSnapper
+import com.privateplanner.domain.isBlankTitle
+import com.privateplanner.onMain
 import java.time.LocalDate
+import java.util.Collections
 import kotlin.math.abs
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-
-data class PlannerUiState(
-    val selectedDate: LocalDate,
-    // The selected day's blocks only: neighbours are cached privately, so a prefetch
-    // publishes nothing and recomposes nothing.
-    val blocks: List<PlannerBlock>,
-    val sheet: PlannerSheet?,
-    val snackbar: PlannerSnackbar?,
-    val sheetError: String?,
-    val remindersOn: Boolean
-)
 
 sealed interface PlannerSheet {
     class CreateBlock(val startMinutes: Int) : PlannerSheet
@@ -52,69 +34,104 @@ sealed interface PlannerSnackbar {
     ) : PlannerSnackbar
 }
 
+// What the planner shows and everything that changes it. Main thread only: reads and
+// writes run on the worker thread and their results come back here, in the order they ran.
+// It outlives a change of configuration with its activity.
 class PlannerViewModel(
     private val repository: PlannerRepository,
     private val reminders: Reminders
-) : ViewModel() {
+) {
     private val launchedAt = TimeSnapper.localNowMillis()
-    private val mutableUiState = MutableStateFlow(
-        PlannerUiState(
-            selectedDate = TimeSnapper.dateOf(launchedAt),
-            blocks = emptyList(),
-            sheet = null,
-            snackbar = null,
-            sheetError = null,
-            // Already in memory: PlannerApp starts loading it before the activity exists.
-            remindersOn = reminders.enabled
-        )
-    )
-    val uiState: StateFlow<PlannerUiState> = mutableUiState.asStateFlow()
 
-    // Where the timeline opens, taken once by its first layout. Outside the UI state, so
-    // taking it publishes nothing and recomposes nothing.
+    var selectedDate: LocalDate = TimeSnapper.dateOf(launchedAt)
+        private set
+
+    // The selected day's blocks only: its neighbours are cached privately, so reading
+    // them ahead changes nothing on screen.
+    var blocks: List<PlannerBlock> = Collections.emptyList()
+        private set
+
+    var sheet: PlannerSheet? = null
+        private set
+
+    var sheetError: String? = null
+        private set
+
+    var snackbar: PlannerSnackbar? = null
+        private set
+
+    // Already in memory: PlannerApp starts loading it before the activity exists.
+    var remindersOn = reminders.enabled
+        private set
+
+    // The screen, while it is showing: called after every change to the state above.
+    var onChange: (() -> Unit)? = null
+
+    // Where the timeline opens, taken once by its first layout.
     private var scrollTarget: Int? = TimeSnapper.minuteOfDay(launchedAt)
 
     fun takeScrollTarget(): Int? = scrollTarget.also { scrollTarget = null }
 
-    // The selected day and its neighbours, for an instant swipe. Main thread only, like
-    // everything here.
+    // The selected day and its neighbours, for an instant swipe.
     private val dayCache = HashMap<LocalDate, List<PlannerBlock>>()
-    private val pendingTimeUpdates = mutableMapOf<Long, PendingTimeUpdate>()
-    private val timeWriteJobs = mutableMapOf<Long, Job>()
-    private val prefetchJobs = mutableMapOf<LocalDate, Job>()
-    private val deletingBlockIds = mutableSetOf<Long>()
-    private var dateObservationJob: Job? = null
-    private var sheetWriteJob: Job? = null
-    private var undoDeleteJob: Job? = null
+
+    // Moves and resizes that are on screen but not yet saved, by block.
+    private val pendingTimes = HashMap<Long, PendingTime>()
+    private val deletingBlockIds = HashSet<Long>()
+    private var sheetWriting = false
+    private var undoing = false
 
     init {
-        observeDate(mutableUiState.value.selectedDate)
+        load(selectedDate)
     }
 
-    private fun observeDate(date: LocalDate) {
-        dateObservationJob?.cancel()
-        dateObservationJob = repository.observeBlocksForDate(date)
-            .onEach { blocks ->
-                publish(date, mergePendingTimeUpdates(blocks))
-                if (mutableUiState.value.selectedDate == date) {
-                    prefetchDate(date.minusDays(1))
-                    prefetchDate(date.plusDays(1))
-                }
+    private fun changed() {
+        onChange?.invoke()
+    }
+
+    // The day, and whichever neighbours are not already held, in one trip to the worker.
+    private fun load(date: LocalDate) {
+        val days = ArrayList<LocalDate>(3)
+        days += date
+        for (neighbour in arrayOf(date.minusDays(1), date.plusDays(1))) {
+            if (!dayCache.containsKey(neighbour)) days += neighbour
+        }
+        Worker.execute {
+            val read = days.map { repository.getBlocksForDate(it) }
+            onMain {
+                for (index in days.indices) publish(days[index], read[index])
             }
-            .launchIn(viewModelScope)
+        }
     }
 
-    // A re-query usually confirms what is already shown (the optimistic move, the
-    // prefetched day), and republishing an equal list would recompose the whole screen.
-    private fun publish(date: LocalDate, blocks: List<PlannerBlock>) {
-        dayCache[date] = blocks
-        mutableUiState.update { state ->
-            if (state.selectedDate != date || state.blocks == blocks) state else state.copy(blocks = blocks)
+    // A read usually confirms what is already shown (the move made ahead of its save, the
+    // cached day), and then the list on screen is kept, so nothing is drawn again.
+    private fun publish(date: LocalDate, read: List<PlannerBlock>) {
+        if (!date.isNear(selectedDate)) return
+        val selected = date == selectedDate
+        val merged = withPendingTimes(read)
+        val shown = if (selected && merged == blocks) blocks else merged
+        dayCache[date] = shown
+        if (selected && shown !== blocks) {
+            blocks = shown
+            changed()
+        }
+    }
+
+    // A write, then its day as the write left it, in one trip to the worker.
+    private fun write(date: LocalDate, action: () -> PlannerWriteResult, done: (PlannerWriteResult) -> Unit) {
+        Worker.execute {
+            val result = action()
+            val read = repository.getBlocksForDate(date)
+            onMain {
+                done(result)
+                publish(date, read)
+            }
         }
     }
 
     fun shiftDay(days: Long) {
-        setDate(mutableUiState.value.selectedDate.plusDays(days))
+        setDate(selectedDate.plusDays(days))
     }
 
     fun returnToToday() {
@@ -147,76 +164,65 @@ class PlannerViewModel(
     }
 
     fun createBlock(title: String) {
-        val state = mutableUiState.value
-        val currentSheet = state.sheet as? PlannerSheet.CreateBlock ?: return
-        if (title.isBlank()) return
-        if (sheetWriteJob?.isActive == true) return
+        val current = sheet as? PlannerSheet.CreateBlock ?: return
+        val date = selectedDate
+        sheetWrite(current, title) { repository.createBlock(date, current.startMinutes, title) }
+    }
+
+    fun renameBlock(title: String) {
+        val current = sheet as? PlannerSheet.RenameBlock ?: return
+        sheetWrite(current, title) { repository.updateTitle(current.blockId, title) }
+    }
+
+    // A sheet's write keeps running if the sheet goes away meanwhile: the user asked for
+    // it, so a late failure surfaces as a message instead of a silently lost write.
+    private fun sheetWrite(current: PlannerSheet, title: String, action: () -> PlannerWriteResult) {
+        if (title.isBlankTitle() || sheetWriting) return
+        sheetWriting = true
         setSheetError(null)
-        sheetWriteJob = viewModelScope.launch {
-            val errorText = when (repository.createBlock(
-                date = state.selectedDate,
-                startMinutes = currentSheet.startMinutes,
-                title = title
-            )) {
+        write(selectedDate, action) { result ->
+            sheetWriting = false
+            val error = when (result) {
                 PlannerWriteResult.Success -> null
                 PlannerWriteResult.NoSpace,
                 PlannerWriteResult.RejectedOverlap -> "No space here"
                 PlannerWriteResult.InvalidInput -> "Title is too long"
                 else -> "Could not save"
             }
-            finishSheetWrite(currentSheet, errorText)
-        }
-    }
-
-    fun renameBlock(title: String) {
-        val currentSheet = mutableUiState.value.sheet as? PlannerSheet.RenameBlock ?: return
-        if (title.isBlank()) return
-        if (sheetWriteJob?.isActive == true) return
-        setSheetError(null)
-        sheetWriteJob = viewModelScope.launch {
-            val errorText = when (repository.updateTitle(currentSheet.blockId, title)) {
-                PlannerWriteResult.Success -> null
-                PlannerWriteResult.InvalidInput -> "Title is too long"
-                else -> "Could not save"
+            if (sheet === current) {
+                if (error == null) showSheet(null) else setSheetError(error)
+            } else if (error != null) {
+                showMessage(error)
             }
-            finishSheetWrite(currentSheet, errorText)
         }
     }
 
     // Only ever asked for a block on screen, whose displayed copy is what undo restores.
     fun deleteBlock(blockId: Long) {
-        val block = cachedBlock(blockId) ?: return
+        val block = block(blockId) ?: return
         if (!deletingBlockIds.add(blockId)) return
-        viewModelScope.launch {
-            try {
-                timeWriteJobs.remove(blockId)?.cancel()
-                pendingTimeUpdates.remove(blockId)
-                if (repository.deleteBlock(block.id) == PlannerWriteResult.Success) {
-                    mutableUiState.update { state ->
-                        state.copy(
-                            sheet = null,
-                            snackbar = PlannerSnackbar.Deleted(
-                                id = System.nanoTime(),
-                                deletedBlock = block
-                            )
-                        )
-                    }
-                } else {
-                    showMessage("Could not delete")
-                }
-            } finally {
-                deletingBlockIds.remove(blockId)
+        pendingTimes.remove(blockId)
+        write(block.date, { repository.deleteBlock(blockId) }) { result ->
+            deletingBlockIds.remove(blockId)
+            if (result == PlannerWriteResult.Success) {
+                sheet = null
+                sheetError = null
+                snackbar = PlannerSnackbar.Deleted(System.nanoTime(), block)
+                changed()
+            } else {
+                showMessage("Could not delete")
             }
         }
     }
 
     fun undoDelete(snackbarId: Long) {
-        val message = mutableUiState.value.snackbar as? PlannerSnackbar.Deleted ?: return
-        if (message.id != snackbarId) return
-        if (undoDeleteJob?.isActive == true) return
-        undoDeleteJob = viewModelScope.launch {
-            when (repository.restoreBlock(message.deletedBlock)) {
-                PlannerWriteResult.Success -> clearSnackbar(message.id)
+        val deleted = snackbar as? PlannerSnackbar.Deleted ?: return
+        if (deleted.id != snackbarId || undoing) return
+        undoing = true
+        write(deleted.deletedBlock.date, { repository.restoreBlock(deleted.deletedBlock) }) { result ->
+            undoing = false
+            when (result) {
+                PlannerWriteResult.Success -> clearSnackbar(deleted.id)
                 PlannerWriteResult.RejectedOverlap -> showMessage("Could not restore; that time is no longer available")
                 else -> showMessage("Could not restore")
             }
@@ -224,38 +230,44 @@ class PlannerViewModel(
     }
 
     fun clearSnackbar(snackbarId: Long) {
-        if (mutableUiState.value.snackbar?.id == snackbarId) {
-            mutableUiState.update { it.copy(snackbar = null) }
-        }
+        if (snackbar?.id != snackbarId) return
+        snackbar = null
+        changed()
     }
 
     fun moveBlock(blockId: Long, startMinutes: Int): Boolean {
-        val block = cachedBlock(blockId) ?: return false
-        val snappedStart = TimeSnapper.clampStart(
-            TimeSnapper.floorToSnap(startMinutes),
-            block.durationMinutes
-        )
-        if (snappedStart == block.startMinutes) return true
-        updateCachedTime(blockId, snappedStart, block.durationMinutes)
-        scheduleTimeWrite(blockId, block.date, snappedStart, block.durationMinutes)
+        val block = block(blockId) ?: return false
+        val start = TimeSnapper.clampStart(TimeSnapper.floorToSnap(startMinutes), block.durationMinutes)
+        if (start != block.startMinutes) setTime(block, start, block.durationMinutes)
         return true
     }
 
     fun resizeBlock(blockId: Long, durationMinutes: Int): Boolean {
-        val block = cachedBlock(blockId) ?: return false
-        val requestedDuration = TimeSnapper.clampDuration(
-            block.startMinutes,
-            TimeSnapper.snapDurationToNearest(durationMinutes)
-        )
-        if (requestedDuration == block.durationMinutes) return false
-        updateCachedTime(blockId, block.startMinutes, requestedDuration)
-        scheduleTimeWrite(blockId, block.date, block.startMinutes, requestedDuration)
+        val block = block(blockId) ?: return false
+        val duration = TimeSnapper.clampDuration(block.startMinutes, TimeSnapper.snapDurationToNearest(durationMinutes))
+        if (duration == block.durationMinutes) return false
+        setTime(block, block.startMinutes, duration)
         return true
+    }
+
+    // On screen at once and saved behind. A save that fails leaves the day as stored.
+    private fun setTime(block: PlannerBlock, startMinutes: Int, durationMinutes: Int) {
+        val pending = PendingTime(startMinutes, durationMinutes)
+        pendingTimes[block.id] = pending
+        publish(block.date, blocks)
+        write(block.date, { repository.updateTime(block.id, startMinutes, durationMinutes) }) { result ->
+            // A later change to the same block has taken over, and its result settles both.
+            if (pendingTimes[block.id] === pending) {
+                pendingTimes.remove(block.id)
+                if (result != PlannerWriteResult.Success) showMessage("Could not save")
+            }
+        }
     }
 
     fun setRemindersOn(on: Boolean) {
         reminders.enabled = on
-        mutableUiState.update { it.copy(remindersOn = on) }
+        remindersOn = on
+        changed()
         reminders.syncSoon(repository)
     }
 
@@ -267,128 +279,46 @@ class PlannerViewModel(
     }
 
     private fun setDate(date: LocalDate) {
-        if (date == mutableUiState.value.selectedDate) return
-        prefetchJobs.keys.filterNot { it.isNear(date) }.forEach { staleDate ->
-            prefetchJobs.remove(staleDate)?.cancel()
-        }
+        if (date == selectedDate) return
         dayCache.keys.retainAll { it.isNear(date) }
-        mutableUiState.update { it.copy(selectedDate = date, blocks = dayCache[date].orEmpty()) }
-        observeDate(date)
+        selectedDate = date
+        blocks = dayCache[date] ?: Collections.emptyList()
+        changed()
+        load(date)
     }
 
-    private fun prefetchDate(date: LocalDate) {
-        if (dayCache.containsKey(date) || prefetchJobs.containsKey(date)) return
-        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-            try {
-                val blocks = repository.getBlocksForDate(date)
-                // Never over the live observer's result: once it has published this day,
-                // a prefetch that started earlier can only be older.
-                if (!dayCache.containsKey(date) && date.isNear(mutableUiState.value.selectedDate)) {
-                    publish(date, blocks)
-                }
-            } finally {
-                if (prefetchJobs[date] === coroutineContext[Job]) {
-                    prefetchJobs.remove(date)
-                }
-            }
-        }
-        prefetchJobs[date] = job
-        job.start()
-    }
+    private fun block(blockId: Long): PlannerBlock? = blocks.firstOrNull { it.id == blockId }
 
-    private fun cachedBlock(blockId: Long): PlannerBlock? =
-        mutableUiState.value.blocks.firstOrNull { block -> block.id == blockId }
-
-    private fun updateCachedTime(blockId: Long, startMinutes: Int, durationMinutes: Int) {
-        val state = mutableUiState.value
-        val blockIndex = state.blocks.indexOfFirst { it.id == blockId }
-        if (blockIndex < 0) return
-        val updatedBlocks = ArrayList(state.blocks)
-        updatedBlocks[blockIndex] = state.blocks[blockIndex].copy(
-            startMinutes = startMinutes,
-            durationMinutes = durationMinutes
-        )
-        if (startMinutes != state.blocks[blockIndex].startMinutes) {
-            updatedBlocks.sortWith(PlannerBlockOrder)
-        }
-        publish(state.selectedDate, updatedBlocks)
-    }
-
-    private fun scheduleTimeWrite(
-        blockId: Long,
-        date: LocalDate,
-        startMinutes: Int,
-        durationMinutes: Int
-    ) {
-        val pending = PendingTimeUpdate(startMinutes, durationMinutes)
-        pendingTimeUpdates[blockId] = pending
-        timeWriteJobs.remove(blockId)?.cancel()
-        timeWriteJobs[blockId] = viewModelScope.launch {
-            val result = repository.updateTime(blockId, startMinutes, durationMinutes)
-            if (pendingTimeUpdates[blockId] !== pending) return@launch
-            pendingTimeUpdates.remove(blockId)
-            timeWriteJobs.remove(blockId)
-            if (result != PlannerWriteResult.Success) {
-                publish(date, mergePendingTimeUpdates(repository.getBlocksForDate(date)))
-                showMessage("Could not save")
-            }
-        }
-    }
-
-    private fun mergePendingTimeUpdates(blocks: List<PlannerBlock>): List<PlannerBlock> {
-        if (pendingTimeUpdates.isEmpty()) return blocks
-        if (blocks.none { pendingTimeUpdates.containsKey(it.id) }) return blocks
+    private fun withPendingTimes(blocks: List<PlannerBlock>): List<PlannerBlock> {
+        if (pendingTimes.isEmpty() || blocks.none { pendingTimes.containsKey(it.id) }) return blocks
         return blocks.mapTo(ArrayList(blocks.size)) { block ->
-            pendingTimeUpdates[block.id]?.let { pending ->
-                block.copy(
-                    startMinutes = pending.startMinutes,
-                    durationMinutes = pending.durationMinutes
-                )
-            } ?: block
+            pendingTimes[block.id]?.let { block.copy(startMinutes = it.startMinutes, durationMinutes = it.durationMinutes) }
+                ?: block
         }.apply {
             sortWith(PlannerBlockOrder)
         }
     }
 
     private fun showMessage(message: String) {
-        mutableUiState.update {
-            it.copy(
-                snackbar = PlannerSnackbar.Message(
-                    id = System.nanoTime(),
-                    message = message
-                )
-            )
-        }
-    }
-
-    // A sheet write keeps running if the sheet goes away mid-flight: the user asked
-    // for it, so a late failure surfaces as a snackbar instead of a silently lost write.
-    private fun finishSheetWrite(sheet: PlannerSheet, errorText: String?) {
-        if (mutableUiState.value.sheet === sheet) {
-            if (errorText == null) showSheet(null) else setSheetError(errorText)
-        } else if (errorText != null) {
-            showMessage(errorText)
-        }
+        snackbar = PlannerSnackbar.Message(System.nanoTime(), message)
+        changed()
     }
 
     private fun showSheet(value: PlannerSheet?) {
-        mutableUiState.update { state ->
-            if (state.sheet === value && state.sheetError == null) {
-                state
-            } else {
-                state.copy(sheet = value, sheetError = null)
-            }
-        }
+        if (sheet === value && sheetError == null) return
+        sheet = value
+        sheetError = null
+        changed()
     }
 
     private fun setSheetError(message: String?) {
-        if (mutableUiState.value.sheetError != message) {
-            mutableUiState.update { it.copy(sheetError = message) }
-        }
+        if (sheetError == message) return
+        sheetError = message
+        changed()
     }
 }
 
-private class PendingTimeUpdate(
+private class PendingTime(
     val startMinutes: Int,
     val durationMinutes: Int
 )

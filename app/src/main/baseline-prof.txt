@@ -1,5 +1,0 @@
-# Compile the app's own classes and methods ahead of time; dependency profiles are merged.
-# AGP expands these rules against release bytecode, so renamed/removed methods never leave
-# stale entries. Replace with a measured profile from a dedicated device when available.
-Lcom/privateplanner/**;
-HSPLcom/privateplanner/**;->**(**)**

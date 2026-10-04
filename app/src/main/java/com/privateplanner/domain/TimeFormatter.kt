@@ -4,7 +4,7 @@ object TimeFormatter {
     fun time(minutes: Int): String = buildString(capacity = 5) { appendTime(minutes) }
 
     private fun StringBuilder.appendTime(minutes: Int) {
-        val clamped = minutes.coerceIn(0, TimeSnapper.MinutesPerDay)
+        val clamped = minutes.coerceAtLeast(0).coerceAtMost(TimeSnapper.MinutesPerDay)
         val hour = clamped / TimeSnapper.MinutesPerHour
         val minute = clamped % TimeSnapper.MinutesPerHour
         append(hour)

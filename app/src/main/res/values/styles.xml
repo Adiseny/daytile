@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- One launch theme per palette polarity. The system draws the splash from these before
-         any of the app runs, so each sets the splash and both bars, not just the window. -->
+         any of the app runs, so each sets the splash and both bars, not just the window. The
+         accent is the polarity's ink: the title field's cursor, selection and handles take it. -->
     <style name="Theme.Daytile.Day" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">#F6F2EC</item>
         <item name="android:windowSplashScreenBackground" tools:targetApi="31">#F6F2EC</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+        <item name="android:colorAccent">#1A1814</item>
     </style>
 
     <style name="Theme.Daytile.Night" parent="@android:style/Theme.Material.NoActionBar">
@@ -14,6 +16,7 @@
         <item name="android:windowSplashScreenBackground" tools:targetApi="31">#15120D</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+        <item name="android:colorAccent">#EFE7DA</item>
     </style>
 
     <!-- Follows the system's light or dark setting until MainActivity records the palette. -->

@@ -12,7 +12,7 @@ private val BlockColours = longArrayOf(
 )
 
 internal fun blockBackgroundArgb(startMinutes: Int, variant: Int): Long {
-    val hour = (startMinutes / TimeSnapper.MinutesPerHour).coerceIn(0, 23)
+    val hour = (startMinutes / TimeSnapper.MinutesPerHour).coerceAtLeast(0).coerceAtMost(23)
     val period = (hour / 3 - 1).coerceAtLeast(0)
     return BlockColours[period * ColoursPerPeriod + variant.mod(ColoursPerPeriod)]
 }
