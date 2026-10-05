@@ -1,3 +1,48 @@
+# The day follows the finger — 5 October 2026
+
+One change on top of 1.4.2, released as 1.5.0: a sideways drag carries the day's blocks
+with it and the next day's in beside them. It is the first release since 1.4.0 to add to
+the APK, so this records what it costs.
+
+## Measurements
+
+| Measurement | 1.4.2 | After |
+| --- | ---: | ---: |
+| Unsigned release APK | 108,797 bytes | 111,685 bytes |
+| Uncompressed `classes.dex` | 96,212 bytes | 99,100 bytes |
+| Classes / method references in the dex | 85 / 842 | 85 / 861 |
+| Frames drawn by a launch | 4 | 4 |
+| Frames drawn by a swipe to the next day | 1 | 13 to 16 |
+| Main-thread time of a frame of that swipe, median | 1.5 ms | 0.2 ms |
+
+A frame of the swipe moves blocks that are drawn already: one property written per
+block, nothing laid out and no text measured. The heading is drawn again only while it
+leans, and the day's grid only as the second day joins it and leaves and as the current
+time's line goes or comes. Nothing runs between changes of day.
+
+The touch that starts a drag builds the next day's blocks, the work 1.4.2 did on the
+frame after the finger lifted, and they are kept if the day changes. On the debug build
+that event took about 1 ms with 7 blocks a day, 2 to 5 ms with 56 and 10 to 13 ms with
+588, of which about 300 are near the screen.
+
+## What was left out
+
+The first working version added 4,752 bytes. Three things came out:
+
+| Left out | Saved | In its place |
+| --- | ---: | --- |
+| The heading's two names drawn together through a timed swap | about 900 bytes | The heading changes in one frame, as it always has, at the point where letting go changes day |
+| The current time's line travelling with today's blocks | about 400 bytes | It goes with the heading, and the grid is not drawn again each frame |
+| The platform's path interpolator for the landing | about 300 bytes | A cubic, which also let the screen's statics stay merged into another class |
+
+Verified on the Android 17 emulator: 66 unit and 44 instrumented tests, `lintRelease`,
+`verifyPrivacy`; eleven screens of one journey on minified copies of 1.4.2 and this
+build (two blocks added, the next day and a block there, the day after, back twice, a
+swipe let go short, the day before, Back to today) match below the status bar; a held
+drag looked at short of the point, past it and back; the same swipes with animations
+switched off; and a copy of 1.4.2 holding blocks on two days, reminders on, updated in
+place.
+
 # A pinned title and a last trim — 5 October 2026
 
 One pass on top of 1.4.1, released as 1.4.2. On screen only a long block's pinned title

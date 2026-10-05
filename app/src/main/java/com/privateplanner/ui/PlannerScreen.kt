@@ -1,6 +1,7 @@
 package com.privateplanner.ui
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
 import android.graphics.Canvas
@@ -29,6 +30,7 @@ import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.postNotificationsGranted
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Collections
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -72,6 +74,15 @@ private const val HeaderTintAlpha = 0.68f
 private const val HeaderFadeHeight = 56f
 private const val ScrimSteps = 32
 private const val DaySwipeThreshold = 72f
+
+// A change of day. Lengths in dp, times in milliseconds: the landing once the finger has
+// lifted, shorter for what little may be left of it; what counts as a flick; and how far
+// the heading leans after the finger before it changes.
+private const val LandingMillis = 240f
+private const val ShortestLandingMillis = 90f
+private const val FlickSpeed = 0.54f
+private const val FlickTravel = 19f
+private const val HeadingLean = 10f
 private const val SnackbarMillis = 4_000
 
 // The planner: the scrolling day under its heading, with at most one snackbar and one
@@ -82,7 +93,7 @@ internal open class PlannerScreen(
     val viewModel: PlannerViewModel,
     // Run when `backEnabled` may have changed.
     private val onBackChanged: Runnable = Runnable {}
-) : FrameLayout(context), TimelineHost {
+) : FrameLayout(context), TimelineHost, Choreographer.FrameCallback {
     private val density = resources.displayMetrics.density
     private val hourPx = HourHeight * density
     private val locale: Locale = resources.configuration.locales[0]
@@ -140,6 +151,8 @@ internal open class PlannerScreen(
         viewModel.onChange = null
         removeCallbacks(clock)
         day.cancelGesture()
+        swiping = false
+        closeSlide()
     }
 
     private val clock = Runnable { tick() }
@@ -151,6 +164,7 @@ internal open class PlannerScreen(
         val date = TimeSnapper.dateOf(now)
         day.minute = minute
         if (date != today) {
+            closeSlide()
             today = date
             showDate()
         }
@@ -189,7 +203,25 @@ internal open class PlannerScreen(
 
     // Nothing here changes the view model, so a change is never met half way through one.
     private fun render() {
-        if (shownDate != viewModel.selectedDate) showDate()
+        val date = viewModel.selectedDate
+        val from = shownDate
+        if (from != date) {
+            if (slideDirection != 0 && !slideWon && date == slideDate) {
+                // The swipe under way was heading here, and its blocks are in place already.
+                winSlide(true)
+            } else {
+                // A day chosen any other way slides in by itself, where there is motion at all.
+                swiping = false
+                closeSlide()
+                if (from != null && width > 0 && ValueAnimator.areAnimatorsEnabled()) {
+                    openSlide(date, viewModel.blocks, if (date > from) 1 else -1)
+                    winSlide(false)
+                    land(1f)
+                } else {
+                    showDate()
+                }
+            }
+        }
         day.setBlocks(viewModel.blocks)
         showSheet(null, null)
         snackbars.show(viewModel.snackbar)
@@ -199,6 +231,13 @@ internal open class PlannerScreen(
     private fun showDate() {
         val date = viewModel.selectedDate
         shownDate = date
+        showHeading(date)
+        onBackChanged.run()
+    }
+
+    // The day's name and, on today, the current time: what stays put while blocks change places.
+    private fun showHeading(date: LocalDate) {
+        day.showsNow = date == today
         val formatter = dateFormatter(HeadingDate, locale)
         // Relative days show their date underneath; other years (rare) add the year.
         val relative = when (date) {
@@ -212,8 +251,6 @@ internal open class PlannerScreen(
             date.year == today.year -> header.show(date.format(formatter), null)
             else -> header.show(date.format(dateFormatter(FullDate, locale)), null)
         }
-        day.showsNow = date == today
-        onBackChanged.run()
     }
 
     // Back closes a sheet, then a message, then returns to today; after that it leaves.
@@ -411,17 +448,24 @@ internal open class PlannerScreen(
         canvas.drawRect(0f, (height - navigationButtons).toFloat(), width.toFloat(), height.toFloat(), navigationPaint)
     }
 
-    // --- Day swipe: a horizontal drag that began as one, 72dp or more, changes day ----
+    // --- Day swipe: a horizontal drag that began as one carries the day's blocks with it
+    // and the next day's in beside them. Let go 72dp or more along, or flick, and the day
+    // changes; short of that, or flicking back, it returns.
 
     private var swipeDownX = 0f
     private var swipeDownY = 0f
     private var swipeDecided = false
     private var swiping = false
+    private var swipeX = 0f
+    private var swipeTime = 0L
+    private var swipeSpeed = 0f
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (shownSheet != null) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // A touch finds the day at rest: a landing still on its way ends here.
+                closeSlide()
                 swipeDownX = event.x
                 swipeDownY = event.y
                 swipeDecided = false
@@ -434,6 +478,12 @@ internal open class PlannerScreen(
                 if (dx * dx + dy * dy > slop * slop) {
                     swipeDecided = true
                     swiping = abs(dx) > abs(dy)
+                    if (swiping) {
+                        swipeX = event.x
+                        swipeTime = event.eventTime
+                        swipeSpeed = 0f
+                        dragTo(dx)
+                    }
                 }
             }
         }
@@ -442,15 +492,134 @@ internal open class PlannerScreen(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!swiping) return false
-        if (event.actionMasked == MotionEvent.ACTION_UP) {
-            val dx = event.x - swipeDownX
-            if (abs(dx) >= DaySwipeThreshold * density) {
-                viewModel.shiftDay(if (dx > 0f) -1 else 1)
-                haptic(HapticFeedbackConstants.SEGMENT_TICK)
+        val dx = event.x - swipeDownX
+        val action = event.actionMasked
+        if (action == MotionEvent.ACTION_MOVE) {
+            val millis = event.eventTime - swipeTime
+            if (millis > 0) {
+                swipeSpeed = 0.6f * swipeSpeed + 0.4f * (event.x - swipeX) / millis
+                swipeX = event.x
+                swipeTime = event.eventTime
             }
+            dragTo(dx)
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            swiping = false
+            // A finger that stopped before it lifted has no speed left.
+            release(dx, if (event.eventTime - swipeTime > 90) 0f else swipeSpeed, action == MotionEvent.ACTION_CANCEL)
         }
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) swiping = false
         return true
+    }
+
+    // --- A change of day under way: two days side by side, the one arriving `slideDirection`
+    // (+1 later, -1 earlier) of the one leaving, `slideAt` of the way there, 0 to 1.
+
+    private var slideDirection = 0
+    private var slideDate: LocalDate? = null
+    private var slideAt = 0f
+    // The day has changed: the arriving blocks are the selected day's and the rest is landing.
+    private var slideWon = false
+    private var headingNext = false
+    private var landFrom = 0f
+    private var landTo = 0f
+    private var landMillis = 0f
+    private var landNanos = 0L
+
+    // What blocks cross between one day and the next: the screen less the hour column.
+    private val travel: Float get() = width - TimelineGutter * density
+
+    private fun openSlide(date: LocalDate, blocks: List<PlannerBlock>, direction: Int) {
+        slideDirection = direction
+        slideDate = date
+        slideAt = 0f
+        slideWon = false
+        headingNext = false
+        day.openOther(blocks)
+        placeSlide()
+    }
+
+    private fun winSlide(finger: Boolean) {
+        slideWon = true
+        shownDate = viewModel.selectedDate
+        day.swapDays()
+        aimHeading(finger)
+    }
+
+    // Ends a change of day where it stands: the selected day is at rest and alone.
+    private fun closeSlide() {
+        if (slideDirection == 0) return
+        slideDirection = 0
+        Choreographer.getInstance().removeFrameCallback(this)
+        header.lean = 0f
+        showHeading(viewModel.selectedDate)
+        day.closeOther()
+    }
+
+    private fun placeSlide() {
+        val across = slideDirection * travel
+        val leaving = -across * slideAt
+        val arriving = across * (1f - slideAt)
+        if (slideWon) day.slide(arriving, leaving) else day.slide(leaving, arriving)
+        header.lean = if (headingNext) 0f else {
+            -slideDirection * HeadingLean * density * min(slideAt * travel / (DaySwipeThreshold * density), 1f)
+        }
+    }
+
+    // The heading names the next day once the day has changed, or from the point where
+    // letting go would change it; short of that, this day, leaning after the finger. The
+    // current time's line goes with the name. A finger that brings the change about, by
+    // crossing that point or by a flick short of it, feels the tick a change of day has
+    // always had.
+    private fun aimHeading(finger: Boolean) {
+        val next = slideWon || slideAt * travel >= DaySwipeThreshold * density
+        if (next == headingNext) return
+        headingNext = next
+        showHeading(if (next) slideDate!! else viewModel.selectedDate)
+        if (next && finger) haptic(HapticFeedbackConstants.SEGMENT_TICK)
+    }
+
+    private fun dragTo(dx: Float) {
+        val direction = if (dx < 0f) 1 else if (dx > 0f) -1 else slideDirection
+        if (direction == 0) return
+        if (slideDirection != direction) {
+            closeSlide()
+            val date = viewModel.selectedDate.plusDays(direction.toLong())
+            openSlide(date, viewModel.cachedBlocks(date) ?: Collections.emptyList(), direction)
+        }
+        slideAt = min(abs(dx) / travel, 1f)
+        aimHeading(true)
+        placeSlide()
+    }
+
+    private fun release(dx: Float, speed: Float, cancelled: Boolean) {
+        val direction = slideDirection
+        if (direction == 0) return
+        val fast = abs(speed) > FlickSpeed * density
+        val onward = fast && (speed < 0f) == (direction > 0)
+        val stick = !cancelled && (!fast || onward) &&
+            (abs(dx) >= DaySwipeThreshold * density || (onward && abs(dx) > FlickTravel * density))
+        // The screen finds the swipe heading to the new day and keeps its blocks. Back, pressed
+        // meanwhile, may have changed the day to it already.
+        if (stick && !slideWon) viewModel.shiftDay(direction.toLong())
+        if (slideDirection != 0) land(if (slideWon) 1f else 0f)
+    }
+
+    // The rest of the way, or back; at once where motion is switched off.
+    private fun land(to: Float) {
+        if (!ValueAnimator.areAnimatorsEnabled()) return closeSlide()
+        landFrom = slideAt
+        landTo = to
+        landMillis = max(ShortestLandingMillis, LandingMillis * abs(to - slideAt))
+        landNanos = System.nanoTime()
+        Choreographer.getInstance().postFrameCallback(this)
+    }
+
+    // Quick away and slowing into place.
+    override fun doFrame(frameTimeNanos: Long) {
+        val left = 1f - min(max(frameTimeNanos - landNanos, 0L) / 1e6f / landMillis, 1f)
+        slideAt = landTo + (landFrom - landTo) * left * left * left
+        aimHeading(false)
+        placeSlide()
+        if (left == 0f) closeSlide() else Choreographer.getInstance().postFrameCallback(this)
     }
 
     // --- What the day and its blocks ask of the screen ------------------------------
@@ -506,9 +675,14 @@ internal open class PlannerScreen(
 
     override fun onEmptyTimeTap(minutes: Int) = viewModel.openCreate(minutes)
 
-    override fun onBlockTap(id: Long) = viewModel.openActions(id)
+    // Only for a block of the selected day: one arriving or leaving is not to be acted on.
+    override fun onBlockTap(id: Long) {
+        if (block(id) != null) viewModel.openActions(id)
+    }
 
-    override fun onBlockRename(id: Long) = viewModel.openRename(id)
+    override fun onBlockRename(id: Long) {
+        if (block(id) != null) viewModel.openRename(id)
+    }
 
     override fun onBlockDelete(id: Long) = deleteBlock(id)
 
@@ -566,6 +740,14 @@ internal open class PlannerScreen(
         var contentHeight = 0
             private set
 
+        // How far the name leans after a finger that is carrying the day away.
+        var lean = 0f
+            set(value) {
+                if (field == value) return
+                field = value
+                invalidate()
+            }
+
         var statusTop = 0
             set(value) {
                 if (field == value) return
@@ -613,6 +795,8 @@ internal open class PlannerScreen(
 
         override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
             glazePaper = 0
+            // Blocks kept through a change of day rest their pinned titles below the new fade.
+            day.scrolled()
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -637,12 +821,12 @@ internal open class PlannerScreen(
             val inner = button.width() - context.px(16f) * 2
             val textTop = button.top + context.px(4f)
             first.draw(
-                canvas, (button.left + context.px(16f) + Math.round((inner - first.width) / 2f)).toFloat(), textTop.toFloat(),
+                canvas, button.left + context.px(16f) + Math.round((inner - first.width) / 2f) + lean, textTop.toFloat(),
                 colours.PrimaryText
             )
             subtitleBlock?.let {
                 it.draw(
-                    canvas, (button.left + context.px(16f) + Math.round((inner - it.width) / 2f)).toFloat(),
+                    canvas, button.left + context.px(16f) + Math.round((inner - it.width) / 2f) + lean,
                     (textTop + first.height).toFloat(), colours.PrimaryText
                 )
             }

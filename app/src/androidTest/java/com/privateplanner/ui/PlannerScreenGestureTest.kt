@@ -60,6 +60,67 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         assertEquals(List(14) { HapticFeedbackConstants.SEGMENT_TICK }, haptics)
     }
 
+    @Test fun aSwipeLetGoShortSlidesBackAndLeavesTheDayAsItWas() {
+        launch { add("Stays") }
+        awaitTile("Stays")
+        val today = main { model.selectedDate }
+        gesture(screen.width * 0.8f, screen.height * 0.5f, -screen.context.dp(40f), 0f)
+        await { main { tile("Stays").translationX == 0f && screen.descendants().filterIsInstance<TimeBlockView>().count() == 1 } }
+        assertEquals(today, main { model.selectedDate })
+        assertTrue(haptics.isEmpty())
+    }
+
+    @Test fun aDragCarriesTheNextDaysBlocksInBesideThisDays() {
+        launch {
+            add("This day's")
+            insertBlock(com.privateplanner.domain.PlannerBlock(
+                date = java.time.LocalDate.now().plusDays(1), title = "Next day's", startMinutes = 540, durationMinutes = 60
+            ))
+        }
+        awaitTile("This day's")
+        val today = main { model.selectedDate }
+        val along = screen.context.dp(100f)
+        val x = screen.width * 0.8f
+        val down = SystemClock.uptimeMillis()
+        fun send(action: Int, dx: Float) = main {
+            MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x + dx, screen.height * 0.5f, 0).let {
+                screen.dispatchTouchEvent(it)
+                it.recycle()
+            }
+        }
+        send(MotionEvent.ACTION_DOWN, 0f)
+        send(MotionEvent.ACTION_MOVE, -screen.context.dp(30f))
+        send(MotionEvent.ACTION_MOVE, -along)
+        main {
+            val travel = screen.width - screen.context.dp(TimelineGutter)
+            assertEquals(-along, tile("This day's").translationX, 1f)
+            assertEquals(travel - along, tile("Next day's").translationX, 1f)
+            assertEquals(today, model.selectedDate)
+        }
+        // Past 72dp the finger has felt the tick; back under it and let go, the day stays.
+        assertEquals(listOf(HapticFeedbackConstants.SEGMENT_TICK), haptics)
+        SystemClock.sleep(120)
+        send(MotionEvent.ACTION_MOVE, -screen.context.dp(30f))
+        SystemClock.sleep(120)
+        send(MotionEvent.ACTION_UP, -screen.context.dp(30f))
+        await { main { screen.descendants().filterIsInstance<TimeBlockView>().count() == 1 && tile("This day's").translationX == 0f } }
+        assertEquals(today, main { model.selectedDate })
+
+        // Let go past it and the next day's blocks are kept as they are, not built again.
+        send(MotionEvent.ACTION_DOWN, 0f)
+        send(MotionEvent.ACTION_MOVE, -screen.context.dp(30f))
+        send(MotionEvent.ACTION_MOVE, -along)
+        val arriving = main { tile("Next day's") }
+        SystemClock.sleep(120)
+        send(MotionEvent.ACTION_UP, -along)
+        assertEquals(today.plusDays(1), main { model.selectedDate })
+        await { main { screen.descendants().filterIsInstance<TimeBlockView>().count() == 1 } }
+        main {
+            assertSame(arriving, tile("Next day's"))
+            assertEquals(0f, arriving.translationX)
+        }
+    }
+
     @Test fun tilesFollowMeasuredWidthAndKeepMinimumTouchTargets() {
         launch(hostWidth = 260) { add("Narrow", duration = 10) }
         scrollTo(0)

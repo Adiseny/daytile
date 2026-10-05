@@ -92,7 +92,9 @@ internal fun centredTouchTop(top: Float, contentHeight: Float): Float {
 }
 
 // The whole day: the grid and its labels, one view per block, and the current time. It is
-// as tall as the day and sits in the scroll view; scrolling re-draws nothing.
+// as tall as the day and sits in the scroll view; scrolling re-draws nothing. While the
+// day is changing a second day's blocks stand beside the selected day's: the day arriving
+// or, once that is the selected one, the day leaving.
 internal class DayView(context: Context, private val host: TimelineHost) : ViewGroup(context) {
     private val density = resources.displayMetrics.density
     private val hourPx = HourHeight * density
@@ -107,10 +109,17 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
     private val halfHourPath = Path()
     private val quarterPath = Path()
     private val fiveMinutePath = Path()
-    private val tiles = LongSparseArray<TimeBlockView>()
+    private var tiles = LongSparseArray<TimeBlockView>()
     private val nowBadge = NowBadge(context)
     private var blocks: List<PlannerBlock> = Collections.emptyList()
     private var layouts: BlockLayouts = BlockLayouts.Empty
+    private var otherTiles = LongSparseArray<TimeBlockView>()
+    private var otherBlocks: List<PlannerBlock> = Collections.emptyList()
+    private var otherLayouts: BlockLayouts = BlockLayouts.Empty
+    private var paired = false
+    // How far each day's blocks stand from their place.
+    private var shift = 0f
+    private var otherShift = 0f
     private var windowStart = Int.MIN_VALUE
     private var windowHeight = 0
     // Kept through a dense day's windowing while its gesture runs.
@@ -147,6 +156,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         invalidate()
         nowBadge.invalidate()
         for (index in 0 until tiles.size()) tiles.valueAt(index).paletteChanged()
+        for (index in 0 until otherTiles.size()) otherTiles.valueAt(index).paletteChanged()
     }
 
     fun setBlocks(value: List<PlannerBlock>) {
@@ -179,10 +189,15 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
     private fun visibleStart(): Int = (max(host.scrollPx - topPx, 0) / hourPx * 2).toInt() * 30 - 30
 
     private fun syncTiles() {
-        val dense = blocks.size > 64
         windowHeight = viewportHeight()
-        windowStart = if (dense) visibleStart() else Int.MIN_VALUE
-        val end = if (dense) windowStart + ceil(windowHeight / hourPx * 60).toInt() + 90 else Int.MAX_VALUE
+        windowStart = sync(blocks, layouts, tiles, shift)
+    }
+
+    // One day's tiles made to match its blocks. Answers where a dense day's window starts.
+    private fun sync(blocks: List<PlannerBlock>, layouts: BlockLayouts, tiles: LongSparseArray<TimeBlockView>, shift: Float): Int {
+        val dense = blocks.size > 64
+        val windowStart = if (dense) visibleStart() else Int.MIN_VALUE
+        val end = if (dense) windowStart + ceil(viewportHeight() / hourPx * 60).toInt() + 90 else Int.MAX_VALUE
         val stale = tiles.clone()
         for (block in blocks) {
             if (dense && block.startMinutes > end && activeBlockId == 0L) break
@@ -196,6 +211,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
                 tile.bind(block, columns)
             } else {
                 TimeBlockView(context, host, this, block, columns).also {
+                    it.translationX = shift
                     tiles.put(block.id, it)
                     addView(it, childCount - 1)
                 }
@@ -207,6 +223,63 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         }
         // Adding/removing a child already requests layout. Existing tiles place only
         // themselves when their geometry changes; scrolling needs no whole-screen layout.
+        return windowStart
+    }
+
+    // --- A second day beside the selected one, while the day changes ------------------
+
+    fun openOther(value: List<PlannerBlock>) {
+        otherBlocks = value
+        otherLayouts = OverlapLayoutCalculator.calculate(value)
+        paired = true
+        sync(value, otherLayouts, otherTiles, otherShift)
+        // Drawn again once, for the clip below.
+        invalidate()
+    }
+
+    // The arriving day is the selected one from here, and the day that was is the one leaving.
+    fun swapDays() {
+        val held = tiles
+        tiles = otherTiles
+        otherTiles = held
+        val were = blocks
+        blocks = otherBlocks
+        otherBlocks = were
+        val columns = layouts
+        layouts = otherLayouts
+        otherLayouts = columns
+        val place = shift
+        shift = otherShift
+        otherShift = place
+        syncTiles()
+    }
+
+    // Only moves what is drawn already: nothing is laid out or drawn again.
+    fun slide(selected: Float, other: Float) {
+        shift = selected
+        otherShift = other
+        for (index in 0 until tiles.size()) tiles.valueAt(index).translationX = selected
+        for (index in 0 until otherTiles.size()) otherTiles.valueAt(index).translationX = other
+    }
+
+    fun closeOther() {
+        for (index in 0 until otherTiles.size()) removeView(otherTiles.valueAt(index))
+        otherTiles.clear()
+        otherBlocks = Collections.emptyList()
+        otherLayouts = BlockLayouts.Empty
+        paired = false
+        slide(0f, 0f)
+        invalidate()
+    }
+
+    // Blocks on their way in or out pass behind the hour column, not over it.
+    override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
+        if (!paired || child === nowBadge) return super.drawChild(canvas, child, drawingTime)
+        canvas.save()
+        canvas.clipRect(gutterPx, 0f, width.toFloat(), height.toFloat())
+        val more = super.drawChild(canvas, child, drawingTime)
+        canvas.restore()
+        return more
     }
 
     // Called as the day scrolls: only a dense day's window and pinned titles depend on it.
@@ -245,6 +318,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         for (index in 0 until tiles.size()) place(tiles.valueAt(index))
+        for (index in 0 until otherTiles.size()) place(otherTiles.valueAt(index))
         placeNow()
     }
 

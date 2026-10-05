@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0 — 5 October 2026
+
+- Changing day follows the finger. A sideways drag carries the day's blocks with it and the next day's in beside them, behind the hour column. Let go 72dp along, or flick, and the day changes; short of that, or flicking back, it returns. The heading leans after the finger and changes, with the tick and the current time's line, at the point where letting go changes day. A day picked from the date sheet or reached with Back slides in the same way. Where animations are switched off the blocks still follow the finger and nothing moves by itself.
+- The unsigned release APK is 111,685 bytes, against 108,797. At rest nothing on screen changes: eleven screens of one journey match 1.4.2 pixel for pixel. Tested on Android 17.
+
 ## 1.4.2 — 5 October 2026
 
 - A long block's title, kept in view as the day scrolls, rests below the heading's fade. It rested inside the fade, where the heading's tint washed it out.

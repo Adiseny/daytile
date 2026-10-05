@@ -73,6 +73,9 @@ class PlannerViewModel(
     private val dayCache = HashMap<LocalDate, List<PlannerBlock>>()
     private val loadingDays = HashSet<LocalDate>()
 
+    // A neighbouring day as it is cached, for a day swipe to show before it is selected.
+    fun cachedBlocks(date: LocalDate): List<PlannerBlock>? = dayCache[date]
+
     // Moves and resizes that are on screen but not yet saved, by block.
     private val pendingTimes = HashMap<Long, PendingTime>()
     private val deletingBlockIds = HashSet<Long>()
