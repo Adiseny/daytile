@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.4.2 — 5 October 2026
 
 - A long block's title, kept in view as the day scrolls, rests below the heading's fade. It rested inside the fade, where the heading's tint washed it out.
+- The unsigned release APK is 108,797 bytes, against 109,653. Block and palette colours are kept as plain numbers and text styles as one number each, the palette on display shares the class of a daylight stop, and the reminder chimes are encoded 3% smaller and decode to the same samples. Nothing on screen changes: fifteen screens of one journey, in both palettes, match the build before it pixel for pixel.
 
 ## 1.4.1 — 5 October 2026
 

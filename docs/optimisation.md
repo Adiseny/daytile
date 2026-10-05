@@ -1,3 +1,52 @@
+# A pinned title and a last trim — 5 October 2026
+
+One pass on top of 1.4.1, released as 1.4.2. On screen only a long block's pinned title
+moves, to below the heading's fade. The rest is size, and there is little left to take.
+
+## Measurements
+
+| Measurement | 1.4.1 | After |
+| --- | ---: | ---: |
+| Unsigned release APK | 109,653 bytes | 108,797 bytes |
+| Uncompressed `classes.dex` | 96,840 bytes | 96,212 bytes |
+| Classes / method references in the dex | 86 / 843 | 85 / 842 |
+| The two reminder chimes | 6,884 bytes | 6,658 bytes |
+
+What changed, in bytes of APK: colours kept as plain integers where they were 64-bit
+(288); text styles as one packed number each in place of a class and five objects, with
+the palette on display sharing the daylight stop's class (340); the chimes encoded again
+with a wider search, decoding to the same samples, which the instrumented test checks
+by hash on Android (226). The pinned-title fix cost 8.
+
+Verified on the Android 17 emulator: 66 unit and 42 instrumented tests, `lintRelease`,
+`verifyPrivacy`, and the same journey run on minified copies of the build before and
+after (the day, the morning and the small hours, another day, the title sheet empty and
+typed, a new block, its actions, rename, delete with its message, the calendar and its
+next month, then the evening, its calendar and its title sheet in the dark palette).
+Every screenshot matches below the status bar; the only pixels that differ anywhere are
+the system's signal icon.
+
+## Where the bytes are
+
+Of the dex's 96 KB, 42 KB is instructions and the rest is its tables: 16.5 KB of strings
+(platform class and method names, SQL, the interface's text), 21 KB of ids and lists,
+3.5 KB of line tables, 6 KB of class records. No declaration in the app is unused.
+
+## Looked at and left
+
+| Idea | Would save | Why it stays |
+| --- | ---: | --- |
+| Chimes at 11,025 Hz | 2,761 bytes | Different samples. Nothing in either chime is above 1.1 kHz and the difference measures below -88 dBFS, but it is a change to a sound tuned by ear and needs listening to first. |
+| The platform's `LinearLayout` in place of `Flow` | about 1,700 bytes | It rounds the other way: text in sheets and buttons can move by a pixel. |
+| R8's API outlines | about 1,300 bytes | Without them classes that touch newer APIs fail verification on Android 8 to 10 and run slower there. |
+| Line tables | 3,466 bytes | R8 writes them at every minimum API level; no option removes them. Raising the minimum to Android 9 saves 780 bytes of other code and drops Android 8. |
+| The build tools' stamp in `META-INF` | about 250 bytes | Packaging fails without the file. |
+| A window on the search for a title's last duration | time only | After twenty years of blocks the search for a title never used takes 2 ms off the main thread. A window would forget lengths older than it. |
+
+The database is as it was: 34 bytes a block, 3 KB when new. A row is its key, its title
+and one byte of duration; the ideas that remain (packing start and duration together,
+sharing titles) were measured for 1.4.1 and are recorded below.
+
 # One table, small pages and no settings file — 5 October 2026
 
 Two passes on top of 1.4.0, released as 1.4.1. Nothing changes on screen but the keyboard-focus shading

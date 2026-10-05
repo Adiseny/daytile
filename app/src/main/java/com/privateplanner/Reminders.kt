@@ -248,7 +248,7 @@ class Reminders(private val context: Context, private val blocks: PlannerBlockDa
             } else {
                 TimeFormatter.range(block.startMinutes, block.durationMinutes) + length
             }
-            val colour = blockBackgroundArgb(block.startMinutes, column).toInt()
+            val colour = blockBackgroundArgb(block.startMinutes, column)
             val channel = if (upcoming) UpcomingChannel else StartChannel
             val previous = active.firstOrNull { it.id == id }?.notification
             // The system owns the running countdown. An unrelated write needs neither

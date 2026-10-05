@@ -19,13 +19,13 @@ class PlannerPaletteContrastTest {
 
     @Test
     fun blockColourPeriodsKeepTheirEstablishedBoundaries() {
-        assertEquals(0xFF6F7772, blockBackgroundArgb(5 * 60 + 59, 0))
-        assertEquals(0xFFC38A24, blockBackgroundArgb(6 * 60, 0))
-        assertEquals(0xFF6F9B72, blockBackgroundArgb(9 * 60, 0))
-        assertEquals(0xFF5E9AC2, blockBackgroundArgb(12 * 60, 0))
-        assertEquals(0xFFC06D4F, blockBackgroundArgb(15 * 60, 0))
-        assertEquals(0xFF816097, blockBackgroundArgb(18 * 60, 0))
-        assertEquals(0xFF637F92, blockBackgroundArgb(21 * 60, 0))
+        assertEquals(0xFF6F7772.toInt(), blockBackgroundArgb(5 * 60 + 59, 0))
+        assertEquals(0xFFC38A24.toInt(), blockBackgroundArgb(6 * 60, 0))
+        assertEquals(0xFF6F9B72.toInt(), blockBackgroundArgb(9 * 60, 0))
+        assertEquals(0xFF5E9AC2.toInt(), blockBackgroundArgb(12 * 60, 0))
+        assertEquals(0xFFC06D4F.toInt(), blockBackgroundArgb(15 * 60, 0))
+        assertEquals(0xFF816097.toInt(), blockBackgroundArgb(18 * 60, 0))
+        assertEquals(0xFF637F92.toInt(), blockBackgroundArgb(21 * 60, 0))
     }
 
     @Test
@@ -69,7 +69,7 @@ class PlannerPaletteContrastTest {
         forEachMinutePalette(step = 5) { minute, palette ->
             for (hour in 0 until 24) {
                 for (variant in 0 until 3) {
-                    val tile = blockBackgroundArgb(hour * 60, variant).toInt()
+                    val tile = blockBackgroundArgb(hour * 60, variant)
                     for (active in listOf(false, true)) {
                         val surface = compositedTileBackground(tile, palette.Paper, active)
                         val ink = tileInkFor(tile, palette.Paper, active)

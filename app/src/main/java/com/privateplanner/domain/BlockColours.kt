@@ -1,18 +1,18 @@
 package com.privateplanner.domain
 
 private const val ColoursPerPeriod = 3
-private val BlockColours = longArrayOf(
-    0xFF6F7772, 0xFF64717A, 0xFF7B7068,
-    0xFFC38A24, 0xFFB97820, 0xFFD49D35,
-    0xFF6F9B72, 0xFF5F8D68, 0xFF84A87C,
-    0xFF5E9AC2, 0xFF4B88B7, 0xFF77ACCB,
-    0xFFC06D4F, 0xFFAE5B42, 0xFFD08368,
-    0xFF816097, 0xFF73578E, 0xFF9270A7,
-    0xFF637F92, 0xFF557386, 0xFF7891A0
+private val BlockColours = intArrayOf(
+    0x6F7772, 0x64717A, 0x7B7068,
+    0xC38A24, 0xB97820, 0xD49D35,
+    0x6F9B72, 0x5F8D68, 0x84A87C,
+    0x5E9AC2, 0x4B88B7, 0x77ACCB,
+    0xC06D4F, 0xAE5B42, 0xD08368,
+    0x816097, 0x73578E, 0x9270A7,
+    0x637F92, 0x557386, 0x7891A0
 )
 
-internal fun blockBackgroundArgb(startMinutes: Int, variant: Int): Long {
+internal fun blockBackgroundArgb(startMinutes: Int, variant: Int): Int {
     val hour = (startMinutes / TimeSnapper.MinutesPerHour).coerceAtLeast(0).coerceAtMost(23)
     val period = (hour / 3 - 1).coerceAtLeast(0)
-    return BlockColours[period * ColoursPerPeriod + variant.mod(ColoursPerPeriod)]
+    return BlockColours[period * ColoursPerPeriod + variant.mod(ColoursPerPeriod)] or 0xFF000000.toInt()
 }

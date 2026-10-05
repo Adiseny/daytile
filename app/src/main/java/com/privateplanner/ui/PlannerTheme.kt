@@ -94,23 +94,26 @@ private const val HourLineBlend = 0.42f
 private const val HalfHourLineBlend = 0.34f
 private const val QuarterTickBlend = 0.26f
 
-private fun palette(light: Boolean, paper: Long, sheet: Long, lineInk: Long, timeText: Long) = PlannerPalette(
-    Paper = paper.toInt(),
-    Sheet = sheet.toInt(),
+private const val Opaque = 0xFF000000.toInt()
+
+// An anchor's four colours are given as RGB and are opaque.
+private fun palette(light: Boolean, paper: Int, sheet: Int, lineInk: Int, timeText: Int) = PlannerPalette(
+    Paper = paper or Opaque,
+    Sheet = sheet or Opaque,
     PrimaryText = if (light) 0xFF1A1814.toInt() else 0xFFEFE7DA.toInt(),
     MutedText = if (light) 0xFF675E51.toInt() else 0xFF9C9384.toInt(),
-    TimeText = timeText.toInt(),
-    HourLine = lerp(paper.toInt(), lineInk.toInt(), HourLineBlend),
-    HalfHourLine = lerp(paper.toInt(), lineInk.toInt(), HalfHourLineBlend),
-    QuarterTick = lerp(paper.toInt(), lineInk.toInt(), QuarterTickBlend),
+    TimeText = timeText or Opaque,
+    HourLine = lerp(paper or Opaque, lineInk or Opaque, HourLineBlend),
+    HalfHourLine = lerp(paper or Opaque, lineInk or Opaque, HalfHourLineBlend),
+    QuarterTick = lerp(paper or Opaque, lineInk or Opaque, QuarterTickBlend),
     AddButtonDisabled = if (light) 0xFFE0D8CD.toInt() else 0xFF39322A.toInt(),
     Delete = if (light) 0xFF9B4F45.toInt() else 0xFFC9756A.toInt(),
     Scrim = if (light) 0x661A1814 else 0xAA0B0906.toInt(),
     LightBackground = light
 )
 
-private val NightPalette = palette(false, 0xFF15120D, 0xFF221C15, 0xFF6F5B3E, 0xFFC6BBA8)
-private val MiddayPalette = palette(true, 0xFFF6F2EC, 0xFFFFF9F1, 0xFF574A38, 0xFF3F3932)
+private val NightPalette = palette(false, 0x15120D, 0x221C15, 0x6F5B3E, 0xC6BBA8)
+private val MiddayPalette = palette(true, 0xF6F2EC, 0xFFF9F1, 0x574A38, 0x3F3932)
 
 // minute = when this stop is fully reached. ramp = fade from the previous stop
 // across the segment; otherwise the previous palette holds and the theme steps
@@ -121,16 +124,16 @@ private val DaylightStops = listOf(
     DaylightStop(0, false, NightPalette),
     DaylightStop(5 * 60, false, NightPalette),
     // First light: the night sky warms before sunrise.
-    DaylightStop(6 * 60 + 45, true, palette(false, 0xFF1C1710, 0xFF291F15, 0xFF7D6440, 0xFFCDBFA4)),
+    DaylightStop(6 * 60 + 45, true, palette(false, 0x1C1710, 0x291F15, 0x7D6440, 0xCDBFA4)),
     // Sunrise: polarity flips to warm morning light.
-    DaylightStop(7 * 60, false, palette(true, 0xFFF3E6D0, 0xFFFCF1DE, 0xFF6E5730, 0xFF4A3B24)),
-    DaylightStop(9 * 60 + 30, true, palette(true, 0xFFF5EDDE, 0xFFFEF6E8, 0xFF625234, 0xFF443A28)),
+    DaylightStop(7 * 60, false, palette(true, 0xF3E6D0, 0xFCF1DE, 0x6E5730, 0x4A3B24)),
+    DaylightStop(9 * 60 + 30, true, palette(true, 0xF5EDDE, 0xFEF6E8, 0x625234, 0x443A28)),
     DaylightStop(13 * 60, true, MiddayPalette),
-    DaylightStop(16 * 60 + 30, true, palette(true, 0xFFF6EEDD, 0xFFFEF5E5, 0xFF64522F, 0xFF463B26)),
+    DaylightStop(16 * 60 + 30, true, palette(true, 0xF6EEDD, 0xFEF5E5, 0x64522F, 0x463B26)),
     // Golden hour: the warmest light of the day.
-    DaylightStop(19 * 60 + 30, true, palette(true, 0xFFF1E2C8, 0xFFFAEDD6, 0xFF6E5426, 0xFF4B3B1F)),
+    DaylightStop(19 * 60 + 30, true, palette(true, 0xF1E2C8, 0xFAEDD6, 0x6E5426, 0x4B3B1F)),
     // Dusk: polarity flips back to a warm dark evening.
-    DaylightStop(20 * 60, false, palette(false, 0xFF1F1810, 0xFF2D2214, 0xFF876A3E, 0xFFD2C2A2)),
+    DaylightStop(20 * 60, false, palette(false, 0x1F1810, 0x2D2214, 0x876A3E, 0xD2C2A2)),
     DaylightStop(22 * 60 + 30, true, NightPalette)
 )
 
@@ -163,15 +166,14 @@ internal fun paletteForMinute(minuteOfDay: Int): PlannerPalette {
     )
 }
 
-private class DisplayedPalette(val step: Int, val palette: PlannerPalette)
-
-// Shared with the launch warm-up thread, which works out the first one.
+// The palette on display with its step, as a stop of its own. Shared with the launch warm-up
+// thread, which works out the first one.
 @Volatile
-private var displayedPalette: DisplayedPalette? = null
+private var displayed: DaylightStop? = null
 
 internal fun displayedPaletteForMinute(minuteOfDay: Int): PlannerPalette {
     val minute = minuteOfDay.coerceAtLeast(0).coerceAtMost(TimeSnapper.MinutesPerDay - 1)
     val step = minute - minute % PaletteStepMinutes
-    return displayedPalette?.takeIf { it.step == step }?.palette
-        ?: paletteForMinute(step).also { displayedPalette = DisplayedPalette(step, it) }
+    return displayed?.takeIf { it.minute == step }?.palette
+        ?: paletteForMinute(step).also { displayed = DaylightStop(step, false, it) }
 }

@@ -548,8 +548,8 @@ internal open class PlannerScreen(
     // paper that fades out below. Tapping the text opens the date sheet; the rest lets
     // touches through to the day.
     private inner class Header(context: Context) : View(context) {
-        private val titlePaint = context.textPaint(PlannerType.headlineMedium.size, PlannerType.headlineMedium.weight)
-        private val subtitlePaint = context.textPaint(PlannerType.bodySmall.size, PlannerType.bodySmall.weight)
+        private val titlePaint = context.textPaint(HeadlineMedium)
+        private val subtitlePaint = context.textPaint(BodySmall)
         private val glaze = Paint()
         private var glazePaper = 0
         private var title = ""
@@ -734,10 +734,10 @@ internal open class PlannerScreen(
             Flow(context, centred = true), Choreographer.FrameCallback {
             private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
             private val message = Label(
-                context, TextSpec(14f, 18f, 600), 0, maxLines = 1, ellipsis = true, lineBox = true
+                context, MessageText, 0, maxLines = 1, ellipsis = true, lineBox = true
             )
             private val undo = if (item.deletedBlock != null) {
-                Label(context, TextSpec(14f, 18f, 600), 0, maxLines = 1, gravity = Gravity.CENTER_VERTICAL, lineBox = true)
+                Label(context, MessageText, 0, maxLines = 1, gravity = Gravity.CENTER_VERTICAL, lineBox = true)
             } else {
                 null
             }

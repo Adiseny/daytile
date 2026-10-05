@@ -287,7 +287,7 @@ internal class TimeBlockView(
         // Moving changes only the time label. Keep the title and duration layouts.
         if (metaStart != displayedStartMinutes) meta = meta?.let { timeText(it.width, it.height) }
         val active = moveActive || resizeActive
-        val background = blockBackgroundArgb(block.startMinutes, columns.columnIndex).toInt()
+        val background = blockBackgroundArgb(block.startMinutes, columns.columnIndex)
         val composite = compositedTileBackground(background, host.palette.Paper, active)
         if (inkBackground != composite) {
             inkBackground = composite

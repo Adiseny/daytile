@@ -18,18 +18,16 @@ import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.ceil
 
-// Sizes in sp. A line height of zero leaves the font's own.
-internal class TextSpec(val size: Float, val lineHeight: Float, val weight: Int)
-
-// headlineMedium and bodySmall are the timeline heading's title and date line, and
-// labelLarge a button's label.
-internal object PlannerType {
-    val headlineMedium = TextSpec(22f, 27f, 600)
-    val titleMedium = TextSpec(18f, 24f, 600)
-    val bodyMedium = TextSpec(14f, 18f, 400)
-    val bodySmall = TextSpec(12f, 15f, 400)
-    val labelLarge = TextSpec(15f, 20f, 600)
-}
+// A text style in one number: its size and line height in sp and its weight in hundreds, a
+// byte each. HeadlineMedium and BodySmall are the timeline heading's title and date line,
+// LabelLarge a button's label, MessageText a snackbar's and ChevronText the date sheet's arrows.
+internal const val HeadlineMedium = 22 shl 16 or (27 shl 8) or 6
+internal const val TitleMedium = 18 shl 16 or (24 shl 8) or 6
+internal const val BodyMedium = 14 shl 16 or (18 shl 8) or 4
+internal const val BodySmall = 12 shl 16 or (15 shl 8) or 4
+internal const val LabelLarge = 15 shl 16 or (20 shl 8) or 6
+internal const val MessageText = 14 shl 16 or (18 shl 8) or 6
+internal const val ChevronText = 28 shl 16 or (22 shl 8) or 4
 
 internal fun Context.dp(value: Float): Float = value * resources.displayMetrics.density
 
@@ -49,14 +47,16 @@ internal fun typeface(weight: Int): Typeface = Typefaces[weight / 100] ?: (
     }
     ).also { Typefaces[weight / 100] = it }
 
-internal fun Context.textPaint(size: Float, weight: Int, colour: Int = 0): TextPaint =
+// Its colour is set by whoever draws with it.
+internal fun Context.textPaint(size: Float, weight: Int): TextPaint =
     TextPaint(Paint.ANTI_ALIAS_FLAG).also {
         it.density = resources.displayMetrics.density
         it.textSize = sp(size)
         it.typeface = typeface(weight)
         it.hinting = Paint.HINTING_ON
-        it.color = colour
     }
+
+internal fun Context.textPaint(style: Int): TextPaint = textPaint((style ushr 16).toFloat(), (style and 0xFF) * 100)
 
 // Every line exactly the line height tall, the text centred in it.
 private class CentredLineHeight(private val lineHeight: Float) : LineHeightSpan {
@@ -146,7 +146,7 @@ internal fun textBlock(
 // places the text within any extra room by its gravity.
 internal class Label(
     context: Context,
-    private val spec: TextSpec,
+    style: Int,
     colour: Int,
     private val maxLines: Int = Int.MAX_VALUE,
     private val ellipsis: Boolean = false,
@@ -156,8 +156,8 @@ internal class Label(
     // text keeps its font's own height.
     lineBox: Boolean = false
 ) : View(context) {
-    private val paint = context.textPaint(spec.size, spec.weight)
-    private val lineHeight = if (lineBox) context.sp(spec.lineHeight) else 0f
+    private val paint = context.textPaint(style)
+    private val lineHeight = if (lineBox) context.sp((style ushr 8 and 0xFF).toFloat()) else 0f
     private var block: TextBlock? = null
     private var blockWidth = -1
 

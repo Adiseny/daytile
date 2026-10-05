@@ -108,9 +108,9 @@ internal class InputSheet(
 ) : Flow(context, vertical = true) {
     private val theme = if (colours.LightBackground) R.style.Theme_Daytile_Day else R.style.Theme_Daytile_Night
     private val input = TitleInput(ContextThemeWrapper(context, theme))
-    private val label = Label(context, PlannerType.labelLarge, 0, lineBox = true)
+    private val label = Label(context, LabelLarge, 0, lineBox = true)
     private val button = PlannerButton(context, colours.Sheet, 24f, pillHeight = 48f)
-    private val error = Label(context, PlannerType.bodyMedium, colours.Delete)
+    private val error = Label(context, BodyMedium, colours.Delete)
     private val keyboard = context.getSystemService(InputMethodManager::class.java)
 
     val text: String get() = input.text.toString()
@@ -220,8 +220,8 @@ internal class ActionsSheet(
     onRename: OnClickListener,
     onDelete: OnClickListener
 ) : Flow(context, centred = true) {
-    private val title = Label(context, PlannerType.titleMedium, colours.PrimaryText, maxLines = 1, ellipsis = true)
-    private val time = Label(context, PlannerType.bodyMedium, colours.MutedText, maxLines = 1, ellipsis = true)
+    private val title = Label(context, TitleMedium, colours.PrimaryText, maxLines = 1, ellipsis = true)
+    private val time = Label(context, BodyMedium, colours.MutedText, maxLines = 1, ellipsis = true)
     private val rename = Flow(context, vertical = true)
     private val delete = PlannerButton(context, colours.PrimaryText, 12f, pillHeight = 48f)
 
@@ -237,7 +237,7 @@ internal class ActionsSheet(
             addView(time)
         }
         addView(rename, weighted())
-        delete.pill.addView(Label(context, PlannerType.labelLarge, colours.Delete).apply { text = "Delete" })
+        delete.pill.addView(Label(context, LabelLarge, colours.Delete).apply { text = "Delete" })
         delete.setOnClickListener(onDelete)
         addView(delete, Cell(WRAP_CONTENT, context.px(48f)))
     }
@@ -286,7 +286,7 @@ private class Bell(context: Context) : View(context) {
 
 // One day of the month: its number, in a filled pill when selected and a ringed one today.
 private class DayCell(context: Context, private val colours: PlannerPalette) : View(context) {
-    private val textPaint = context.textPaint(PlannerType.bodyMedium.size, PlannerType.bodyMedium.weight)
+    private val textPaint = context.textPaint(BodyMedium)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var number: TextBlock? = null
     private var today = false
@@ -345,11 +345,11 @@ internal class DateSheet(
 ) : Flow(context, vertical = true) {
     private val locale = resources.configuration.locales[0]
     private val monthTitle = Label(
-        context, PlannerType.titleMedium, colours.PrimaryText, gravity = Gravity.CENTER_HORIZONTAL, centred = true
+        context, TitleMedium, colours.PrimaryText, gravity = Gravity.CENTER_HORIZONTAL, centred = true
     )
     private val cells = List(42) { DayCell(context, colours) }
     private val bell = Bell(context)
-    private val remindersLabel = Label(context, PlannerType.labelLarge, 0, lineBox = true).apply { text = "Reminders" }
+    private val remindersLabel = Label(context, LabelLarge, 0, lineBox = true).apply { text = "Reminders" }
     private val reminders = PlannerButton(context, colours.PrimaryText, 15f)
 
     var visibleMonth: YearMonth = visibleMonth ?: YearMonth.from(selectedDate)
@@ -369,7 +369,7 @@ internal class DateSheet(
             Flow(context).apply {
                 for (day in DayOfWeek.values()) {
                     val label = Label(
-                        context, PlannerType.bodyMedium, colours.MutedText, gravity = Gravity.CENTER_HORIZONTAL, centred = true
+                        context, BodyMedium, colours.MutedText, gravity = Gravity.CENTER_HORIZONTAL, centred = true
                     )
                     label.text = day.getDisplayName(TextStyle.NARROW, locale)
                     addView(label, weighted())
@@ -392,7 +392,7 @@ internal class DateSheet(
         reminders.contentDescription = "Reminders"
         reminders.setOnClickListener(onToggleReminders)
         val todayButton = PlannerButton(context, colours.PrimaryText, 12f)
-        todayButton.pill.addView(Label(context, PlannerType.labelLarge, colours.PrimaryText, lineBox = true).apply { text = "Today" })
+        todayButton.pill.addView(Label(context, LabelLarge, colours.PrimaryText, lineBox = true).apply { text = "Today" })
         todayButton.setOnClickListener { onSelect.accept(today) }
         addView(
             Flow(context, centred = true).apply {
@@ -406,7 +406,7 @@ internal class DateSheet(
     }
 
     private fun chevron(glyph: String, description: String, months: Long): View =
-        Label(context, TextSpec(28f, 22f, 400), colours.PrimaryText, gravity = Gravity.CENTER, lineBox = true).apply {
+        Label(context, ChevronText, colours.PrimaryText, gravity = Gravity.CENTER, lineBox = true).apply {
             text = glyph
             contentDescription = description
             rippleOver(colours.PrimaryText, context.dp(8f))
