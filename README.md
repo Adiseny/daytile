@@ -4,12 +4,6 @@ https://github.com/user-attachments/assets/d70025df-86f2-4962-9f8f-eacb93eca2bf
 
 Daytile is an offline Android app for planning your day as blocks on a 24-hour timeline.
 
-<p align="center">
-  <img src="docs/readme/daytile-timeline.png" width="240" alt="A full day planned as blocks on the timeline">
-  <img src="docs/readme/daytile-add.gif" width="240" alt="Adding a block: tap an empty time, type a title, tap Add">
-  <img src="docs/readme/daytile-move.gif" width="240" alt="Holding a block to move it, then dragging its lower handle to lengthen it">
-</p>
-
 ## Download
 
 Download the APK from the [latest GitHub release](https://github.com/Adiseny/daytile/releases/latest).
@@ -21,6 +15,12 @@ Tap an empty time to add a block. Tap a block for its actions, hold and drag it 
 Tap the date heading and use the bell at the bottom left to switch reminders on. While they are on, every block reminds you five minutes before it starts, counting down to the start, and again as it starts, counting down to the end. A reminder clears itself when its countdown ends, or as soon as you delete or move the block. Reminders are off until you turn them on.
 
 Blocks take their colour from the time of day they start, and the planner follows the clock rather than the system theme: light by day, dark from 20:00 to 07:00.
+
+<p align="center">
+  <img src="docs/readme/daytile-timeline.png" width="240" alt="A full day planned as blocks on the timeline">
+  <img src="docs/readme/daytile-add.gif" width="240" alt="Adding a block: tap an empty time, type a title, tap Add">
+  <img src="docs/readme/daytile-move.gif" width="240" alt="Holding a block to move it, then dragging its lower handle to lengthen it">
+</p>
 
 <p align="center">
   <img src="docs/readme/daytile-days.gif" width="240" alt="Swiping to the next days, then jumping to a date from the calendar">
