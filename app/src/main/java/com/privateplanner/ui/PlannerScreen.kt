@@ -462,6 +462,8 @@ internal open class PlannerScreen(
 
     override val headerHeightPx: Int get() = header.contentHeight
 
+    override val headerFadeBottomPx: Int get() = header.measuredHeight
+
     override val visibleBottomPx: Int get() = scroll.height - navigationBottom
 
     private fun initialScroll(target: Int, height: Int): Int = initialTimelineScroll(

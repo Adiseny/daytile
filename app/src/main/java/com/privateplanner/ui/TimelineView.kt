@@ -27,8 +27,10 @@ internal interface TimelineHost {
     val palette: PlannerPalette
     val scrollPx: Int
     val viewportHeightPx: Int
-    // The heading's bottom edge: where pinned titles rest and the top scroll zone begins.
+    // The bottom edge of the heading's solid part, where the top scroll zone begins.
     val headerHeightPx: Int
+    // The bottom of the fade beneath it, where pinned titles rest: clear of the tint.
+    val headerFadeBottomPx: Int
     // The viewport's bottom edge above the navigation bar.
     val visibleBottomPx: Int
     fun scrollTimelineBy(delta: Float): Boolean

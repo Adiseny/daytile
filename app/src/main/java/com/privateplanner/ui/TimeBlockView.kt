@@ -60,8 +60,8 @@ internal fun durationReserveDp(
     }
 }
 
-// How far a long tile's title slides down to stay just below the heading. Lengths in dp
-// except where named px.
+// How far a long tile's title slides down to stay just below the heading's fade. Lengths in
+// dp except where named px.
 internal fun titleFollowOffsetPx(
     density: Float,
     scrollPx: Int,
@@ -180,7 +180,7 @@ internal class TimeBlockView(
 
     fun scrolled() {
         if (visualHeight < LongTitlePinMinHeight) return
-        val offset = titleFollowOffsetPx(density, host.scrollPx, heightForMinutes(displayedStartMinutes), visualHeight, host.headerHeightPx)
+        val offset = titleFollowOffsetPx(density, host.scrollPx, heightForMinutes(displayedStartMinutes), visualHeight, host.headerFadeBottomPx)
         if (offset != followOffset) {
             followOffset = offset
             invalidate()
@@ -303,7 +303,7 @@ internal class TimeBlockView(
         canvas.drawRoundRect(0f, 0f, w, h, radius, radius, TilePaint)
 
         val follow = if (meta != null && visualHeight >= LongTitlePinMinHeight) {
-            titleFollowOffsetPx(density, host.scrollPx, heightForMinutes(displayedStartMinutes), visualHeight, host.headerHeightPx)
+            titleFollowOffsetPx(density, host.scrollPx, heightForMinutes(displayedStartMinutes), visualHeight, host.headerFadeBottomPx)
         } else {
             0
         }

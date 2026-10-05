@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A long block's title, kept in view as the day scrolls, rests below the heading's fade. It rested inside the fade, where the heading's tint washed it out.
+
 ## 1.4.1 — 5 October 2026
 
 ### Storage
