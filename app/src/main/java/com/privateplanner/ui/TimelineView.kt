@@ -61,8 +61,8 @@ private class GridLabels(context: Context) {
 private var preparedGridLabels: GridLabels? = null
 
 // Runs on the launch warm-up thread, so the first frame draws the labels instead of
-// laying them out on the main thread. The day measures its own if the density or font
-// scale differ.
+// laying them out on the main thread. The day asks for them only as it first draws, by
+// when they are ready, and measures its own if the density or font scale differ.
 internal fun Context.prepareGridLabels() {
     preparedGridLabels = GridLabels(this)
 }
@@ -105,7 +105,6 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
     private val halfHourPath = Path()
     private val quarterPath = Path()
     private val fiveMinutePath = Path()
-    private val labels = preparedGridLabels?.takeIf { it.fits(context) } ?: GridLabels(context)
     private val tiles = LongSparseArray<TimeBlockView>()
     private val nowBadge = NowBadge(context)
     private var blocks: List<PlannerBlock> = Collections.emptyList()
@@ -150,8 +149,18 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
 
     fun setBlocks(value: List<PlannerBlock>) {
         if (blocks === value) return
+        // A title edit leaves every column in place.
+        var moved = blocks.size != value.size
+        if (!moved) for (index in value.indices) {
+            val before = blocks[index]
+            val after = value[index]
+            if (before.id != after.id || before.startMinutes != after.startMinutes || before.durationMinutes != after.durationMinutes) {
+                moved = true
+                break
+            }
+        }
+        if (moved) layouts = OverlapLayoutCalculator.calculate(value)
         blocks = value
-        layouts = OverlapLayoutCalculator.calculate(value)
         syncTiles()
     }
 
@@ -174,6 +183,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         val end = if (dense) windowStart + ceil(windowHeight / hourPx * 60).toInt() + 90 else Int.MAX_VALUE
         val stale = tiles.clone()
         for (block in blocks) {
+            if (dense && block.startMinutes > end && activeBlockId == 0L) break
             if (dense && block.id != activeBlockId &&
                 (block.endMinutes < windowStart || block.startMinutes > end)
             ) continue
@@ -193,7 +203,8 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
             tiles.remove(stale.keyAt(index))
             removeView(stale.valueAt(index))
         }
-        requestLayout()
+        // Adding/removing a child already requests layout. Existing tiles place only
+        // themselves when their geometry changes; scrolling needs no whole-screen layout.
     }
 
     // Called as the day scrolls: only a dense day's window and pinned titles depend on it.
@@ -270,6 +281,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
     override fun onDraw(canvas: Canvas) {
         val colours = host.palette
         val hidden = if (showsNow) hiddenGridLabelMinutes(minute) else null
+        val labels = preparedGridLabels?.takeIf { it.fits(context) } ?: GridLabels(context).also { preparedGridLabels = it }
         canvas.save()
         canvas.translate(0f, topPx.toFloat())
         canvas.drawPath(hourPath, stroke.apply { color = colours.HourLine })

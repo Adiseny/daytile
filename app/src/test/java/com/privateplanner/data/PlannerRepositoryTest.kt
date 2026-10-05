@@ -4,6 +4,7 @@ import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
+import java.util.function.Supplier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -132,7 +133,8 @@ class PlannerRepositoryTest {
             title = "gym"
         )
         repository.updateTime(
-            id = 0,
+            date = LocalDate.of(2026, 5, 28),
+            id = 1,
             startMinutes = 9 * 60,
             durationMinutes = 100
         )
@@ -187,7 +189,7 @@ class PlannerRepositoryTest {
         )
         val repository = PlannerRepository(dao)
 
-        repository.deleteBlock(1)
+        repository.deleteBlock(date, 1)
         repository.createBlock(
             date = LocalDate.of(2026, 5, 29),
             startMinutes = 10 * 60,
@@ -207,7 +209,7 @@ class PlannerRepositoryTest {
         )
         val repository = PlannerRepository(dao)
 
-        repository.deleteBlock(2)
+        repository.deleteBlock(LocalDate.of(2026, 5, 28), 2)
         repository.createBlock(
             date = LocalDate.of(2026, 5, 29),
             startMinutes = 9 * 60,
@@ -260,13 +262,14 @@ class PlannerRepositoryTest {
         val repository = PlannerRepository(dao)
 
         val result = repository.updateTime(
+            date = LocalDate.of(2026, 5, 29),
             id = 20,
             startMinutes = 9 * 60,
             durationMinutes = 60
         )
 
         assertEquals(PlannerWriteResult.RejectedOverlap, result)
-        val block = dao.getBlock(20)!!
+        val block = dao.getBlock(LocalDate.of(2026, 5, 29).toEpochDay(), 20)!!
         assertEquals(10 * 60, block.startMinutes)
         assertEquals(60, block.durationMinutes)
     }
@@ -281,13 +284,14 @@ class PlannerRepositoryTest {
         val repository = PlannerRepository(dao)
 
         val result = repository.updateTime(
+            date = LocalDate.of(2026, 5, 29),
             id = 20,
             startMinutes = 9 * 60,
             durationMinutes = 60
         )
 
         assertEquals(PlannerWriteResult.RejectedOverlap, result)
-        val block = dao.getBlock(20)!!
+        val block = dao.getBlock(LocalDate.of(2026, 5, 29).toEpochDay(), 20)!!
         assertEquals(9 * 60, block.startMinutes)
         assertEquals(30, block.durationMinutes)
     }
@@ -301,13 +305,14 @@ class PlannerRepositoryTest {
         val repository = PlannerRepository(dao)
 
         val result = repository.updateTime(
+            date = LocalDate.of(2026, 5, 29),
             id = 1,
             startMinutes = 23 * 60 + 55,
             durationMinutes = 60
         )
 
         assertEquals(PlannerWriteResult.Success, result)
-        val block = dao.getBlock(1)!!
+        val block = dao.getBlock(LocalDate.of(2026, 5, 29).toEpochDay(), 1)!!
         assertEquals(23 * 60 + 50, block.startMinutes)
         assertEquals(10, block.durationMinutes)
     }
@@ -326,6 +331,7 @@ class PlannerRepositoryTest {
         val repository = PlannerRepository(dao)
 
         repository.updateTime(
+            date = LocalDate.of(2026, 5, 29),
             id = 4,
             startMinutes = 9 * 60,
             durationMinutes = 60
@@ -339,7 +345,7 @@ class PlannerRepositoryTest {
     }
 
     @Test
-    fun updateTimeReturnsMissingBlockWhenRowCountFailsAfterRead() {
+    fun updateTimeReturnsMissingBlockWhenNoRowIsUpdated() {
         val dao = FakePlannerBlockDao(
             listOf(entity(1, "2026-05-29", "Move me", 9 * 60, 60))
         )
@@ -347,13 +353,14 @@ class PlannerRepositoryTest {
         val repository = PlannerRepository(dao)
 
         val result = repository.updateTime(
+            date = LocalDate.of(2026, 5, 29),
             id = 1,
             startMinutes = 10 * 60,
             durationMinutes = 60
         )
 
         assertEquals(PlannerWriteResult.MissingBlock, result)
-        val block = dao.getBlock(1)!!
+        val block = dao.getBlock(LocalDate.of(2026, 5, 29).toEpochDay(), 1)!!
         assertEquals(9 * 60, block.startMinutes)
         assertEquals(60, block.durationMinutes)
     }
@@ -363,7 +370,7 @@ class PlannerRepositoryTest {
         val dao = FakePlannerBlockDao(emptyList())
         val repository = PlannerRepository(dao)
 
-        val result = repository.updateTitle(1, "Rename")
+        val result = repository.updateTitle(LocalDate.of(2026, 5, 29), 1, "Rename")
 
         assertEquals(PlannerWriteResult.MissingBlock, result)
     }
@@ -375,10 +382,10 @@ class PlannerRepositoryTest {
         )
         val repository = PlannerRepository(dao)
 
-        val result = repository.updateTitle(1, "A".repeat(MaxTitleLength + 1))
+        val result = repository.updateTitle(LocalDate.of(2026, 5, 29), 1, "A".repeat(MaxTitleLength + 1))
 
         assertEquals(PlannerWriteResult.InvalidInput, result)
-        assertEquals("Original", dao.getBlock(1)!!.title)
+        assertEquals("Original", dao.getBlock(LocalDate.of(2026, 5, 29).toEpochDay(), 1)!!.title)
     }
 
     @Test
@@ -386,7 +393,7 @@ class PlannerRepositoryTest {
         val dao = FakePlannerBlockDao(emptyList())
         val repository = PlannerRepository(dao)
 
-        val result = repository.deleteBlock(1)
+        val result = repository.deleteBlock(LocalDate.of(2026, 5, 29), 1)
 
         assertEquals(PlannerWriteResult.MissingBlock, result)
     }
@@ -410,7 +417,7 @@ class PlannerRepositoryTest {
         )
 
         assertEquals(PlannerWriteResult.RejectedOverlap, result)
-        assertNull(dao.getBlock(99))
+        assertNull(dao.getBlock(date.toEpochDay(), 99))
     }
 
     @Test
@@ -432,15 +439,16 @@ class PlannerRepositoryTest {
         )
 
         assertEquals(PlannerWriteResult.MissingBlock, result)
-        assertEquals("Existing", dao.getBlock(1)!!.title)
+        assertEquals("Existing", dao.getBlock(date.toEpochDay(), 1)!!.title)
     }
 
     private class FakePlannerBlockDao(
         initialBlocks: List<PlannerBlock>
     ) : PlannerBlockDao {
-        override fun <R> withTransaction(block: () -> R): R = block()
+        override fun <R> withTransaction(block: Supplier<R>): R = block.get()
 
         private val blocks = initialBlocks.toMutableList()
+        private var lastId = initialBlocks.maxOfOrNull { it.id } ?: 0L
         val inserted = mutableListOf<PlannerBlock>()
         val overlapQueries = mutableListOf<OverlapQuery>()
         var nextUpdateTimeRowCount: Int? = null
@@ -510,14 +518,15 @@ class PlannerRepositoryTest {
                 .sortedBy { it.id }
 
         override fun insertBlock(block: PlannerBlock) {
-            blocks += block
-            inserted += block
+            val stored = if (block.id == 0L) block.copy(id = ++lastId) else block
+            blocks += stored
+            inserted += stored
         }
 
-        override fun updateTitle(id: Long, title: String): Int {
+        override fun updateTitle(dateEpochDay: Long, id: Long, title: String): Int {
             var updated = 0
             blocks.replaceAll { existing ->
-                if (existing.id == id) {
+                if (existing.date.toEpochDay() == dateEpochDay && existing.id == id) {
                     updated = 1
                     PlannerBlock(
                         id = existing.id,
@@ -533,14 +542,14 @@ class PlannerRepositoryTest {
             return updated
         }
 
-        override fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int): Int {
+        override fun updateTime(dateEpochDay: Long, id: Long, startMinutes: Int, durationMinutes: Int): Int {
             nextUpdateTimeRowCount?.let { result ->
                 nextUpdateTimeRowCount = null
                 return result
             }
             var updated = 0
             blocks.replaceAll { existing ->
-                if (existing.id == id) {
+                if (existing.date.toEpochDay() == dateEpochDay && existing.id == id) {
                     updated = 1
                     PlannerBlock(
                         id = existing.id,
@@ -556,14 +565,14 @@ class PlannerRepositoryTest {
             return updated
         }
 
-        override fun deleteBlockById(id: Long): Int {
+        override fun deleteBlock(dateEpochDay: Long, id: Long): Int {
             val before = blocks.size
-            blocks.removeAll { it.id == id }
+            blocks.removeAll { it.date.toEpochDay() == dateEpochDay && it.id == id }
             return before - blocks.size
         }
 
-        override fun getBlock(id: Long): PlannerBlock? {
-            return blocks.firstOrNull { it.id == id }
+        override fun getBlock(dateEpochDay: Long, id: Long): PlannerBlock? {
+            return blocks.firstOrNull { it.date.toEpochDay() == dateEpochDay && it.id == id }
         }
 
         private fun getSortedBlocksForDate(dateEpochDay: Long): List<PlannerBlock> {

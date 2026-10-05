@@ -51,16 +51,18 @@ internal fun dateFormatter(kind: Int, locale: Locale): DateTimeFormatter =
     DateFormatters[kind]?.takeIf { it.locale == locale }
         ?: DateTimeFormatter.ofPattern(DatePatterns[kind], locale).also { DateFormatters[kind] = it }
 
-// Launch's main-thread work that can be done ahead, on the warm-up thread: the palettes,
-// the grid labels, and the locale's day and month names (the first format loads them).
-// Whatever is not ready in time is done where it was.
+// Launch's main-thread work that can be done ahead, on the warm-up thread, in the order
+// the main thread comes to it: the palette as the window is styled, the locale's day and
+// month names (the first format loads them) as the heading is set, the grid labels at the
+// first draw, and the date sheet's names when it is first opened. Whatever is not ready in
+// time is done where it was.
 internal fun Context.warmUpInterface() {
     val now = TimeSnapper.localNowMillis()
     displayedPaletteForMinute(TimeSnapper.minuteOfDay(now))
-    prepareGridLabels()
     val locale = Locale.getDefault()
     val today = TimeSnapper.dateOf(now)
     today.format(dateFormatter(HeadingDate, locale))
+    prepareGridLabels()
     prepareDateSheet(locale, today)
 }
 
@@ -74,20 +76,19 @@ private const val SnackbarMillis = 4_000
 
 // The planner: the scrolling day under its heading, with at most one snackbar and one
 // sheet above. It draws what the view model holds, and nothing beneath it: the window's
-// background is the paper.
-internal class PlannerScreen(
+// background is the paper. Open so that a test can hear its haptics.
+internal open class PlannerScreen(
     context: Context,
     val viewModel: PlannerViewModel,
-    // Told when leaving with back should be the planner's rather than the system's.
-    private val onBackEnabled: (Boolean) -> Unit = {},
-    private val haptics: (Int) -> Unit = {}
+    // Run when `backEnabled` may have changed.
+    private val onBackChanged: Runnable = Runnable {}
 ) : FrameLayout(context), TimelineHost {
     private val density = resources.displayMetrics.density
     private val hourPx = HourHeight * density
     private val locale: Locale = resources.configuration.locales[0]
 
     // Before the views below, which read it as they are built.
-    override var palette: PlannerPalette = displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis()))
+    final override var palette: PlannerPalette = displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis()))
         private set
 
     private val scroll = TimelineScroll(context)
@@ -125,14 +126,17 @@ internal class PlannerScreen(
             applyInsets(insets)
             insets
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) followKeyboard()
+        followKeyboard()
+        // Nothing is acted on while another app draws over the planner.
+        filterTouchesWhenObscured = true
+        applyBars()
     }
 
     // --- Lifecycle: the view model is followed, and the clock runs, only while visible --
 
     fun start() {
         tick()
-        viewModel.onChange = { render() }
+        viewModel.onChange = Runnable { render() }
         render()
     }
 
@@ -193,7 +197,7 @@ internal class PlannerScreen(
         day.setBlocks(viewModel.blocks)
         showSheet(null, null)
         snackbars.show(viewModel.snackbar)
-        onBackEnabled(backEnabled)
+        onBackChanged.run()
     }
 
     private fun showDate() {
@@ -213,7 +217,7 @@ internal class PlannerScreen(
             else -> header.show(date.format(dateFormatter(FullDate, locale)), null)
         }
         day.showsNow = date == today
-        onBackEnabled(backEnabled)
+        onBackChanged.run()
     }
 
     // Back closes a sheet, then a message, then returns to today; after that it leaves.
@@ -277,7 +281,9 @@ internal class PlannerScreen(
             // exception for a fifth kind that does not exist.
             else -> {
                 title = "Choose date"
-                DateSheet(context, palette, viewModel.selectedDate, today, month, { toggleReminders(it) }) { viewModel.jumpTo(it) }
+                DateSheet(context, palette, viewModel.selectedDate, today, month, { toggleReminders(!viewModel.remindersOn) }) {
+                    viewModel.jumpTo(it)
+                }
             }
         }
         // Scrim and sheet go straight into the screen, above everything added before them.
@@ -285,6 +291,8 @@ internal class PlannerScreen(
             setBackgroundColor(palette.Scrim)
             contentDescription = "Dismiss $title"
             setOnClickListener { viewModel.dismissSheet() }
+            // For touch and for accessibility services; from a keyboard, back dismisses.
+            isFocusable = false
             this@PlannerScreen.addView(this, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         }
         sheetFrame = FrameLayout(context).apply {
@@ -362,14 +370,15 @@ internal class PlannerScreen(
             }
         }
         header.statusTop = statusTop
-        snackbars.setPadding(context.px(16f), context.px(16f), context.px(16f), context.px(16f) + navigationBottom)
+        val edge = context.px(16f)
+        snackbars.setPadding(edge, edge, edge, edge + navigationBottom)
         if (!imeAnimating) {
             imeBottom = keyboard
             placeSheet()
         }
     }
 
-    // The sheet rises with the keyboard, frame by frame.
+    // The sheet rises with the keyboard, frame by frame, where the platform reports its frames.
     private fun followKeyboard() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         setWindowInsetsAnimationCallback(object : WindowInsetsAnimation.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
@@ -476,7 +485,6 @@ internal class PlannerScreen(
     }
 
     override fun haptic(constant: Int) {
-        haptics(constant)
         performHapticFeedback(when {
             constant == HapticFeedbackConstants.SEGMENT_TICK && Build.VERSION.SDK_INT < 34 -> HapticFeedbackConstants.CLOCK_TICK
             constant == HapticFeedbackConstants.TEXT_HANDLE_MOVE && Build.VERSION.SDK_INT < 27 -> HapticFeedbackConstants.CLOCK_TICK
@@ -518,6 +526,10 @@ internal class PlannerScreen(
             isVerticalScrollBarEnabled = false
             // Restored with the activity, as a scroll position should be.
             id = android.R.id.list
+            // Keys take the window out of touch mode, where the platform shades whatever
+            // holds the focus: left to that, the whole day once a sheet typed into from a
+            // keyboard has closed.
+            defaultFocusHighlightEnabled = false
         }
 
         override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
@@ -547,6 +559,7 @@ internal class PlannerScreen(
         private var subtitle: String? = null
         private var titleBlock: TextBlock? = null
         private var subtitleBlock: TextBlock? = null
+        private var textWidth = -1
         private val button = Rect()
         // In its colour from the start: setting it during the first draw would ask for a second.
         private var pressColour = palette.PrimaryText
@@ -565,12 +578,17 @@ internal class PlannerScreen(
 
         init {
             isClickable = true
+            // Its own ripple shows the focus, in the button's shape; the platform's
+            // highlight would shade the whole band.
+            defaultFocusHighlightEnabled = false
             setOnClickListener { viewModel.openDateJump() }
         }
 
         fun show(title: String, subtitle: String?) {
+            if (this.title == title && this.subtitle == subtitle) return
             this.title = title
             this.subtitle = subtitle
+            textWidth = -1
             contentDescription = "Jump date, $title"
             requestLayout()
             invalidate()
@@ -578,11 +596,14 @@ internal class PlannerScreen(
 
         override fun onMeasure(widthSpec: Int, heightSpec: Int) {
             val width = MeasureSpec.getSize(widthSpec)
-            val textWidth = width - context.px(16f) * 2
-            val first = textBlock(title, titlePaint, 0f, textWidth, maxLines = 1, ellipsis = true)
-            val second = subtitle?.let { textBlock(it, subtitlePaint, 0f, textWidth, maxLines = 1, ellipsis = true) }
-            titleBlock = first
-            subtitleBlock = second
+            val available = width - context.px(16f) * 2
+            if (textWidth != available) {
+                textWidth = available
+                titleBlock = textBlock(title, titlePaint, 0f, available, maxLines = 1, ellipsis = true)
+                subtitleBlock = subtitle?.let { textBlock(it, subtitlePaint, 0f, available, maxLines = 1, ellipsis = true) }
+            }
+            val first = titleBlock!!
+            val second = subtitleBlock
             val buttonWidth = max(first.width, second?.width ?: 0) + context.px(16f) * 2
             val buttonHeight = first.height + (second?.height ?: 0) + context.px(4f) * 2
             val left = Math.round((width - buttonWidth) / 2f)
@@ -610,7 +631,7 @@ internal class PlannerScreen(
                         val eased = t * t * t * (t * (t * 6f - 15f) + 10f)
                         withAlpha(colours.Paper, HeaderTintAlpha * (1f - eased))
                     },
-                    FloatArray(ScrimSteps + 1) { it.toFloat() / ScrimSteps },
+                    null,
                     Shader.TileMode.CLAMP
                 )
             }
@@ -700,7 +721,7 @@ internal class PlannerScreen(
                 accessibility.getRecommendedTimeoutMillis(
                     SnackbarMillis,
                     AccessibilityManager.FLAG_CONTENT_ICONS or AccessibilityManager.FLAG_CONTENT_TEXT or
-                        if (next is PlannerSnackbar.Deleted) AccessibilityManager.FLAG_CONTENT_CONTROLS else 0
+                        if (next.deletedBlock != null) AccessibilityManager.FLAG_CONTENT_CONTROLS else 0
                 )
             } else {
                 SnackbarMillis
@@ -718,7 +739,7 @@ internal class PlannerScreen(
             private val message = Label(
                 context, TextSpec(14f, 18f, 600), 0, maxLines = 1, ellipsis = true, lineBox = true
             )
-            private val undo = if (item is PlannerSnackbar.Deleted) {
+            private val undo = if (item.deletedBlock != null) {
                 Label(context, TextSpec(14f, 18f, 600), 0, maxLines = 1, gravity = Gravity.CENTER_VERTICAL, lineBox = true)
             } else {
                 null
@@ -731,7 +752,7 @@ internal class PlannerScreen(
             init {
                 setWillNotDraw(false)
                 setPadding(context.px(16f), context.px(12f), context.px(14f), context.px(12f))
-                message.text = if (item is PlannerSnackbar.Message) item.message else "Deleted"
+                message.text = item.message
                 addView(message, Cell(0, LayoutParams.WRAP_CONTENT, 1f))
                 if (undo != null) {
                     undo.text = "Undo"

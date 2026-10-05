@@ -27,23 +27,26 @@ class PlannerApp : Application() {
     // None of the three touches its context until it is first used.
     private val database = PlannerDatabase(this)
 
-    val reminders = Reminders(this)
+    val reminders = Reminders(this, database)
 
-    val repository: PlannerRepository = PlannerRepository(database) { reminders.syncSoon(repository) }
+    val repository = PlannerRepository(database) { reminders.syncSoon() }
+
+    // The splash this process last asked the system for, which MainActivity records.
+    var splashLight: Boolean? = null
 
     override fun onCreate() {
         super.onCreate()
-        // Launch's disk work, begun while the activity is still being created: the
-        // settings are in memory when the planner first reads them, and SQLite is
-        // open (and any old schema migrated) before the first query, which queues
-        // behind this and puts the day's blocks in the first frame rather than a later one.
-        // Only a head start: a failure is left for the real first use to report as before,
-        // rather than crashing a process that may have started for a broadcast. Receivers
-        // read both too, so this runs for every process start.
+        // Launch's disk and system work, begun while the activity is still being created:
+        // SQLite is open (and an earlier release's database brought over) before the first
+        // query, which queues behind this and puts the day's blocks in the first frame
+        // rather than a later one, and the reminders switch is known before anything on the
+        // main thread asks. Only a head start: a failure is left for the real first use to
+        // report as before, rather than crashing a process that may have started for a
+        // broadcast. Receivers need both too, so this runs for every process start.
         Worker.execute {
             runCatching {
-                plannerSettings()
                 database.open()
+                reminders.enabled
             }
         }
     }

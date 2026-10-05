@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Storage
+
+- Schema 8 keeps the blocks in one table, in the order the planner reads them: by day, start and id, with no row ids, no index beside it and no table counting ids. A block takes about 34 bytes where it took 46, so a year of eight blocks a day is about 110 KB instead of 150 KB, and a new database is 12 KB instead of 20 KB. An existing database is rebuilt in that order when first opened, keeping every block and id; SQLite's own table of ids cannot be dropped, so it stays in such a file, empty, on one 4 KB page. The last id given out is kept in the file's header, so a deleted block's id is still never used again.
+- The planner keeps no settings file. The reminders switch is the reminder receiver's own enabled state, which the system already stored, and the splash colour is told to the system when the app is left, once per process and when it changes. A folder and a file, 16 KB on the test emulator, are no longer made, and no settings are read as a process starts.
+- Updating removes what earlier releases and their libraries left beside the database: the two settings files, the profile installer's notes and Room's lock file, with the folders that empties. The reminders switch is carried over to the receiver first. On the test emulator the data of a copy of 1.3.3 holding three blocks went from 258 KB to 57 KB, and that of a copy of 1.4.0 from 78 KB to 57 KB.
+- After a first use, one block added, the app's data is 53 KB on the test emulator against 78 KB for 1.4.0.
+- The unsigned release APK is 110 KB, against 116 KB. The app's name, the launcher icon's background colour and the ids of a block's accessibility actions are written where they are used, which removes three resource types. The reminder chimes are encoded 5% smaller and decode to the same samples. The Apache licence text for the Kotlin standard library moves from the APK to `docs/kotlin-licence.txt`: no class of that library ships, and the release build now fails if one would.
+
+### Responsiveness and correctness
+
+- Entering a title from a physical keyboard no longer leaves the whole day shaded until the next touch. Since 1.4.0 the platform drew its focus highlight over the day's scroll view, and over the whole heading band and each button's touch area when they held the focus; the heading and buttons now show focus by their own ripple alone. A sheet's scrim no longer takes keyboard focus; back closes the sheet.
+- At launch the grid labels and the heading's date are ready when the main thread reaches them. The warm-up thread lost that race in about half of launches on the test emulator, which cost the main thread 1.5 ms.
+- Finding the duration of a title never used before reads the blocks themselves: 0.6 ms after ten years of blocks on the test emulator, where reading through the day index took 2.8 ms.
+- Swiping through days reads each missing day once, and reads still queued for days already left are skipped.
+- A moved block lays out only its time label again and a renamed one only its text; a rename leaves every column in place. Dragging near an edge schedules frames only while the finger is in an edge zone. The heading is laid out once per change of date or width.
+- A reminder's block is found among today's blocks, or tomorrow's for a warning shown before midnight, so nothing is stored in the notification for it.
+
+### Removed
+
+- The migrations from database schemas 1 to 4. No published release used them: 1.0.0 shipped schema 5.
+
+### Changed
+
+- Clearing the app's storage switches reminders off on Android 13 and later, as before. On Android 8 to 12 the system keeps the receiver's state through a clear, so the switch stays as it was.
+
+Plans opened by this version cannot be opened by 1.4.0 or earlier.
+
 ## 1.4.0 — 4 October 2026
 
 ### Storage

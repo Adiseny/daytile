@@ -92,8 +92,7 @@ android {
         }
         resources {
             // Build and reflection metadata nothing reads at runtime; the app ships no
-            // Kotlin reflection, the only reader of the module and builtins files. The
-            // standard library's licence is src/main/resources/META-INF/LICENSE-kotlin.txt.
+            // Kotlin reflection, the only reader of the module and builtins files.
             excludes += setOf(
                 "META-INF/*.kotlin_module",
                 "kotlin/**",

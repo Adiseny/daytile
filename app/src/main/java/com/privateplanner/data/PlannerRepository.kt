@@ -21,7 +21,7 @@ class PlannerRepository(
     private val dao: PlannerBlockDao,
     // Called after every successful write so the pending reminder alarm is re-armed
     // from one place; no call site can forget to keep reminders in step.
-    private val onWrite: () -> Unit = {}
+    private val onWrite: Runnable = Runnable {}
 ) {
     fun getBlocksForDate(date: LocalDate): List<PlannerBlock> {
         return dao.getBlocksForDate(date.toEpochDay())
@@ -64,42 +64,42 @@ class PlannerRepository(
         }
     }
 
-    fun updateTitle(id: Long, title: String): PlannerWriteResult {
+    // A block is named by its day and id, as it is stored.
+    fun updateTitle(date: LocalDate, id: Long, title: String): PlannerWriteResult {
         return writeCatching {
-            rowResult(dao.updateTitle(id, normalizeTitle(title)))
+            rowResult(dao.updateTitle(date.toEpochDay(), id, normalizeTitle(title)))
         }
     }
 
-    fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int): PlannerWriteResult {
+    fun updateTime(date: LocalDate, id: Long, startMinutes: Int, durationMinutes: Int): PlannerWriteResult {
         return writeCatching {
-            dao.withTransaction transaction@{
-                val current = dao.getBlock(id)
-                    ?: return@transaction PlannerWriteResult.MissingBlock
+            dao.withTransaction {
                 // The clamped duration always fits after the snapped start.
                 val start = TimeSnapper.floorToValidStart(startMinutes)
                 val duration = TimeSnapper.clampDuration(
                     startMinutes = start,
                     durationMinutes = TimeSnapper.snapDurationToNearest(durationMinutes)
                 )
-                if (!overlapPolicy(current.date, start, start + duration, id).canPlace(start, duration)) {
+                if (!overlapPolicy(date, start, start + duration, id).canPlace(start, duration)) {
                     PlannerWriteResult.RejectedOverlap
                 } else {
-                    rowResult(dao.updateTime(id, start, duration))
+                    // A block that has gone changes no row.
+                    rowResult(dao.updateTime(date.toEpochDay(), id, start, duration))
                 }
             }
         }
     }
 
-    fun deleteBlock(id: Long): PlannerWriteResult {
+    fun deleteBlock(date: LocalDate, id: Long): PlannerWriteResult {
         return writeCatching {
-            rowResult(dao.deleteBlockById(id))
+            rowResult(dao.deleteBlock(date.toEpochDay(), id))
         }
     }
 
     fun restoreBlock(block: PlannerBlock): PlannerWriteResult {
         return writeCatching {
             dao.withTransaction transaction@{
-                if (dao.getBlock(block.id) != null) {
+                if (dao.getBlock(block.date.toEpochDay(), block.id) != null) {
                     return@transaction PlannerWriteResult.MissingBlock
                 }
                 val title = normalizeTitle(block.title)
@@ -117,18 +117,6 @@ class PlannerRepository(
                 PlannerWriteResult.Success
             }
         }
-    }
-
-    fun getBlock(id: Long): PlannerBlock? {
-        return dao.getBlock(id)
-    }
-
-    fun getNextStart(dateEpochDay: Long, startMinutes: Int): Long? {
-        return dao.getNextStart(dateEpochDay, startMinutes)
-    }
-
-    fun getBlocksStartingAt(date: LocalDate, startMinutes: Int): List<PlannerBlock> {
-        return dao.getBlocksStartingAt(date.toEpochDay(), startMinutes)
     }
 
     private fun overlapPolicy(
@@ -152,7 +140,7 @@ class PlannerRepository(
             if (BuildConfig.DEBUG) throw exception
             PlannerWriteResult.Failed
         }
-        if (result == PlannerWriteResult.Success) onWrite()
+        if (result == PlannerWriteResult.Success) onWrite.run()
         return result
     }
 }

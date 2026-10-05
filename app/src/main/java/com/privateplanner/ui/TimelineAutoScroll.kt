@@ -17,9 +17,7 @@ private const val AutoScrollBottomMaxStep = 42f
 internal class EdgeAutoScroll(
     private val host: TimelineHost,
     density: Float,
-    private val pointerViewportY: () -> Float,
-    private val enabled: () -> Boolean,
-    private val onScrolled: () -> Unit
+    private val tile: TimeBlockView
 ) : Choreographer.FrameCallback {
     private val visibleTopPx = host.headerHeightPx.toFloat()
     private val visibleBottomPx = host.visibleBottomPx.toFloat()
@@ -28,13 +26,34 @@ internal class EdgeAutoScroll(
     private val topMaxStepPx = AutoScrollTopMaxStep * density
     private val bottomMaxStepPx = AutoScrollBottomMaxStep * density
     private var lastFrameNanos = 0L
-    private var running = true
+    private var running = false
+    private var step = 0f
 
     init {
-        Choreographer.getInstance().postFrameCallback(this)
+        update()
+    }
+
+    // Pointer events choose the speed. Holding a tile in the middle of the screen
+    // needs no frame callbacks; entering an edge starts them again.
+    fun update() {
+        step = if (tile.scrollsAtEdges) TimelineGeometry.edgeAutoScrollDelta(
+            pointerViewportY = tile.pointerViewportY,
+            visibleTopPx = visibleTopPx,
+            visibleBottomPx = visibleBottomPx,
+            topReachPx = topReachPx,
+            bottomReachPx = bottomReachPx,
+            topMaxStepPx = topMaxStepPx,
+            bottomMaxStepPx = bottomMaxStepPx
+        ) else 0f
+        if (step == 0f) stop() else if (!running) {
+            running = true
+            lastFrameNanos = 0L
+            Choreographer.getInstance().postFrameCallback(this)
+        }
     }
 
     fun stop() {
+        if (!running) return
         running = false
         Choreographer.getInstance().removeFrameCallback(this)
     }
@@ -43,18 +62,9 @@ internal class EdgeAutoScroll(
         if (!running) return
         val previousFrameNanos = lastFrameNanos
         lastFrameNanos = frameNanos
-        if (previousFrameNanos != 0L && enabled()) {
+        if (previousFrameNanos != 0L) {
             val frameMillis = (frameNanos - previousFrameNanos) / 1_000_000f
-            val delta = TimelineGeometry.edgeAutoScrollDelta(
-                pointerViewportY = pointerViewportY(),
-                visibleTopPx = visibleTopPx,
-                visibleBottomPx = visibleBottomPx,
-                topReachPx = topReachPx,
-                bottomReachPx = bottomReachPx,
-                topMaxStepPx = topMaxStepPx,
-                bottomMaxStepPx = bottomMaxStepPx
-            ) * (frameMillis / AutoScrollReferenceFrameMillis)
-            if (delta != 0f && host.scrollTimelineBy(delta)) onScrolled()
+            if (host.scrollTimelineBy(step * (frameMillis / AutoScrollReferenceFrameMillis))) tile.edgeScrolled()
         }
         Choreographer.getInstance().postFrameCallback(this)
     }

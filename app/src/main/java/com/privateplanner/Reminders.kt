@@ -10,30 +10,27 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
+import com.privateplanner.data.PlannerBlockDao
 import com.privateplanner.domain.BlockLayouts
-import com.privateplanner.data.PlannerRepository
 import com.privateplanner.domain.OverlapLayoutCalculator
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
+import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.abs
 
-private const val EnabledKey = "enabled"
 // A channel's sound is fixed when it is created, so the two moments need two
 // channels rather than one. That also lets the warning be silenced on its own
-// while the start stays audible. Channels replaced along the way are deleted
-// rather than left behind in system settings.
+// while the start stays audible.
 private const val UpcomingChannel = "reminders.upcoming"
 private const val StartChannel = "reminders.start"
-private val LegacyChannels = listOf("reminders", "reminders.2")
 private const val ExtraEpochMinute = "minute"
 
 // Enough warning to finish what you are doing and get to the next thing.
@@ -44,15 +41,19 @@ private const val LeadMinutes = 5
 private const val NoAlarm = Long.MIN_VALUE
 private const val UnknownAlarm = Long.MAX_VALUE
 
-// One switch, one pending alarm. A block has two moments worth a notification: the
-// warning, LeadMinutes before it starts, and the start itself. Reminders arm the
-// nearer of those two moments across all blocks; firing it posts whatever is due at
-// that minute and arms the moment after. A reboot, a clock change and every write
-// all reduce to the same `sync` call, so there is no per-block alarm state to drift,
-// leak or reconcile. Apart from the switch itself, everything here runs on the worker
-// thread, one sync at a time: each reads the planner as its turn comes, so the last always
-// reflects the latest write.
-class Reminders(private val context: Context) {
+// One switch, one pending alarm. The switch is the receiver's own state: the receiver
+// exists for reminders alone, so it is enabled only while they are on, and the system
+// keeps that across restarts and updates with no file of the planner's. Off, as it is
+// until someone turns it on, a reboot or a clock change does not start the process to
+// find nothing to do. A block has two moments worth a notification: the warning,
+// LeadMinutes before it starts, and the start itself. Reminders arm the nearer of those
+// two moments across all blocks; firing it posts whatever is due at that minute and arms
+// the moment after. A reboot, a clock change and every write all reduce to the same
+// `sync` call, so there is no per-block alarm state to drift, leak or reconcile. Apart
+// from the switch itself, everything here runs on the worker thread, one sync at a time:
+// each reads the planner's blocks as its turn comes, so the last always reflects the
+// latest write.
+class Reminders(private val context: Context, private val blocks: PlannerBlockDao) {
     // Notifications outlive the process, so this starts pessimistic: one query settles
     // it, and afterwards writes skip the notification service entirely.
     private var mayBeShowing = true
@@ -74,10 +75,15 @@ class Reminders(private val context: Context) {
     // errand rather than something every post should pay for.
     private var channelsReady = false
 
-    // The receiver exists for reminders alone, so it is enabled only while the switch is
-    // on. Off, as it is until someone turns it on, a reboot or a clock change no longer
-    // starts the process to find nothing to do. The system keeps the setting across
-    // restarts and updates; the first sync in a process restates it, and later ones know.
+    // The switch as this process knows it: asked of the system once, by the worker as the
+    // process starts, and afterwards changed here at once and told to the system by the
+    // sync that follows. Whoever asks first also brings over an earlier release's switch,
+    // so that none can see the receiver before it has been.
+    @Volatile
+    private var switch: Boolean? = null
+
+    // What the system was last told. The first sync in a process restates it, which also
+    // settles a receiver nobody has switched either way; later ones know.
     private var receiverOn: Boolean? = null
 
     // Once switching off has cleared persistent alarms and notifications, planner writes
@@ -87,53 +93,50 @@ class Reminders(private val context: Context) {
     private var settledOff = false
 
     var enabled: Boolean
-        get() = context.plannerSettings().getBoolean(EnabledKey, false)
-        set(value) {
+        get() = switch ?: synchronized(this) {
+            switch ?: run {
+                if (File(context.dataDir, "shared_prefs").exists()) context.leaveEarlierReleases()
+                (context.packageManager.getComponentEnabledSetting(context.reminderReceiver()) ==
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED).also { switch = it }
+            }
+        }
+        set(value) = synchronized(this) {
             settledOff = false
-            context.plannerSettings().edit().putBoolean(EnabledKey, value).apply()
+            switch = value
         }
 
     // Fire and forget: the caller, usually a write the user is waiting on, carries on at
     // once and the reminder follows on the worker thread, behind what is already queued
     // there. The work is done even if the screen has gone by then.
-    fun syncSoon(
-        repository: PlannerRepository,
-        firedMinute: Long = -1L,
-        clockChanged: Boolean = false,
-        then: () -> Unit = {}
-    ) {
+    fun syncSoon(firedMinute: Long = -1L, clockChanged: Boolean = false, then: Runnable? = null) {
         if (settledOff && !enabled) {
-            then()
+            then?.run()
             return
         }
         Worker.execute {
             try {
-                sync(repository, firedMinute, clockChanged)
+                sync(firedMinute, clockChanged)
             } finally {
-                then()
+                then?.run()
             }
         }
     }
 
     // Everything below is binder traffic and disk, so it stays on the worker thread.
-    fun sync(repository: PlannerRepository, firedMinute: Long = -1L, clockChanged: Boolean = false) {
+    fun sync(firedMinute: Long = -1L, clockChanged: Boolean = false) {
         val on = enabled
         if (!on && settledOff) return
         settledOff = false
         if (receiverOn != on) {
-            context.packageManager.setComponentEnabledSetting(
-                ComponentName(context, ReminderReceiver::class.java),
-                if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                PackageManager.DONT_KILL_APP
-            )
+            context.switchReminderReceiver(on)
             receiverOn = on
         }
         val nowMinute = Math.floorDiv(TimeSnapper.localNowMillis(), TimeSnapper.MillisPerMinute)
-        if (firedMinute >= 0 || mayBeShowing) show(repository, on, nowMinute, firedMinute, clockChanged)
+        if (firedMinute >= 0 || mayBeShowing) show(on, nowMinute, firedMinute, clockChanged)
 
         val after = maxOf(nowMinute, firedMinute)
-        val event = if (on) nextEvent(repository, after) else NoAlarm
-        val at = if (event == NoAlarm) 0L else millisAt(dateOf(event), minuteOf(event))
+        val event = if (on) nextEvent(after) else NoAlarm
+        val at = if (event == NoAlarm) 0L else millisAt(LocalDate.ofEpochDay(dayOf(event)), minuteOf(event))
         // Most writes (a rename, an edit on another day) leave the next moment alone,
         // and with reminders off there is never anything to arm. Both land here, and
         // neither reaches a system service.
@@ -167,38 +170,38 @@ class Reminders(private val context: Context) {
     // The first block after `after` owns the nearest moment: its warning if that has
     // not passed, otherwise its start. Only when the warning has passed can a later
     // block's warning still land first, which is the one extra lookup.
-    private fun nextEvent(repository: PlannerRepository, after: Long): Long {
-        val first = repository.startAfter(after) ?: return NoAlarm
+    private fun nextEvent(after: Long): Long {
+        val first = startAfter(after) ?: return NoAlarm
         if (first - LeadMinutes > after) return first - LeadMinutes
-        val later = repository.startAfter(after + LeadMinutes) ?: return first
+        val later = startAfter(after + LeadMinutes) ?: return first
         return minOf(first, later - LeadMinutes)
     }
+
+    // The first block starting strictly after `minute`, as an epoch minute.
+    private fun startAfter(minute: Long): Long? = blocks.getNextStart(dayOf(minute + 1), minuteOf(minute + 1))
 
     // What is showing is made to equal what should be showing: every block inside one of
     // its two windows, and nothing else. The countdown notification is posted under the
     // block's negated id so that both can stand at once and each is cancelled on its own
     // terms. Re-posting an id updates it in place, so a block that is moved or resized
     // corrects itself instead of going stale.
-    private fun show(
-        repository: PlannerRepository,
-        on: Boolean,
-        nowMinute: Long,
-        firedMinute: Long,
-        clockChanged: Boolean
-    ) {
+    private fun show(on: Boolean, nowMinute: Long, firedMinute: Long, clockChanged: Boolean) {
         val manager = context.getSystemService(NotificationManager::class.java)
         val due = LinkedHashMap<Int, PlannerBlock>(4)
         if (on && firedMinute >= 0) {
-            repository.getBlocksStartingAt(dateOf(firedMinute), minuteOf(firedMinute))
-                .forEach { due[it.id.toInt()] = it }
+            blocks.getBlocksStartingAt(dayOf(firedMinute), minuteOf(firedMinute)).forEach { due[it.id.toInt()] = it }
             val warned = firedMinute + LeadMinutes
-            repository.getBlocksStartingAt(dateOf(warned), minuteOf(warned))
-                .forEach { due[-it.id.toInt()] = it }
+            blocks.getBlocksStartingAt(dayOf(warned), minuteOf(warned)).forEach { due[-it.id.toInt()] = it }
         }
+        val today = dayOf(nowMinute)
         val active = manager.activeNotifications
         active.forEach { posted ->
-            val block = if (on) repository.getBlock(abs(posted.id).toLong()) else null
-            if (block != null && showsAt(block, nowMinute, posted.id < 0)) {
+            val upcoming = posted.id < 0
+            val id = abs(posted.id).toLong()
+            // A block is stored under its day. One with a reminder still due is today's or,
+            // warned of in the minutes before midnight, tomorrow's.
+            val block = if (!on) null else blocks.getBlock(today, id) ?: if (upcoming) blocks.getBlock(today + 1, id) else null
+            if (block != null && showsAt(block, nowMinute, upcoming)) {
                 due[posted.id] = block
             } else {
                 manager.cancel(posted.id)
@@ -212,7 +215,9 @@ class Reminders(private val context: Context) {
             // process: after the first run there is nothing to change.
             val ids = manager.notificationChannels.map { it.id }
             if (ids.size != 2 || UpcomingChannel !in ids || StartChannel !in ids) {
-                LegacyChannels.forEach(manager::deleteNotificationChannel)
+                // The channels these two replaced, not left behind in system settings.
+                manager.deleteNotificationChannel("reminders")
+                manager.deleteNotificationChannel("reminders.2")
                 manager.createNotificationChannels(
                     listOf(
                         channel(UpcomingChannel, "Coming up", "reminder_upcoming"),
@@ -235,7 +240,7 @@ class Reminders(private val context: Context) {
             val remaining = until - postedAt
             if (remaining <= 0) return@forEach
             val column = layouts.getOrPut(block.date) {
-                OverlapLayoutCalculator.calculate(repository.getBlocksForDate(block.date))
+                OverlapLayoutCalculator.calculate(blocks.getBlocksForDate(block.date.toEpochDay()))
             }[block.id]?.columnIndex ?: 0
             val length = " · " + TimeFormatter.duration(block.durationMinutes)
             val text = if (upcoming) {
@@ -316,18 +321,36 @@ class ReminderReceiver : BroadcastReceiver() {
         val app = context.applicationContext as? PlannerApp ?: return
         val fired = if (intent.action == null) intent.getLongExtra(ExtraEpochMinute, -1L) else -1L
         val pending = goAsync()
-        app.reminders.syncSoon(
-            app.repository, fired,
-            clockChanged = intent.action == Intent.ACTION_TIME_CHANGED,
-            then = { pending.finish() }
-        )
+        app.reminders.syncSoon(fired, intent.action == Intent.ACTION_TIME_CHANGED) { pending.finish() }
     }
 }
 
-// The planner's one settings file: the reminders switch and the splash MainActivity last
-// recorded. The platform keeps it in memory once read, and the first call starts that read
-// on its loader thread, so PlannerApp calls this as the process starts.
-internal fun Context.plannerSettings(): SharedPreferences = getSharedPreferences("reminders", Context.MODE_PRIVATE)
+private fun Context.reminderReceiver() = ComponentName(this, ReminderReceiver::class.java)
+
+private fun Context.switchReminderReceiver(on: Boolean) = packageManager.setComponentEnabledSetting(
+    reminderReceiver(),
+    if (on) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+    PackageManager.DONT_KILL_APP
+)
+
+// What releases up to 1.4.0 and their libraries kept beside the database, each a block of
+// storage or more: the reminders switch in a settings file, which is handed to the
+// receiver, the record of the splash, two notes of an installed profile and Room's lock.
+// The folders go too, where that leaves them empty, and with the settings folder goes the
+// sign that any of this is still to do: every such release made one, and nothing here does.
+private fun Context.leaveEarlierReleases() {
+    val settings = getSharedPreferences("reminders", Context.MODE_PRIVATE)
+    if (settings.contains("enabled")) switchReminderReceiver(settings.getBoolean("enabled", false))
+    deleteSharedPreferences("reminders")
+    deleteSharedPreferences("launch")
+    for (left in arrayOf(
+        "shared_prefs",
+        "cache/private_planner.db.lck",
+        "files/profileInstalled",
+        "files/profileinstaller_profileWrittenFor_lastUpdateTime.dat",
+        "files"
+    )) File(dataDir, left).delete()
+}
 
 internal fun Context.postNotificationsGranted(): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -345,10 +368,6 @@ private fun showsAt(block: PlannerBlock, nowMinute: Long, upcoming: Boolean): Bo
     }
 }
 
-// The first block starting strictly after `minute`, as an epoch minute.
-private fun PlannerRepository.startAfter(minute: Long): Long? =
-    getNextStart(dayOf(minute + 1), minuteOf(minute + 1))
-
 // Minutes are wall-clock minutes, so they are added before the zone is applied: on a
 // daylight-saving day, elapsed minutes from midnight land an hour off after the change.
 // A minute inside a skipped hour moves forward by the gap. Internal for tests.
@@ -363,8 +382,6 @@ private fun epochMinute(date: LocalDate, startMinutes: Int): Long =
     date.toEpochDay() * TimeSnapper.MinutesPerDay + startMinutes
 
 private fun dayOf(minute: Long): Long = Math.floorDiv(minute, TimeSnapper.MinutesPerDay.toLong())
-
-private fun dateOf(minute: Long): LocalDate = LocalDate.ofEpochDay(dayOf(minute))
 
 private fun minuteOf(minute: Long): Int =
     Math.floorMod(minute, TimeSnapper.MinutesPerDay.toLong()).toInt()

@@ -62,8 +62,13 @@ open class PlannerTestHost {
             val context: Context = if (fontScale == activity.resources.configuration.fontScale) activity else {
                 activity.createConfigurationContext(Configuration(activity.resources.configuration).apply { this.fontScale = fontScale })
             }
-            model = PlannerViewModel(PlannerRepository(database), Reminders(activity.applicationContext))
-            screen = PlannerScreen(context, model, haptics = { haptics += it })
+            model = PlannerViewModel(PlannerRepository(database), Reminders(activity.applicationContext, database))
+            screen = object : PlannerScreen(context, model) {
+                override fun haptic(constant: Int) {
+                    haptics += constant
+                    super.haptic(constant)
+                }
+            }
             activity.applyPlannerSystemBars(screen.palette)
             activity.setContentView(FrameLayout(activity).apply {
                 addView(screen, FrameLayout.LayoutParams(hostWidth?.let { context.px(it.toFloat()) } ?: -1, -1))

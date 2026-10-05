@@ -11,9 +11,10 @@ import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
 import java.util.Collections
+import java.util.function.Supplier
 
 private const val DatabaseName = "private_planner.db"
-private const val SchemaVersion = 7
+private const val SchemaVersion = 8
 
 // The planner's one table on the platform's SQLite, in the file Room used, so existing
 // installs retain their data. Android builds SQLite with auto-vacuum on, so the file gives
@@ -21,21 +22,29 @@ private const val SchemaVersion = 7
 // database. Used from one thread at a time, so a transaction's statements always run on
 // the thread that began it, as the platform requires, and its statements can be shared.
 class PlannerDatabase(context: Context, name: String? = DatabaseName) : PlannerBlockDao {
-    // These seven statements are rebound and executed again and again. Keep their Java
+    // These statements are rebound and executed again and again. Keep their Java
     // wrappers and bind arrays as well as SQLite's cached native plans.
     private val statements = HashMap<String, SQLiteStatement>(8)
 
     private val helper = object : SQLiteOpenHelper(context, name, null, SchemaVersion) {
-        override fun onCreate(db: SQLiteDatabase) = createSchema(db)
+        override fun onCreate(db: SQLiteDatabase) = db.execSQL(Schema)
 
+        // Every release before this one (versions 5 to 7) kept the blocks in the order they
+        // were made, with an index by day beside them, SQLite's own record of the last id
+        // and, at first, Room's record and an index of titles. The blocks move into the
+        // day-ordered table in its own order, so its pages are filled, and the old table
+        // takes its indices with it. So does the platform's record of the locale, which a
+        // database opened as below neither needs nor is given again.
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            if (oldVersion < 5) migrateLegacyBlocks(db)
-            // What versions 5 and 6 kept beside the table and its day index: Room's own
-            // record, and an index of titles that was two fifths of the file.
-            db.execSQL("DROP INDEX IF EXISTS index_blocks_title_dateEpochDay_startMinutes_durationMinutes")
-            db.execSQL("DROP INDEX IF EXISTS index_blocks_title_dateEpochDay_startMinutes")
+            // Nothing, read as 0, where no block was ever added.
+            val lastId = db.compileStatement("SELECT MAX(seq) FROM sqlite_sequence").simpleQueryForLong()
+            db.execSQL("ALTER TABLE blocks RENAME TO blocks_old")
+            db.execSQL(Schema)
+            db.execSQL("INSERT INTO blocks SELECT dateEpochDay, startMinutes, id, title, durationMinutes FROM blocks_old ORDER BY 1, 2, 3")
+            db.execSQL("DROP TABLE blocks_old")
             db.execSQL("DROP TABLE IF EXISTS room_master_table")
-            createSchema(db)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) db.execSQL("DROP TABLE IF EXISTS android_metadata")
+            db.execSQL("$LastId = $lastId")
         }
     }.apply {
         // Titles compare with SQLite's own NOCASE, so each open skips loading the locale's
@@ -66,11 +75,11 @@ class PlannerDatabase(context: Context, name: String? = DatabaseName) : PlannerB
         helper.close()
     }
 
-    override fun <R> withTransaction(block: () -> R): R {
+    override fun <R> withTransaction(block: Supplier<R>): R {
         val database = db
         database.beginTransactionNonExclusive()
         try {
-            return block().also { database.setTransactionSuccessful() }
+            return block.get().also { database.setTransactionSuccessful() }
         } finally {
             database.endTransaction()
         }
@@ -83,49 +92,50 @@ class PlannerDatabase(context: Context, name: String? = DatabaseName) : PlannerB
         startMinutes: Int,
         endMinutes: Int,
         excludedBlockId: Long
-    ) = blocks(OverlappingQuery, dateEpochDay, excludedBlockId, endMinutes, startMinutes)
+    ) = blocks(OverlappingQuery, dateEpochDay, excludedBlockId, endMinutes.toLong(), startMinutes.toLong())
 
     override fun getNextStartMinutes(dateEpochDay: Long, startMinutes: Int) =
-        scalar(NextStartMinutesQuery, dateEpochDay, startMinutes)?.toInt()
+        scalar(NextStartMinutesQuery, null, dateEpochDay, startMinutes.toLong())?.toInt()
 
     override fun getLatestPreviousDurationForTitle(title: String, dateEpochDay: Long, startMinutes: Int) =
-        scalar(PreviousDurationQuery, title, dateEpochDay, startMinutes)?.toInt()
+        scalar(PreviousDurationQuery, title, dateEpochDay, startMinutes.toLong())?.toInt()
 
-    // Room's insert: an id of 0 is left to AUTOINCREMENT, and a clashing id aborts
-    // rather than replacing a row.
+    // An id of 0 takes the next one, counted in the file's header: SQLite's application id,
+    // which the platform leaves alone, on the page every commit writes anyway. No id is
+    // given out twice, as undo and reminders need, and no table of its own keeps the count.
     override fun insertBlock(block: PlannerBlock) {
-        statement("INSERT INTO blocks ($BlockColumns) VALUES (NULLIF(?, 0), ?, ?, ?, ?)").apply {
-            bindLong(1, block.id)
-            bindLong(2, block.date.toEpochDay())
-            bindString(3, block.title)
-            bindLong(4, block.startMinutes.toLong())
-            bindLong(5, block.durationMinutes.toLong())
-            executeInsert()
+        var id = block.id
+        if (id == 0L) {
+            id = statement(LastId).simpleQueryForLong() + 1
+            db.execSQL("$LastId = $id")
         }
+        write(
+            "INSERT INTO blocks (title, id, day, start, duration) VALUES (?, ?, ?, ?, ?)",
+            block.title, id, block.date.toEpochDay(), block.startMinutes.toLong(), block.durationMinutes.toLong()
+        )
     }
 
     override fun getNextStart(dateEpochDay: Long, startMinutes: Int) =
-        scalar(NextStartQuery, dateEpochDay, startMinutes)
+        scalar(NextStartQuery, null, dateEpochDay, startMinutes.toLong())
 
     override fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int) =
-        blocks(BlocksStartingAtQuery, dateEpochDay, startMinutes)
+        blocks(BlocksStartingAtQuery, dateEpochDay, startMinutes.toLong())
 
-    override fun updateTitle(id: Long, title: String) =
-        write("UPDATE blocks SET title = ? WHERE id = ?", title, id)
+    override fun updateTitle(dateEpochDay: Long, id: Long, title: String) =
+        write("UPDATE blocks SET title = ?$OneBlock", title, dateEpochDay, id)
 
-    override fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int) =
-        write("UPDATE blocks SET startMinutes = ?, durationMinutes = ? WHERE id = ?", startMinutes, durationMinutes, id)
+    override fun updateTime(dateEpochDay: Long, id: Long, startMinutes: Int, durationMinutes: Int) =
+        write("UPDATE blocks SET start = ?, duration = ?$OneBlock", null, startMinutes.toLong(), durationMinutes.toLong(), dateEpochDay, id)
 
-    override fun deleteBlockById(id: Long) = write("DELETE FROM blocks WHERE id = ?", id)
+    override fun deleteBlock(dateEpochDay: Long, id: Long) = write("DELETE FROM blocks$OneBlock", null, dateEpochDay, id)
 
-    override fun getBlock(id: Long) = blocks(BlockByIdQuery, id).firstOrNull()
+    override fun getBlock(dateEpochDay: Long, id: Long) =
+        blocks("SELECT $BlockColumns FROM blocks$OneBlock", dateEpochDay, id).firstOrNull()
 
-    // Arguments are bound as their own types: text bound for a number would compare as
-    // text against expressions such as startMinutes + durationMinutes.
-    private fun blocks(sql: String, vararg args: Any): List<PlannerBlock> {
+    private fun blocks(sql: String, vararg numbers: Long): List<PlannerBlock> {
         val cursor = db.rawQueryWithFactory(
             { _, driver, table, query ->
-                query.bindAll(args)
+                query.bindAll(null, numbers)
                 SQLiteCursor(driver, table, query)
             },
             sql,
@@ -134,16 +144,17 @@ class PlannerDatabase(context: Context, name: String? = DatabaseName) : PlannerB
         )
         try {
             if (!cursor.moveToFirst()) return Collections.emptyList()
-            // Every block query selects one day (or one id). Share its date across rows.
-            val date = LocalDate.ofEpochDay(cursor.getLong(1))
+            // Every block query binds its day first. Share that date across rows instead
+            // of copying the same column into SQLite's cursor window for every task.
+            val date = LocalDate.ofEpochDay(numbers[0])
             val rows = ArrayList<PlannerBlock>(cursor.count)
             do {
                 rows += PlannerBlock(
                     id = cursor.getLong(0),
                     date = date,
-                    title = cursor.getString(2),
-                    startMinutes = cursor.getInt(3),
-                    durationMinutes = cursor.getInt(4)
+                    title = cursor.getString(1),
+                    startMinutes = cursor.getInt(2),
+                    durationMinutes = cursor.getInt(3)
                 )
             } while (cursor.moveToNext())
             return rows
@@ -154,15 +165,15 @@ class PlannerDatabase(context: Context, name: String? = DatabaseName) : PlannerB
 
     // Always returns a row. Missing titles and alarms are normal, so they must not allocate
     // SQLiteDoneException and its stack trace. No stored time is MIN_VALUE.
-    private fun scalar(sql: String, vararg args: Any): Long? {
+    private fun scalar(sql: String, text: String?, vararg numbers: Long): Long? {
         val statement = statement(sql, scalar = true)
-        statement.bindAll(args)
+        statement.bindAll(text, numbers)
         return statement.simpleQueryForLong().takeUnless { it == Long.MIN_VALUE }
     }
 
-    private fun write(sql: String, vararg args: Any): Int {
+    private fun write(sql: String, text: String?, vararg numbers: Long): Int {
         val statement = statement(sql)
-        statement.bindAll(args)
+        statement.bindAll(text, numbers)
         return statement.executeUpdateDelete()
     }
 
@@ -172,72 +183,48 @@ class PlannerDatabase(context: Context, name: String? = DatabaseName) : PlannerB
         }
 }
 
-private fun SQLiteProgram.bindAll(args: Array<out Any>) {
-    args.forEachIndexed { index, arg ->
-        if (arg is String) bindString(index + 1, arg) else bindLong(index + 1, (arg as Number).toLong())
-    }
+// A statement's text, where it has any, is its first argument, and the rest are numbers,
+// bound as numbers: text bound for a number would compare as text against expressions such
+// as start + duration.
+private fun SQLiteProgram.bindAll(text: String?, numbers: LongArray) {
+    var index = 1
+    if (text != null) bindString(index++, text)
+    for (number in numbers) bindLong(index++, number)
 }
 
-private const val BlockColumns = "id, dateEpochDay, title, startMinutes, durationMinutes"
+private const val BlockColumns = "id, title, start, duration"
 
-private const val BlocksForDateQuery =
-    "SELECT $BlockColumns FROM blocks WHERE dateEpochDay = ? ORDER BY startMinutes ASC, id ASC"
+// The blocks themselves in the order the planner reads them, by day, start and id, with no
+// row ids and so no index beside them: a day is one run of neighbouring rows, and a block
+// takes about two thirds of what it took as a row plus an index entry. The key's columns
+// cannot be null. A block is found by its day and id, among that day's few rows.
+private const val Schema = "CREATE TABLE blocks (day INTEGER, start INTEGER, id INTEGER, " +
+    "title TEXT NOT NULL COLLATE NOCASE, duration INTEGER NOT NULL, PRIMARY KEY (day, start, id)) WITHOUT ROWID"
 
-private const val BlockByIdQuery = "SELECT $BlockColumns FROM blocks WHERE id = ?"
+private const val OneBlock = " WHERE day = ? AND id = ?"
+
+private const val LastId = "PRAGMA application_id"
+
+// The orders asked for below are the table's own, so none of them sorts.
+private const val BlocksForDateQuery = "SELECT $BlockColumns FROM blocks WHERE day = ? ORDER BY start, id"
 
 // Only feeds overlap counts, so row order does not matter.
-private const val OverlappingQuery = "SELECT $BlockColumns FROM blocks " +
-    "WHERE dateEpochDay = ? AND id != ? AND startMinutes < ? AND startMinutes + durationMinutes > ?"
+private const val OverlappingQuery =
+    "SELECT $BlockColumns FROM blocks WHERE day = ? AND id != ? AND start < ? AND start + duration > ?"
 
-private const val NextStartMinutesQuery =
-    "SELECT startMinutes FROM blocks WHERE dateEpochDay = ? AND startMinutes > ? ORDER BY startMinutes LIMIT 1"
+private const val NextStartMinutesQuery = "SELECT start FROM blocks WHERE day = ? AND start > ? ORDER BY start LIMIT 1"
 
-// Walks back through the day index from the day and minute, reading each block's title
-// until one matches: a handful of rows for a title in regular use, and every earlier block
-// for one never used, a few milliseconds off the main thread after ten years of blocks.
-// An index of titles made that instant, and was two fifths of the database. Row-value
-// comparisons are available on every supported Android version.
-private const val PreviousDurationQuery = "SELECT durationMinutes FROM blocks " +
-    "WHERE title = ? AND (dateEpochDay, startMinutes) < (?, ?) " +
-    "ORDER BY dateEpochDay DESC, startMinutes DESC, id DESC LIMIT 1"
+// Walks back through the table from the day and minute until a title matches: a handful
+// of rows for a title in regular use, and every earlier block for one never used, under a
+// millisecond off the main thread after ten years of blocks. An index of titles made that
+// instant, and was two fifths of the database. Row-value comparisons are available on
+// every supported Android version.
+private const val PreviousDurationQuery = "SELECT duration FROM blocks " +
+    "WHERE title = ? AND (day, start) < (?, ?) ORDER BY day DESC, start DESC, id DESC LIMIT 1"
 
 // Reminders keep a single pending alarm: the epoch minute of the next block starting at
-// or after a given day/minute. Answered from the (dateEpochDay, startMinutes) index
-// alone, starting at that day, without touching the table.
+// or after a given day/minute, which is the first row from there on.
 private const val NextStartQuery =
-    "SELECT dateEpochDay * ${TimeSnapper.MinutesPerDay} + startMinutes FROM blocks " +
-        "WHERE (dateEpochDay, startMinutes) >= (?, ?) ORDER BY dateEpochDay ASC, startMinutes ASC LIMIT 1"
+    "SELECT day * ${TimeSnapper.MinutesPerDay} + start FROM blocks WHERE (day, start) >= (?, ?) ORDER BY day, start LIMIT 1"
 
-private const val BlocksStartingAtQuery =
-    "SELECT $BlockColumns FROM blocks WHERE dateEpochDay = ? AND startMinutes = ? ORDER BY id ASC"
-
-// One index, by day then start. The rowid is its last key, so equal starts come out in
-// id order with no temporary sort.
-private fun createSchema(db: SQLiteDatabase) {
-    db.execSQL(
-        "CREATE TABLE IF NOT EXISTS `blocks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-            "`dateEpochDay` INTEGER NOT NULL, `title` TEXT NOT NULL COLLATE NOCASE, " +
-            "`startMinutes` INTEGER NOT NULL, `durationMinutes` INTEGER NOT NULL)"
-    )
-    db.execSQL(
-        "CREATE INDEX IF NOT EXISTS `index_blocks_dateEpochDay_startMinutes` " +
-            "ON `blocks` (`dateEpochDay`, `startMinutes`)"
-    )
-}
-
-// Versions 1 to 4 differ only in title collation and indices: each stores the same five
-// columns with text ids and ISO dates. So every one migrates straight to 5 in a single
-// table rebuild, inside the transaction the platform opens for an upgrade.
-private fun migrateLegacyBlocks(db: SQLiteDatabase) {
-    db.execSQL(
-        "CREATE TABLE blocks_new (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, dateEpochDay INTEGER NOT NULL, " +
-            "title TEXT NOT NULL COLLATE NOCASE, startMinutes INTEGER NOT NULL, durationMinutes INTEGER NOT NULL)"
-    )
-    db.execSQL(
-        "INSERT INTO blocks_new (dateEpochDay, title, startMinutes, durationMinutes) " +
-            "SELECT CAST(julianday(date) - julianday('1970-01-01') AS INTEGER), title, startMinutes, durationMinutes " +
-            "FROM blocks ORDER BY date, startMinutes"
-    )
-    db.execSQL("DROP TABLE blocks")
-    db.execSQL("ALTER TABLE blocks_new RENAME TO blocks")
-}
+private const val BlocksStartingAtQuery = "SELECT $BlockColumns FROM blocks WHERE day = ? AND start = ? ORDER BY id"

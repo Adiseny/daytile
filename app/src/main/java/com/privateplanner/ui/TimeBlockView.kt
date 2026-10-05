@@ -11,7 +11,6 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
-import com.privateplanner.R
 import com.privateplanner.domain.BlockLayout
 import com.privateplanner.domain.MovePlacement
 import com.privateplanner.domain.PlannerBlock
@@ -84,6 +83,15 @@ private val TextPaints = HashMap<Long, TextPaint>()
 private fun Context.tilePaint(size: Float, weight: Int): TextPaint =
     TextPaints.getOrPut((sp(size) * 64f).toLong() * 1000 + weight) { textPaint(size, weight) }
 
+// What a block offers accessibility services beyond a tap. A service names a custom action
+// by its id alone, and these lie where an app's own ids do, apart from every platform action.
+internal const val RenameAction = 0x7f000001
+internal const val DeleteAction = 0x7f000002
+internal const val EarlierAction = 0x7f000003
+internal const val LaterAction = 0x7f000004
+internal const val ShortenAction = 0x7f000005
+internal const val LengthenAction = 0x7f000006
+
 private const val Idle = 0
 private const val Pending = 1
 private const val Moving = 2
@@ -128,12 +136,15 @@ internal class TimeBlockView(
     private var contentStale = true
     private var title: TextBlock? = null
     private var meta: TextBlock? = null
+    private var metaStart = NoPreviewMinutes
     private var duration: TextBlock? = null
     private var titleX = 0
     private var titleY = 0
     private var metaY = 0
     private var durationX = 0
     private var durationY = 0
+    private var inkBackground = 0
+    private var ink = 0
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -142,9 +153,13 @@ internal class TimeBlockView(
 
     fun bind(block: PlannerBlock, columns: BlockLayout) {
         if (this.block == block && this.columns == columns) return
+        val renamed = this.block.title != block.title
+        val moved = this.block.startMinutes != block.startMinutes ||
+            this.block.durationMinutes != block.durationMinutes || this.columns != columns
         this.block = block
         this.columns = columns
-        contentChanged()
+        if (moved) day.place(this)
+        contentChanged(layout = renamed)
     }
 
     fun setVisual(tileWidth: Float, visualHeight: Float, visualOffsetPx: Int, visualHeightPx: Int) {
@@ -172,8 +187,8 @@ internal class TimeBlockView(
         }
     }
 
-    private fun contentChanged() {
-        contentStale = true
+    private fun contentChanged(layout: Boolean = true) {
+        contentStale = contentStale || layout
         contentDescription = "${block.title}, " +
             "${TimeFormatter.range(block.startMinutes, displayedDurationMinutes, " to ")}, " +
             "${TimeFormatter.duration(displayedDurationMinutes)}. Actions: Rename, Delete."
@@ -230,16 +245,7 @@ internal class TimeBlockView(
             titleX = start
             titleY = top
             metaY = top + text.height
-            meta = textBlock(
-                TimeFormatter.range(displayedStartMinutes, displayedDurationMinutes),
-                context.tilePaint(if (small) 10f else 12f, 400),
-                context.sp(if (small) 12f else 16f),
-                columnWidth,
-                maxLines = 1,
-                ellipsis = true,
-                maxHeight = max(columnHeight - text.height, 0),
-                fill = true
-            )
+            meta = timeText(columnWidth, max(columnHeight - text.height, 0))
         }
         duration = if (reserve > 0f) {
             val reservePx = px(reserve)
@@ -259,13 +265,34 @@ internal class TimeBlockView(
         }
     }
 
+    private fun timeText(width: Int, height: Int): TextBlock {
+        metaStart = displayedStartMinutes
+        val small = visualHeight < 64f
+        return textBlock(
+            TimeFormatter.range(metaStart, displayedDurationMinutes),
+            context.tilePaint(if (small) 10f else 12f, 400),
+            context.sp(if (small) 12f else 16f),
+            width,
+            maxLines = 1,
+            ellipsis = true,
+            maxHeight = height,
+            fill = true
+        )
+    }
+
     // In one pass and in this order: fill, text, resize handle, border. The border is a
     // whole-pixel stroke inset by half its width, with correspondingly smaller corners.
     override fun onDraw(canvas: Canvas) {
         if (contentStale) layOutContent()
+        // Moving changes only the time label. Keep the title and duration layouts.
+        if (metaStart != displayedStartMinutes) meta = meta?.let { timeText(it.width, it.height) }
         val active = moveActive || resizeActive
         val background = blockBackgroundArgb(block.startMinutes, columns.columnIndex).toInt()
-        val ink = tileInkFor(background, host.palette.Paper, active)
+        val composite = compositedTileBackground(background, host.palette.Paper, active)
+        if (inkBackground != composite) {
+            inkBackground = composite
+            ink = tileInkFor(background, host.palette.Paper, active)
+        }
         val w = width.toFloat()
         val h = visualHeightPx.toFloat()
         canvas.save()
@@ -348,6 +375,7 @@ internal class TimeBlockView(
                         resizeTo()
                     }
                 }
+                autoScroll?.update()
             }
             MotionEvent.ACTION_UP -> if (phase == Pending) {
                 finish(cancelled = true)
@@ -437,7 +465,7 @@ internal class TimeBlockView(
         hasDraggedAfterHold = false
         invalidate()
         moveTo()
-        autoScroll = EdgeAutoScroll(host, density, { initialPointerViewportY + totalDy }, { hasDraggedAfterHold }) { moveTo() }
+        autoScroll = EdgeAutoScroll(host, density, this)
     }
 
     private fun startResize() {
@@ -448,8 +476,17 @@ internal class TimeBlockView(
         lastSavable = initial.durationMinutes
         invalidate()
         resizeTo()
-        autoScroll = EdgeAutoScroll(host, density, { initialPointerViewportY + totalDy }, { true }) { resizeTo() }
+        autoScroll = EdgeAutoScroll(host, density, this)
     }
+
+    // What the edge scrolling asks of the gesture: where the finger is in the viewport,
+    // whether it may scroll yet (a move waits for the first drag after the hold), and to
+    // follow the day once it has scrolled.
+    val pointerViewportY: Float get() = initialPointerViewportY + totalDy
+
+    val scrollsAtEdges: Boolean get() = phase == Resizing || hasDraggedAfterHold
+
+    fun edgeScrolled() = if (phase == Moving) moveTo() else resizeTo()
 
     // Every snapped step ticks unless the spot is unusable; only a savable one may be dropped on.
     private fun ticks(placement: MovePlacement): Boolean {
@@ -467,7 +504,6 @@ internal class TimeBlockView(
         if (snapped == lastSnapped) return
         lastSnapped = snapped
         previewStartMinutes = snapped
-        contentStale = true
         invalidate()
         if (ticks(host.overlapPolicy(block.id).placement(snapped, initial.durationMinutes))) lastSavable = snapped
     }
@@ -506,7 +542,7 @@ internal class TimeBlockView(
         translationZ = 0f
         day.activeBlockId = 0
         day.place(this)
-        contentChanged()
+        contentChanged(layout = false)
     }
 
     fun cancelGesture() = finish(cancelled = true)
@@ -534,12 +570,12 @@ internal class TimeBlockView(
         super.onInitializeAccessibilityNodeInfo(info)
         info.isClickable = true
         info.addAction(AccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, "Open actions"))
-        info.addAction(AccessibilityAction(R.id.block_rename, "Rename"))
-        info.addAction(AccessibilityAction(R.id.block_delete, "Delete"))
-        info.addAction(AccessibilityAction(R.id.block_earlier, "Move earlier 5 minutes"))
-        info.addAction(AccessibilityAction(R.id.block_later, "Move later 5 minutes"))
-        info.addAction(AccessibilityAction(R.id.block_shorten, "Shorten 5 minutes"))
-        info.addAction(AccessibilityAction(R.id.block_lengthen, "Lengthen 5 minutes"))
+        info.addAction(AccessibilityAction(RenameAction, "Rename"))
+        info.addAction(AccessibilityAction(DeleteAction, "Delete"))
+        info.addAction(AccessibilityAction(EarlierAction, "Move earlier 5 minutes"))
+        info.addAction(AccessibilityAction(LaterAction, "Move later 5 minutes"))
+        info.addAction(AccessibilityAction(ShortenAction, "Shorten 5 minutes"))
+        info.addAction(AccessibilityAction(LengthenAction, "Lengthen 5 minutes"))
     }
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean = when (action) {
@@ -547,18 +583,18 @@ internal class TimeBlockView(
             host.onBlockTap(block.id)
             true
         }
-        R.id.block_rename -> {
+        RenameAction -> {
             host.onBlockRename(block.id)
             true
         }
-        R.id.block_delete -> {
+        DeleteAction -> {
             host.onBlockDelete(block.id)
             true
         }
-        R.id.block_earlier -> moveBy(-TimeSnapper.SnapMinutes)
-        R.id.block_later -> moveBy(TimeSnapper.SnapMinutes)
-        R.id.block_shorten -> resizeBy(-TimeSnapper.SnapMinutes)
-        R.id.block_lengthen -> resizeBy(TimeSnapper.SnapMinutes)
+        EarlierAction -> moveBy(-TimeSnapper.SnapMinutes)
+        LaterAction -> moveBy(TimeSnapper.SnapMinutes)
+        ShortenAction -> resizeBy(-TimeSnapper.SnapMinutes)
+        LengthenAction -> resizeBy(TimeSnapper.SnapMinutes)
         else -> super.performAccessibilityAction(action, arguments)
     }
 }

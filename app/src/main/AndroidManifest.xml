@@ -17,8 +17,9 @@
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
+        android:resetEnabledSettingsOnAppDataCleared="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
+        android:label="Daytile"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Daytile"
         tools:targetApi="33">
@@ -36,8 +37,10 @@
         </activity>
 
         <!-- Exported so the system can deliver these; all four are protected
-             broadcasts, so nothing else can send them. Reminders disables the receiver
-             while its switch is off, so none of them starts the process then. -->
+             broadcasts, so nothing else can send them. Whether it is enabled is the
+             reminders switch itself, which the system keeps: off, none of them starts the
+             process. Clearing the planner's storage (from Android 13) returns it to this
+             unset state, which the planner reads as off. -->
         <receiver
             android:name=".ReminderReceiver"
             android:exported="true">

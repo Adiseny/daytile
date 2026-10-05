@@ -11,6 +11,8 @@ import com.privateplanner.domain.isBlankTitle
 import com.privateplanner.onMain
 import java.time.LocalDate
 import java.util.Collections
+import java.util.function.Consumer
+import java.util.function.Supplier
 import kotlin.math.abs
 
 sealed interface PlannerSheet {
@@ -20,19 +22,8 @@ sealed interface PlannerSheet {
     object DateJump : PlannerSheet
 }
 
-sealed interface PlannerSnackbar {
-    val id: Long
-
-    class Deleted(
-        override val id: Long,
-        val deletedBlock: PlannerBlock
-    ) : PlannerSnackbar
-
-    class Message(
-        override val id: Long,
-        val message: String
-    ) : PlannerSnackbar
-}
+// A message above the navigation bar. One for a deleted block holds it, to put it back.
+class PlannerSnackbar(val id: Long, val message: String, val deletedBlock: PlannerBlock? = null)
 
 // What the planner shows and everything that changes it. Main thread only: reads and
 // writes run on the worker thread and their results come back here, in the order they ran.
@@ -43,6 +34,7 @@ class PlannerViewModel(
 ) {
     private val launchedAt = TimeSnapper.localNowMillis()
 
+    @Volatile // The worker skips queued reads that are no longer near this day.
     var selectedDate: LocalDate = TimeSnapper.dateOf(launchedAt)
         private set
 
@@ -60,12 +52,10 @@ class PlannerViewModel(
     var snackbar: PlannerSnackbar? = null
         private set
 
-    // Already in memory: PlannerApp starts loading it before the activity exists.
-    var remindersOn = reminders.enabled
-        private set
+    val remindersOn: Boolean get() = reminders.enabled
 
     // The screen, while it is showing: called after every change to the state above.
-    var onChange: (() -> Unit)? = null
+    var onChange: Runnable? = null
 
     // Where the timeline opens, taken once by its first layout.
     private var scrollTarget: Int? = TimeSnapper.minuteOfDay(launchedAt)
@@ -74,6 +64,7 @@ class PlannerViewModel(
 
     // The selected day and its neighbours, for an instant swipe.
     private val dayCache = HashMap<LocalDate, List<PlannerBlock>>()
+    private val loadingDays = HashSet<LocalDate>()
 
     // Moves and resizes that are on screen but not yet saved, by block.
     private val pendingTimes = HashMap<Long, PendingTime>()
@@ -86,20 +77,30 @@ class PlannerViewModel(
     }
 
     private fun changed() {
-        onChange?.invoke()
+        onChange?.run()
     }
 
-    // The day, and whichever neighbours are not already held, in one trip to the worker.
+    // Only missing days go to the worker. All writes publish their day on this thread,
+    // so cached days stay current, including when a save finishes after a day swipe.
     private fun load(date: LocalDate) {
         val days = ArrayList<LocalDate>(3)
-        days += date
-        for (neighbour in arrayOf(date.minusDays(1), date.plusDays(1))) {
-            if (!dayCache.containsKey(neighbour)) days += neighbour
+        for (offset in 0..2) {
+            val day = date.plusDays(if (offset == 2) -1 else offset.toLong())
+            if (!dayCache.containsKey(day) && loadingDays.add(day)) days += day
         }
+        if (days.isEmpty()) return
         Worker.execute {
-            val read = days.map { repository.getBlocksForDate(it) }
+            val read = days.map { if (it.isNear(selectedDate)) repository.getBlocksForDate(it) else null }
             onMain {
-                for (index in days.indices) publish(days[index], read[index])
+                var retry = false
+                for (index in days.indices) {
+                    val day = days[index]
+                    loadingDays.remove(day)
+                    val blocks = read[index]
+                    if (blocks != null) publish(day, blocks) else if (day.isNear(selectedDate)) retry = true
+                }
+                // The user can return to a day between a skipped read and this callback.
+                if (retry) load(selectedDate)
             }
         }
     }
@@ -119,12 +120,12 @@ class PlannerViewModel(
     }
 
     // A write, then its day as the write left it, in one trip to the worker.
-    private fun write(date: LocalDate, action: () -> PlannerWriteResult, done: (PlannerWriteResult) -> Unit) {
+    private fun write(date: LocalDate, action: Supplier<PlannerWriteResult>, done: Consumer<PlannerWriteResult>) {
         Worker.execute {
-            val result = action()
+            val result = action.get()
             val read = repository.getBlocksForDate(date)
             onMain {
-                done(result)
+                done.accept(result)
                 publish(date, read)
             }
         }
@@ -171,12 +172,14 @@ class PlannerViewModel(
 
     fun renameBlock(title: String) {
         val current = sheet as? PlannerSheet.RenameBlock ?: return
-        sheetWrite(current, title) { repository.updateTitle(current.blockId, title) }
+        // A rename sheet is open only over its block's day.
+        val date = selectedDate
+        sheetWrite(current, title) { repository.updateTitle(date, current.blockId, title) }
     }
 
     // A sheet's write keeps running if the sheet goes away meanwhile: the user asked for
     // it, so a late failure surfaces as a message instead of a silently lost write.
-    private fun sheetWrite(current: PlannerSheet, title: String, action: () -> PlannerWriteResult) {
+    private fun sheetWrite(current: PlannerSheet, title: String, action: Supplier<PlannerWriteResult>) {
         if (title.isBlankTitle() || sheetWriting) return
         sheetWriting = true
         setSheetError(null)
@@ -202,12 +205,12 @@ class PlannerViewModel(
         val block = block(blockId) ?: return
         if (!deletingBlockIds.add(blockId)) return
         pendingTimes.remove(blockId)
-        write(block.date, { repository.deleteBlock(blockId) }) { result ->
+        write(block.date, { repository.deleteBlock(block.date, block.id) }) { result ->
             deletingBlockIds.remove(blockId)
             if (result == PlannerWriteResult.Success) {
                 sheet = null
                 sheetError = null
-                snackbar = PlannerSnackbar.Deleted(System.nanoTime(), block)
+                snackbar = PlannerSnackbar(System.nanoTime(), "Deleted", block)
                 changed()
             } else {
                 showMessage("Could not delete")
@@ -216,13 +219,13 @@ class PlannerViewModel(
     }
 
     fun undoDelete(snackbarId: Long) {
-        val deleted = snackbar as? PlannerSnackbar.Deleted ?: return
-        if (deleted.id != snackbarId || undoing) return
+        val block = snackbar?.takeIf { it.id == snackbarId }?.deletedBlock
+        if (block == null || undoing) return
         undoing = true
-        write(deleted.deletedBlock.date, { repository.restoreBlock(deleted.deletedBlock) }) { result ->
+        write(block.date, { repository.restoreBlock(block) }) { result ->
             undoing = false
             when (result) {
-                PlannerWriteResult.Success -> clearSnackbar(deleted.id)
+                PlannerWriteResult.Success -> clearSnackbar(snackbarId)
                 PlannerWriteResult.RejectedOverlap -> showMessage("Could not restore; that time is no longer available")
                 else -> showMessage("Could not restore")
             }
@@ -255,7 +258,7 @@ class PlannerViewModel(
         val pending = PendingTime(startMinutes, durationMinutes)
         pendingTimes[block.id] = pending
         publish(block.date, blocks)
-        write(block.date, { repository.updateTime(block.id, startMinutes, durationMinutes) }) { result ->
+        write(block.date, { repository.updateTime(block.date, block.id, startMinutes, durationMinutes) }) { result ->
             // A later change to the same block has taken over, and its result settles both.
             if (pendingTimes[block.id] === pending) {
                 pendingTimes.remove(block.id)
@@ -266,9 +269,8 @@ class PlannerViewModel(
 
     fun setRemindersOn(on: Boolean) {
         reminders.enabled = on
-        remindersOn = on
         changed()
-        reminders.syncSoon(repository)
+        reminders.syncSoon()
     }
 
     // The date sheet that asked covers the bottom of the screen, where the message appears,
@@ -290,17 +292,21 @@ class PlannerViewModel(
     private fun block(blockId: Long): PlannerBlock? = blocks.firstOrNull { it.id == blockId }
 
     private fun withPendingTimes(blocks: List<PlannerBlock>): List<PlannerBlock> {
-        if (pendingTimes.isEmpty() || blocks.none { pendingTimes.containsKey(it.id) }) return blocks
-        return blocks.mapTo(ArrayList(blocks.size)) { block ->
-            pendingTimes[block.id]?.let { block.copy(startMinutes = it.startMinutes, durationMinutes = it.durationMinutes) }
-                ?: block
-        }.apply {
-            sortWith(PlannerBlockOrder)
+        if (pendingTimes.isEmpty()) return blocks
+        var merged: ArrayList<PlannerBlock>? = null
+        for (index in blocks.indices) {
+            val block = blocks[index]
+            val pending = pendingTimes[block.id] ?: continue
+            if (pending.startMinutes == block.startMinutes && pending.durationMinutes == block.durationMinutes) continue
+            if (merged == null) merged = ArrayList(blocks)
+            merged[index] = block.copy(startMinutes = pending.startMinutes, durationMinutes = pending.durationMinutes)
         }
+        merged?.sortWith(PlannerBlockOrder)
+        return merged ?: blocks
     }
 
     private fun showMessage(message: String) {
-        snackbar = PlannerSnackbar.Message(System.nanoTime(), message)
+        snackbar = PlannerSnackbar(System.nanoTime(), message)
         changed()
     }
 

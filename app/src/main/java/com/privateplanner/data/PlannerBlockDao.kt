@@ -1,12 +1,13 @@
 package com.privateplanner.data
 
 import com.privateplanner.domain.PlannerBlock
+import java.util.function.Supplier
 
 // The planner's queries, implemented by PlannerDatabase on SQLite and by a fake in the
 // unit tests. Every call is made from one thread at a time: the app's worker thread.
 // Titles compare case-insensitively (the column is COLLATE NOCASE).
 interface PlannerBlockDao {
-    fun <R> withTransaction(block: () -> R): R
+    fun <R> withTransaction(block: Supplier<R>): R
 
     // A day's blocks by start then id.
     fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlock>
@@ -25,7 +26,8 @@ interface PlannerBlockDao {
     // The duration of the title's latest block before the given day and minute, if any.
     fun getLatestPreviousDurationForTitle(title: String, dateEpochDay: Long, startMinutes: Int): Int?
 
-    // Fails on a clashing id rather than replacing the row.
+    // A block with an id of 0 is given the next one, which no block has had before. One
+    // with an id keeps it: the caller knows that no block has it now.
     fun insertBlock(block: PlannerBlock)
 
     // The epoch minute of the next block starting at or after the given day and minute.
@@ -33,12 +35,13 @@ interface PlannerBlockDao {
 
     fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int): List<PlannerBlock>
 
+    // A block is named by its day and id: blocks are stored by day, and never change day.
     // The update and delete calls return the number of rows changed.
-    fun updateTitle(id: Long, title: String): Int
+    fun updateTitle(dateEpochDay: Long, id: Long, title: String): Int
 
-    fun updateTime(id: Long, startMinutes: Int, durationMinutes: Int): Int
+    fun updateTime(dateEpochDay: Long, id: Long, startMinutes: Int, durationMinutes: Int): Int
 
-    fun deleteBlockById(id: Long): Int
+    fun deleteBlock(dateEpochDay: Long, id: Long): Int
 
-    fun getBlock(id: Long): PlannerBlock?
+    fun getBlock(dateEpochDay: Long, id: Long): PlannerBlock?
 }

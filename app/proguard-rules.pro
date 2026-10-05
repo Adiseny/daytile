@@ -1,6 +1,13 @@
 # The only rules: nothing in the app is named by reflection, and it has no libraries
-# beyond the Kotlin standard library, of which almost nothing remains.
+# beyond the Kotlin standard library, of which no class remains.
 -allowaccessmodification
+
+# That is checked: the build fails if one would ship. Only functions the compiler and R8
+# write into the app's own classes are left of it (docs/kotlin-licence.txt), so an idiom
+# that needs a class of its own (a callable reference, `lazy`, `Pair`, a range kept as an
+# object, a function type in place of a platform interface) is caught here, not by size.
+-checkdiscard class kotlin.** { <init>(...); }
+-checkdiscard interface kotlin.**
 
 # Move every renamed class into a single package so the dex carries no package names.
 # Nothing finds a renamed class by its package: whatever is looked up by name (the

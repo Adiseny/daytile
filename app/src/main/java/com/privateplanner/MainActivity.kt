@@ -5,13 +5,11 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.View
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.ui.PlannerScreen
 import com.privateplanner.ui.PlannerViewModel
-import com.privateplanner.ui.applyPlannerSystemBars
 import com.privateplanner.ui.displayedPaletteForMinute
 
 class MainActivity : Activity() {
@@ -30,11 +28,10 @@ class MainActivity : Activity() {
         // The view model outlives a change of configuration with its activity.
         @Suppress("DEPRECATION")
         val viewModel = lastNonConfigurationInstance as? PlannerViewModel ?: PlannerViewModel(app.repository, app.reminders)
-        // Before the window is attached, so the first frame already has the paper and bars.
-        applyPlannerSystemBars(displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())))
-        screen = PlannerScreen(this, viewModel, onBackEnabled = { takeBack(it) })
+        // The screen styles the window as it is built, before the window is attached, so the
+        // first frame already has the paper and bars.
+        screen = PlannerScreen(this, viewModel) { takeBack() }
         setContentView(screen)
-        findViewById<View>(android.R.id.content).filterTouchesWhenObscured = true
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -48,7 +45,8 @@ class MainActivity : Activity() {
     // Back is the planner's while a sheet or a message is showing or another day is: it
     // closes them, then returns to today. Otherwise it is the system's, with its own
     // animation out of the app, so from Android 13 the callback is registered only meanwhile.
-    private fun takeBack(enabled: Boolean) {
+    private fun takeBack() {
+        val enabled = screen?.backEnabled == true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || enabled == (back != null)) return
         if (enabled) {
             back = OnBackInvokedCallback { screen?.handleBack() }.also {
@@ -81,28 +79,24 @@ class MainActivity : Activity() {
 
     // The system draws the splash before any of the app runs, so by itself it follows the
     // phone's light or dark setting, not the palette: a dark phone opened a light planner
-    // through a black splash. Leaving records the polarity on screen for the next launch;
-    // only the first launch after 07:00 or 20:00 can still differ. The record is already in
-    // memory with the settings, so an unchanged polarity costs no task, disk read or
-    // system call; a changed one makes the system call, which persists the theme, on the
-    // worker thread.
+    // through a black splash. Leaving tells the system the polarity on screen, which it
+    // keeps for the next launch; only the first launch after 07:00 or 20:00 can still
+    // differ. The process remembers what it last told, so only the first leave and a
+    // changed polarity make the system call, on the worker thread, and nothing is stored
+    // for it here.
     override fun onStop() {
         super.onStop()
         screen?.stop()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         val light = displayedPaletteForMinute(TimeSnapper.minuteOfDay(TimeSnapper.localNowMillis())).LightBackground
-        val settings = application.plannerSettings()
-        if (settings.getBoolean(SplashLightKey, !light) == light) return
+        val app = application as PlannerApp
+        if (app.splashLight == light) return
+        app.splashLight = light
         val splash = splashScreen
         Worker.execute {
             runCatching {
                 splash.setSplashScreenTheme(if (light) R.style.Theme_Daytile_Day else R.style.Theme_Daytile_Night)
-                settings.edit().putBoolean(SplashLightKey, light).apply()
-                // Versions up to 1.3.3 kept the record in a file of its own.
-                application.deleteSharedPreferences("launch")
             }
         }
     }
 }
-
-private const val SplashLightKey = "splashLight"

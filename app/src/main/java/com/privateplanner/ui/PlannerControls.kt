@@ -182,12 +182,15 @@ internal class PlannerButton(
 
     var container: Int = 0
         set(value) {
+            if (field == value) return
             field = value
             fill.setColor(value)
         }
 
     init {
         isClickable = true
+        // The pill's ripple shows the focus; the platform's highlight would shade the slot.
+        defaultFocusHighlightEnabled = false
         addView(pill)
     }
 

@@ -4,6 +4,7 @@ import com.privateplanner.domain.PlannerBlock
 import android.content.Context
 import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteDatabase
+import android.os.Build
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
@@ -85,24 +86,33 @@ class PlannerDatabaseTest {
             assertEquals((day + 1) * 1440 + 540, dao.getNextStart(day, 721))
             assertNull(dao.getNextStart(day + 1, 541))
             assertEquals(listOf(1L), dao.getBlocksStartingAt(day, 540).map { it.id })
-            assertEquals(1, dao.updateTime(2, 750, 30))
-            assertEquals(1, dao.updateTitle(2, "Late lunch"))
-            assertEquals(0, dao.updateTitle(99, "Missing"))
-            assertEquals(PlannerBlock(2, LocalDate.ofEpochDay(day), "Late lunch", 750, 30), dao.getBlock(2))
+            assertEquals(1, dao.updateTime(day, 2, 750, 30))
+            assertEquals(1, dao.updateTitle(day, 2, "Late lunch"))
+            assertEquals(0, dao.updateTitle(day, 99, "Missing"))
+            // A block is its day's: the same id on another day is another block's.
+            assertEquals(0, dao.updateTitle(day + 1, 2, "Wrong day"))
+            assertEquals(0, dao.updateTime(day + 1, 2, 0, 10))
+            assertEquals(0, dao.deleteBlock(day + 1, 2))
+            assertNull(dao.getBlock(day + 1, 2))
+            assertEquals(PlannerBlock(2, LocalDate.ofEpochDay(day), "Late lunch", 750, 30), dao.getBlock(day, 2))
             assertThrows(SQLiteConstraintException::class.java) {
-                dao.insertBlock(PlannerBlock(1, LocalDate.ofEpochDay(day), "Clash", 0, 5))
+                dao.insertBlock(PlannerBlock(1, LocalDate.ofEpochDay(day), "Clash", 540, 5))
             }
-            assertEquals(1, dao.deleteBlockById(1))
-            assertEquals(0, dao.deleteBlockById(1))
+            assertEquals(1, dao.deleteBlock(day, 1))
+            assertEquals(0, dao.deleteBlock(day, 1))
             assertEquals(listOf(2L), dao.getBlocksForDate(day).map { it.id })
+            // The newest block's id is not handed out again once it has gone.
+            assertEquals(1, dao.deleteBlock(day + 1, 3))
+            dao.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(day + 1), title = "Swim", startMinutes = 540, durationMinutes = 30))
+            assertEquals(listOf(4L), dao.getBlocksForDate(day + 1).map { it.id })
+            // A block put back keeps its id and leaves the count alone.
+            dao.insertBlock(PlannerBlock(3, LocalDate.ofEpochDay(day + 1), "Gym", 540, 30))
+            dao.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(day + 1), title = "Run", startMinutes = 540, durationMinutes = 30))
+            assertEquals(listOf(3L, 4L, 5L), dao.getBlocksForDate(day + 1).map { it.id })
+            assertEquals(listOf(3L, 4L, 5L), dao.getBlocksStartingAt(day + 1, 540).map { it.id })
         } finally {
             database.close()
         }
-    }
-
-    @Test
-    fun everyLegacySchemaPreservesBlocks() {
-        for (version in 1..4) migrateFromVersion(version)
     }
 
     @Test
@@ -145,9 +155,9 @@ class PlannerDatabaseTest {
             assertEquals(7, database.getBlocksForDate(firstDay).size)
             assertEquals(firstId, database.getBlocksForDate(firstDay).first().id)
             assertEquals(firstId + count - 1, database.getBlocksForDate(lastDay).last().id)
-            assertTrue("Dropping the title index must give its pages back", file.length() < oldBytes * 2 / 3)
+            assertTrue("Dropping both indices must give their pages back", file.length() < oldBytes / 2)
             SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { check ->
-                check.rawQuery("SELECT * FROM blocks ORDER BY id", null).use { rows ->
+                check.rawQuery("SELECT id, day, title, start, duration FROM blocks ORDER BY id", null).use { rows ->
                     repeat(count) { i ->
                         assertTrue(rows.moveToNext())
                         assertEquals(firstId + i, rows.getLong(0))
@@ -162,18 +172,41 @@ class PlannerDatabaseTest {
                     assertTrue(it.moveToFirst())
                     assertEquals(1, it.getInt(0))
                 }
-                check.rawQuery("SELECT name FROM sqlite_master WHERE name = 'room_master_table' OR name LIKE '%title%'", null).use {
-                    assertFalse(it.moveToFirst())
+                // The table alone is left, beside the empty record of ids SQLite never drops
+                // and, before Android 9, the platform's record of the locale.
+                check.rawQuery("SELECT name FROM sqlite_master ORDER BY name", null).use {
+                    val names = ArrayList<String>()
+                    while (it.moveToNext()) names += it.getString(0)
+                    val locale = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) emptyList() else listOf("android_metadata")
+                    assertEquals(locale + listOf("blocks", "sqlite_sequence"), names)
                 }
-                check.rawQuery(
-                    "EXPLAIN QUERY PLAN SELECT durationMinutes FROM blocks WHERE title = ? AND (dateEpochDay, startMinutes) < (?, ?) ORDER BY dateEpochDay DESC, startMinutes DESC, id DESC LIMIT 1",
-                    arrayOf("Task 1 – 保持", lastDay.toString(), "900")
-                ).use {
-                    while (it.moveToNext()) assertFalse(it.getString(3).contains("TEMP B-TREE"))
+                check.rawQuery("SELECT COUNT(*) FROM sqlite_sequence", null).use {
+                    assertTrue(it.moveToFirst())
+                    assertEquals(0, it.getInt(0))
+                }
+                // Every ordered query reads the table in its own order, with nothing to sort.
+                for (query in listOf(
+                    "SELECT id FROM blocks WHERE day = ? ORDER BY start, id",
+                    "SELECT start FROM blocks WHERE day = ? AND start > ? ORDER BY start LIMIT 1",
+                    "SELECT duration FROM blocks WHERE title = ? AND (day, start) < (?, ?) ORDER BY day DESC, start DESC, id DESC LIMIT 1",
+                    "SELECT day * 1440 + start FROM blocks WHERE (day, start) >= (?, ?) ORDER BY day, start LIMIT 1",
+                    "SELECT id FROM blocks WHERE day = ? AND start = ? ORDER BY id",
+                    "SELECT id FROM blocks WHERE day = ? AND id = ?",
+                    "UPDATE blocks SET start = ?, duration = ? WHERE day = ? AND id = ?",
+                    "DELETE FROM blocks WHERE day = ? AND id = ?"
+                )) {
+                    check.rawQuery("EXPLAIN QUERY PLAN $query", null).use {
+                        assertTrue(it.moveToFirst())
+                        do {
+                            val step = it.getString(3)
+                            assertFalse("$query: $step", step.contains("TEMP B-TREE"))
+                            assertTrue("$query: $step", step.contains("PRIMARY KEY"))
+                        } while (it.moveToNext())
+                    }
                 }
             }
             database.withTransaction {
-                repeat(count - 7) { database.deleteBlockById(firstId + it) }
+                repeat(count - 7) { database.deleteBlock(firstDay + it / 7, firstId + it) }
             }
             assertTrue("Deleting history must return unused pages", file.length() < oldBytes / 20)
             assertEquals(7, database.getBlocksForDate(lastDay).size)
@@ -195,50 +228,63 @@ class PlannerDatabaseTest {
         }
     }
 
-    private fun migrateFromVersion(version: Int) {
+    // 1.4.0's database, whose newest block has been deleted: the blocks keep their ids, and
+    // the deleted block's id is still not given to the next one.
+    @Test
+    fun versionsSixAndSevenKeepEveryBlockAndNeverReuseAnId() {
+        for (version in 6..7) checkMigratedIds(version)
+    }
+
+    private fun checkMigratedIds(version: Int) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(TestDatabase)
-
-        context.openOrCreateDatabase(TestDatabase, Context.MODE_PRIVATE, null).apply {
-            execSQL(
-                """
-                CREATE TABLE blocks (
-                    id TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    startMinutes INTEGER NOT NULL,
-                    durationMinutes INTEGER NOT NULL,
-                    PRIMARY KEY(id)
-                )
-                """.trimIndent()
-            )
-            execSQL(
-                """
-                INSERT INTO blocks (id, date, title, startMinutes, durationMinutes)
-                VALUES ('legacy-id', '2026-05-29', 'Focus', 540, 45)
-                """.trimIndent()
-            )
-            setVersion(version)
-            close()
+        val day = 20_000L
+        context.openOrCreateDatabase(TestDatabase, Context.MODE_PRIVATE, null).use { old ->
+            old.execSQL("CREATE TABLE IF NOT EXISTS `blocks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `dateEpochDay` INTEGER NOT NULL, `title` TEXT NOT NULL COLLATE NOCASE, `startMinutes` INTEGER NOT NULL, `durationMinutes` INTEGER NOT NULL)")
+            old.execSQL("CREATE INDEX IF NOT EXISTS `index_blocks_dateEpochDay_startMinutes` ON `blocks` (`dateEpochDay`, `startMinutes`)")
+            if (version == 6) old.execSQL("CREATE INDEX index_blocks_title_dateEpochDay_startMinutes ON blocks(title, dateEpochDay, startMinutes)")
+            old.execSQL("INSERT INTO blocks VALUES (3, $day, 'Later', 600, 30)")
+            old.execSQL("INSERT INTO blocks VALUES (4, $day, 'Same start', 540, 45)")
+            old.execSQL("INSERT INTO blocks VALUES (9, $day, 'Earlier', 540, 60)")
+            old.execSQL("INSERT INTO blocks VALUES (2, ${day - 400}, 'Long ago', 0, 1440)")
+            old.execSQL("INSERT INTO blocks VALUES (12, ${day + 1}, 'Deleted', 0, 10)")
+            old.execSQL("DELETE FROM blocks WHERE id = 12")
+            old.version = version
         }
-
         val database = PlannerDatabase(context, TestDatabase)
-
         try {
-            val block = database.getBlocksForDate(LocalDate.of(2026, 5, 29).toEpochDay()).single()
-
-            assertEquals(1L, block.id)
-            assertEquals(LocalDate.of(2026, 5, 29).toEpochDay(), block.date.toEpochDay())
-            assertEquals("Focus", block.title)
-            assertEquals(540, block.startMinutes)
-            assertEquals(45, block.durationMinutes)
-
-            val reusedDuration = database.getLatestPreviousDurationForTitle(
-                title = "focus",
-                dateEpochDay = LocalDate.of(2026, 5, 30).toEpochDay(),
-                startMinutes = 540
+            assertEquals(
+                listOf(
+                    PlannerBlock(4, LocalDate.ofEpochDay(day), "Same start", 540, 45),
+                    PlannerBlock(9, LocalDate.ofEpochDay(day), "Earlier", 540, 60),
+                    PlannerBlock(3, LocalDate.ofEpochDay(day), "Later", 600, 30)
+                ),
+                database.getBlocksForDate(day)
             )
-            assertEquals(45, reusedDuration)
+            assertEquals(PlannerBlock(2, LocalDate.ofEpochDay(day - 400), "Long ago", 0, 1440), database.getBlock(day - 400, 2))
+            assertEquals(1440, database.getLatestPreviousDurationForTitle("long AGO", day, 0))
+            database.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(day + 1), title = "New", startMinutes = 0, durationMinutes = 10))
+            assertEquals(13L, database.getBlocksForDate(day + 1).single().id)
+        } finally {
+            database.close()
+            context.deleteDatabase(TestDatabase)
+        }
+    }
+
+    // A database nothing was ever added to has no id on record.
+    @Test
+    fun emptyVersionSevenDatabaseStartsCountingAtOne() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase(TestDatabase)
+        context.openOrCreateDatabase(TestDatabase, Context.MODE_PRIVATE, null).use { old ->
+            old.execSQL("CREATE TABLE blocks (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, dateEpochDay INTEGER NOT NULL, title TEXT NOT NULL COLLATE NOCASE, startMinutes INTEGER NOT NULL, durationMinutes INTEGER NOT NULL)")
+            old.execSQL("CREATE INDEX index_blocks_dateEpochDay_startMinutes ON blocks (dateEpochDay, startMinutes)")
+            old.version = 7
+        }
+        val database = PlannerDatabase(context, TestDatabase)
+        try {
+            database.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(0), title = "First", startMinutes = 0, durationMinutes = 10))
+            assertEquals(1L, database.getBlocksForDate(0).single().id)
         } finally {
             database.close()
             context.deleteDatabase(TestDatabase)
@@ -264,7 +310,7 @@ class PlannerDatabaseTest {
             null,
             SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING
         ).apply {
-            execSQL("INSERT INTO blocks (dateEpochDay, title, startMinutes, durationMinutes) VALUES ($day, 'Logged', 540, 45)")
+            execSQL("INSERT INTO blocks (id, day, title, start, duration) VALUES (5, $day, 'Logged', 540, 45)")
             // Closing would fold the log in, so the files are taken as a dead process leaves them.
             assertTrue(File(original.path + "-wal").length() > 0)
             original.copyTo(abandoned)
@@ -310,16 +356,21 @@ class PlannerDatabaseTest {
         val dao = database
         val original = PlannerBlock(1, LocalDate.ofEpochDay(0), "Original", 0, 60)
         try {
-            dao.insertBlock(original)
+            dao.insertBlock(original.copy(id = 0))
             try {
                 database.withTransaction {
-                    dao.updateTitle(1, "Changed")
+                    dao.updateTitle(0, 1, "Changed")
+                    dao.insertBlock(original.copy(id = 0, title = "New", startMinutes = 120))
+                    assertEquals(listOf(1L, 2L), dao.getBlocksForDate(0).map { it.id })
                     dao.insertBlock(original.copy(title = "Duplicate"))
                 }
                 throw AssertionError("The conflicting insert must fail")
             } catch (_: SQLiteConstraintException) {
                 assertEquals(listOf(original), dao.getBlocksForDate(0))
             }
+            // The count of ids went back with the block that took one.
+            dao.insertBlock(original.copy(id = 0, title = "Next", startMinutes = 120))
+            assertEquals(listOf(1L, 2L), dao.getBlocksForDate(0).map { it.id })
         } finally {
             database.close()
         }

@@ -15,7 +15,6 @@ import androidx.test.espresso.matcher.ViewMatchers.hasFocus
 import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.privateplanner.R
 import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.TimeSnapper
 import org.junit.Assert.*
@@ -88,7 +87,7 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         gesture(area.exactCenterX(), area.bottom - screen.context.dp(4f), 0f, screen.context.dp(40f))
         await { stored("Move me")!!.durationMinutes != moved.durationMinutes }
         val resized = stored("Move me")!!
-        main { assertTrue(tile("Move me").performAccessibilityAction(R.id.block_lengthen, null)) }
+        main { assertTrue(tile("Move me").performAccessibilityAction(LengthenAction, null)) }
         await { stored("Move me")!!.durationMinutes == resized.durationMinutes + 5 }
     }
 
@@ -120,7 +119,7 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         scrollTo(100_000)
         awaitTile("Dense 1430/6")
         assertTrue(count() <= limit && count() < 700)
-        main { tile("Dense 1430/6").performAccessibilityAction(R.id.block_delete, null) }
+        main { tile("Dense 1430/6").performAccessibilityAction(DeleteAction, null) }
         await { stored("Dense 1430/6") == null && main { model.snackbar } != null }
         clickLabel("Undo")
         awaitTile("Dense 1430/6")
@@ -179,7 +178,7 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         input().perform(replaceText("Workflow task"))
         clickLabel("Add")
         awaitTile("Workflow task")
-        main { tile("Workflow task").performAccessibilityAction(R.id.block_rename, null) }
+        main { tile("Workflow task").performAccessibilityAction(RenameAction, null) }
         input().check { view, _ ->
             view as EditText
             assertEquals("Workflow task", view.text.toString())
@@ -188,11 +187,11 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         }
         input().perform(replaceText("Renamed workflow"), pressImeActionButton())
         awaitTile("Renamed workflow")
-        main { tile("Renamed workflow").performAccessibilityAction(R.id.block_delete, null) }
+        main { tile("Renamed workflow").performAccessibilityAction(DeleteAction, null) }
         await { stored("Renamed workflow") == null && main { model.snackbar } != null }
         clickLabel("Undo")
         awaitTile("Renamed workflow")
-        main { tile("Renamed workflow").performAccessibilityAction(R.id.block_delete, null) }
+        main { tile("Renamed workflow").performAccessibilityAction(DeleteAction, null) }
         await { stored("Renamed workflow") == null }
     }
 
@@ -209,6 +208,131 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         await { main { model.sheet } == null }
         assertEquals("Same", stored("Same")!!.title)
         assertSame(shown, main { model.blocks })
+    }
+
+    @Test fun cachedDaysStayCurrentAfterRapidEditsRejectedMovesAndUndo() {
+        launch {
+            repeat(7) { add("Busy $it", 540, 60) }
+            add("Moving", 660, 30)
+        }
+        awaitTile("Moving")
+        val date = main { model.selectedDate }
+        val id = stored("Moving")!!.id
+        fun settle() {
+            worker { }
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        }
+        settle()
+        main {
+            // Optimistic movement is rejected by the stored overlap limit while another
+            // day is selected. Returning must show the saved position, not the preview.
+            model.moveBlock(id, 540)
+            model.shiftDay(1)
+        }
+        settle()
+        main {
+            model.jumpTo(date)
+            assertEquals(660, model.blocks.first { it.id == id }.startMinutes)
+            model.moveBlock(id, 720)
+            model.moveBlock(id, 725)
+            model.resizeBlock(id, 45)
+            model.shiftDay(1)
+        }
+        settle()
+        main {
+            model.jumpTo(date)
+            val moved = model.blocks.first { it.id == id }
+            assertEquals(725, moved.startMinutes)
+            assertEquals(45, moved.durationMinutes)
+            model.deleteBlock(id)
+            model.shiftDay(1)
+        }
+        settle()
+        main {
+            model.jumpTo(date)
+            assertTrue(model.blocks.none { it.id == id })
+            model.undoDelete(model.snackbar!!.id)
+            // Evict the day while restoring it, then request it again before the write
+            // completes. A late prefetch must not replace the restored block.
+            model.shiftDay(20)
+            model.jumpTo(date)
+        }
+        settle()
+        await { main { model.blocks.any { it.id == id } } }
+        assertEquals(storedToday(), main { model.blocks })
+        assertEquals(725, stored("Moving")!!.startMinutes)
+    }
+
+    @Test fun rapidDaySwipesReadEachMissingDayOnce() {
+        launch()
+        val reads = java.util.concurrent.ConcurrentHashMap<Long, Int>()
+        val dao = object : com.privateplanner.data.PlannerBlockDao by database {
+            override fun getBlocksForDate(dateEpochDay: Long): List<com.privateplanner.domain.PlannerBlock> {
+                reads[dateEpochDay] = (reads[dateEpochDay] ?: 0) + 1
+                return database.getBlocksForDate(dateEpochDay)
+            }
+        }
+        val cached = main {
+            PlannerViewModel(com.privateplanner.data.PlannerRepository(dao), com.privateplanner.Reminders(activity, database))
+        }
+        worker { }
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        val today = main { cached.selectedDate.toEpochDay() }
+        assertEquals(3, reads.size)
+        main {
+            repeat(100) {
+                cached.shiftDay(1)
+                cached.shiftDay(-1)
+            }
+        }
+        worker { }
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        assertTrue(reads.keys.all { it in today - 1..today + 2 })
+        assertEquals("The two visited days stay cached", 1, reads[today])
+        assertEquals(1, reads[today + 1])
+        // Yesterday is evicted on the first forward swipe, so returning requests it
+        // again. The following 99 swipes must reuse that request while it is in flight.
+        assertTrue("In-flight days need no duplicate reads: $reads", reads.values.all { it <= 2 })
+
+        val gate = java.util.concurrent.CountDownLatch(1)
+        com.privateplanner.Worker.execute { gate.await() }
+        try {
+            main { repeat(100) { cached.shiftDay(1) } }
+        } finally {
+            gate.countDown()
+        }
+        worker { }
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        assertEquals("Queued reads for abandoned days must be skipped",
+            setOf(today + 99, today + 100, today + 101), reads.keys.filter { it > today + 2 }.toSet())
+        assertTrue(reads.values.all { it <= 2 })
+    }
+
+    @Test fun aHeldTileStartsAndStopsEdgeScrollingAsThePointerMoves() {
+        launch { add("Edge", 660, 120) }
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(600)) })
+        awaitTile("Edge")
+        val tile = main { tile("Edge") }
+        val original = stored("Edge")
+        val down = SystemClock.uptimeMillis()
+        fun send(action: Int, y: Float) = main {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, tile.width / 2f, y, 0)
+            tile.onTouchEvent(event)
+            event.recycle()
+        }
+        val y = tile.height * 0.4f
+        send(MotionEvent.ACTION_DOWN, y)
+        await { main { screen.descendants().filterIsInstance<DayView>().first().activeBlockId != 0L } }
+        val before = main { screen.scrollPx }
+        SystemClock.sleep(100)
+        assertEquals(before, main { screen.scrollPx })
+        send(MotionEvent.ACTION_MOVE, y + screen.height)
+        await { main { screen.scrollPx > before } }
+        send(MotionEvent.ACTION_CANCEL, y + screen.height)
+        val cancelled = main { screen.scrollPx }
+        SystemClock.sleep(100)
+        assertEquals(cancelled, main { screen.scrollPx })
+        assertEquals(original, stored("Edge"))
     }
 
     // The screen is told it shows some other palette, then its clock ticks back to the real one.

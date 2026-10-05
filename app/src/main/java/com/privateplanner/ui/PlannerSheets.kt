@@ -36,6 +36,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
+import java.util.function.Consumer
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -103,7 +104,7 @@ internal class InputSheet(
     private val colours: PlannerPalette,
     title: String,
     buttonLabel: String,
-    private val onSubmit: (String) -> Unit
+    private val onSubmit: Consumer<String>
 ) : Flow(context, vertical = true) {
     private val theme = if (colours.LightBackground) R.style.Theme_Daytile_Day else R.style.Theme_Daytile_Night
     private val input = TitleInput(ContextThemeWrapper(context, theme))
@@ -174,7 +175,7 @@ internal class InputSheet(
     }
 
     private fun submit() {
-        if (!text.isBlankTitle()) onSubmit(text)
+        if (!text.isBlankTitle()) onSubmit.accept(text)
     }
 
     private fun submittable(yes: Boolean) {
@@ -216,8 +217,8 @@ internal class InputSheet(
 internal class ActionsSheet(
     context: Context,
     colours: PlannerPalette,
-    onRename: () -> Unit,
-    onDelete: () -> Unit
+    onRename: OnClickListener,
+    onDelete: OnClickListener
 ) : Flow(context, centred = true) {
     private val title = Label(context, PlannerType.titleMedium, colours.PrimaryText, maxLines = 1, ellipsis = true)
     private val time = Label(context, PlannerType.bodyMedium, colours.MutedText, maxLines = 1, ellipsis = true)
@@ -230,14 +231,14 @@ internal class ActionsSheet(
             minimumHeight = context.px(56f)
             setPadding(context.px(8f), context.px(6f), context.px(8f), context.px(6f))
             rippleOver(colours.PrimaryText, context.dp(8f))
-            setOnClickListener { onRename() }
+            setOnClickListener(onRename)
             addView(title)
             time.setPadding(0, context.px(2f), 0, 0)
             addView(time)
         }
         addView(rename, weighted())
         delete.pill.addView(Label(context, PlannerType.labelLarge, colours.Delete).apply { text = "Delete" })
-        delete.setOnClickListener { onDelete() }
+        delete.setOnClickListener(onDelete)
         addView(delete, Cell(WRAP_CONTENT, context.px(48f)))
     }
 
@@ -339,8 +340,8 @@ internal class DateSheet(
     private val selectedDate: LocalDate,
     private val today: LocalDate,
     visibleMonth: YearMonth?,
-    onToggleReminders: (Boolean) -> Unit,
-    private val onSelect: (LocalDate) -> Unit
+    onToggleReminders: OnClickListener,
+    private val onSelect: Consumer<LocalDate>
 ) : Flow(context, vertical = true) {
     private val locale = resources.configuration.locales[0]
     private val monthTitle = Label(
@@ -350,7 +351,6 @@ internal class DateSheet(
     private val bell = Bell(context)
     private val remindersLabel = Label(context, PlannerType.labelLarge, 0, lineBox = true).apply { text = "Reminders" }
     private val reminders = PlannerButton(context, colours.PrimaryText, 15f)
-    private var remindersOn = false
 
     var visibleMonth: YearMonth = visibleMonth ?: YearMonth.from(selectedDate)
         private set
@@ -390,10 +390,10 @@ internal class DateSheet(
             addView(remindersLabel, Cell().apply { leftMargin = context.px(7f) })
         }
         reminders.contentDescription = "Reminders"
-        reminders.setOnClickListener { onToggleReminders(!remindersOn) }
+        reminders.setOnClickListener(onToggleReminders)
         val todayButton = PlannerButton(context, colours.PrimaryText, 12f)
         todayButton.pill.addView(Label(context, PlannerType.labelLarge, colours.PrimaryText, lineBox = true).apply { text = "Today" })
-        todayButton.setOnClickListener { onSelect(today) }
+        todayButton.setOnClickListener { onSelect.accept(today) }
         addView(
             Flow(context, centred = true).apply {
                 addView(reminders)
@@ -428,7 +428,7 @@ internal class DateSheet(
                 val date = visibleMonth.atDay(day)
                 cell.visibility = VISIBLE
                 cell.bind(day, date == selectedDate, date == today, date.format(spoken))
-                cell.setOnClickListener { onSelect(date) }
+                cell.setOnClickListener { onSelect.accept(date) }
             } else {
                 cell.visibility = INVISIBLE
             }
@@ -436,8 +436,8 @@ internal class DateSheet(
     }
 
     fun setReminders(on: Boolean) {
-        remindersOn = on
         val colour = if (on) colours.PrimaryText else colours.MutedText
+        if (bell.colour == colour && bell.slashed == !on) return
         bell.colour = colour
         bell.slashed = !on
         bell.invalidate()
