@@ -1,5 +1,7 @@
 # Daytile
 
+https://github.com/user-attachments/assets/d70025df-86f2-4962-9f8f-eacb93eca2bf
+
 Daytile is an offline Android app for planning your day as blocks on a 24-hour timeline.
 
 <p align="center">
