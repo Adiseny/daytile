@@ -15,14 +15,12 @@
             android:pathData="M542,503h436c35.35,0 64,28.65 64,64v124c0,35.35 -28.65,64 -64,64H542c-35.35,0 -64,-28.65 -64,-64V567c0,-35.35 28.65,-64 64,-64z" />
 
         <path
-            android:fillColor="@android:color/transparent"
             android:pathData="M411,231v805"
             android:strokeColor="#CFC4B6"
             android:strokeLineCap="round"
             android:strokeWidth="32" />
 
         <path
-            android:fillColor="@android:color/transparent"
             android:pathData="M257,396h81m0,215h-81m0,215h81"
             android:strokeColor="#D8CFC3"
             android:strokeLineCap="round"

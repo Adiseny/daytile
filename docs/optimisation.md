@@ -1,3 +1,93 @@
+# One table, small pages and no settings file — 5 October 2026
+
+Two passes on top of 1.4.0, released as 1.4.1. Nothing changes on screen but the keyboard-focus shading
+described in the changelog, which lists every change; this records what was measured.
+
+## Measurements
+
+| Measurement | 1.4.0 | After |
+| --- | ---: | ---: |
+| Unsigned release APK | 115,874 bytes | 109,653 bytes |
+| Uncompressed `classes.dex` | 98,248 bytes | 96,840 bytes |
+| Classes / method references in the dex | 100 / 861 | 86 / 843 |
+| Installed, fresh (APK, odex, vdex) | 143,285 bytes | 138,988 bytes |
+| New database | 20,480 bytes | 3,072 bytes |
+| App data after a first use, one block added | 77,824 bytes | 36,864 bytes |
+| App data of a copy of 1.3.3 with three blocks, updated | 221,184 bytes | 36,864 bytes |
+| App data of a copy of 1.4.0 with three blocks, updated | 77,824 bytes | 36,864 bytes |
+| Frames drawn by a launch | 4 | 4 |
+| Launch, main-thread CPU | 19.2 ms | 18.8 ms |
+| Launch, whole process CPU | 97.5 ms | 95.9 ms |
+
+Sizes are from debug-signed, minified copies under separate application IDs on the
+Android 17 emulator (x86_64, 1344x2992, a file system of 4 KiB blocks). App data is what
+`pm get-package-storage-stats` reports as data, less what it reports as cache: the
+database, its journal, the folders the system makes and the system's own profile of the
+app. Each file and each folder is at least one block. Launch figures are medians of
+twelve launches made in touch mode after a force-stop, alternating between builds, from
+`schedstat` 1.2 s after `am start -W` returns; the two builds are within what this
+emulator can tell apart, and no launch of either drew the day a second time.
+
+## Database size
+
+Eight blocks a day, 24 repeating titles and one block in six with a title used once,
+added a day at a time in a shuffled order; host SQLite 3.51.2 with auto-vacuum on, as
+Android builds it.
+
+| Blocks | 1.4.0 | One table, 4 KiB pages | One table, 1 KiB pages | The 1.4.0 file brought over |
+| ---: | ---: | ---: | ---: | ---: |
+| 8 | 20,480 | 12,288 | 3,072 | 3,072 |
+| 96 | 20,480 | 12,288 | 6,144 | 6,144 |
+| 240 (a month) | 28,672 | 20,480 | 11,264 | 10,240 |
+| 496 | 45,056 | 28,672 | 19,456 | 17,408 |
+| 2,920 (a year) | 151,552 | 110,592 | 101,376 | 91,136 |
+| 14,600 | 667,648 | 495,616 | 491,520 | 443,392 |
+| 29,200 (ten years) | 1,331,200 | 987,136 | 983,040 | 885,760 |
+
+A database is three pages before it holds a block: the header, auto-vacuum's map and the
+table. In the platform's pages that is three blocks of storage and in 1 KiB pages one.
+Past that the two grow alike, 34 bytes a block. A file brought over is written out in
+key order with full pages, 30 bytes a block, and fills like any other from then on.
+
+## Page size and time
+
+The same blocks in both page sizes, written out in key order. Medians on the emulator, ms:
+
+| Blocks | Pages | Open and read a day | Read a day | Title never used | Title in use | Insert | Move |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,920 | 4 KiB | 0.155 | 0.009 | 0.067 | 0.012 | 0.52 | 0.012 |
+| 2,920 | 1 KiB | 0.165 | 0.009 | 0.066 | 0.012 | 0.49 | 0.013 |
+| 29,200 | 4 KiB | 0.154 | 0.009 | 0.562 | 0.012 | 0.39 | 0.013 |
+| 29,200 | 1 KiB | 0.157 | 0.009 | 0.568 | 0.012 | 0.41 | 0.013 |
+| 58,400 | 4 KiB | 0.155 | 0.009 | 1.122 | 0.012 | 0.39 | 0.012 |
+| 58,400 | 1 KiB | 0.171 | 0.009 | 2.222 | 0.012 | 0.38 | 0.012 |
+
+The one difference is the search for a title never used before, which reads every block,
+once the file no longer fits SQLite's page cache: after twenty years of eight blocks a
+day in 1 KiB pages, and somewhat later in the platform's. It runs on the worker thread
+inside a create.
+
+## Titles shared between blocks: measured, not done
+
+Keeping each distinct title once, in a table of its own, with a number in the block:
+
+| 29,200 blocks, 1 KiB pages | Titles in the blocks | Titles shared |
+| --- | ---: | ---: |
+| Every title one of 30 | 852,992 bytes | 570,368 bytes |
+| Six in ten one of 30, the rest used once | 925,696 bytes | 832,512 bytes |
+| Every title used once | 1,035,264 bytes | 1,135,616 bytes |
+
+A third smaller when every title repeats, a tenth with a mix, a tenth larger when none
+does, for a second table, a join in every read, and a search and a sweep in every
+create, rename and delete. Up to a few hundred blocks it saves nothing. Left as it is.
+
+## The system's compiled files
+
+A fresh install is compiled to `verify`: an odex of 17,152 bytes and a vdex of 2,264
+beside the APK. After three sessions of use the system had saved no profile of a build
+this small, so its idle compilation (`speed-profile`) left those files as they were.
+Compiling every method (`speed`), the upper bound, makes the odex 271,936 bytes.
+
 # Worker thread, standard library and schema 7 — 4 October 2026
 
 This pass starts from the native-view working tree described in the next section

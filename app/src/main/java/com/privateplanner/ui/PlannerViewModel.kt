@@ -15,12 +15,19 @@ import java.util.function.Consumer
 import java.util.function.Supplier
 import kotlin.math.abs
 
-sealed interface PlannerSheet {
-    class CreateBlock(val startMinutes: Int) : PlannerSheet
-    class RenameBlock(val blockId: Long) : PlannerSheet
-    class BlockActions(val blockId: Long) : PlannerSheet
-    object DateJump : PlannerSheet
+// The sheet that is open: its kind, and the minute a new block starts at or the id of the
+// block to rename or act on. One kind with a number, not a type each: a type is a class.
+class PlannerSheet(val kind: Int, val value: Long) {
+    companion object {
+        const val Create = 0
+        const val Rename = 1
+        const val Actions = 2
+        const val Date = 3
+    }
 }
+
+// The same each time, so asking for the date sheet while it is open changes nothing.
+private val DateJump = PlannerSheet(PlannerSheet.Date, 0)
 
 // A message above the navigation bar. One for a deleted block holds it, to put it back.
 class PlannerSnackbar(val id: Long, val message: String, val deletedBlock: PlannerBlock? = null)
@@ -120,7 +127,7 @@ class PlannerViewModel(
     }
 
     // A write, then its day as the write left it, in one trip to the worker.
-    private fun write(date: LocalDate, action: Supplier<PlannerWriteResult>, done: Consumer<PlannerWriteResult>) {
+    private fun write(date: LocalDate, action: Supplier<Int>, done: Consumer<Int>) {
         Worker.execute {
             val result = action.get()
             val read = repository.getBlocksForDate(date)
@@ -145,19 +152,19 @@ class PlannerViewModel(
     }
 
     fun openCreate(startMinutes: Int) {
-        showSheet(PlannerSheet.CreateBlock(TimeSnapper.floorToValidStart(startMinutes)))
+        showSheet(PlannerSheet(PlannerSheet.Create, TimeSnapper.floorToValidStart(startMinutes).toLong()))
     }
 
     fun openActions(blockId: Long) {
-        showSheet(PlannerSheet.BlockActions(blockId))
+        showSheet(PlannerSheet(PlannerSheet.Actions, blockId))
     }
 
     fun openRename(blockId: Long) {
-        showSheet(PlannerSheet.RenameBlock(blockId))
+        showSheet(PlannerSheet(PlannerSheet.Rename, blockId))
     }
 
     fun openDateJump() {
-        showSheet(PlannerSheet.DateJump)
+        showSheet(DateJump)
     }
 
     fun dismissSheet() {
@@ -165,21 +172,21 @@ class PlannerViewModel(
     }
 
     fun createBlock(title: String) {
-        val current = sheet as? PlannerSheet.CreateBlock ?: return
+        val current = sheet?.takeIf { it.kind == PlannerSheet.Create } ?: return
         val date = selectedDate
-        sheetWrite(current, title) { repository.createBlock(date, current.startMinutes, title) }
+        sheetWrite(current, title) { repository.createBlock(date, current.value.toInt(), title) }
     }
 
     fun renameBlock(title: String) {
-        val current = sheet as? PlannerSheet.RenameBlock ?: return
+        val current = sheet?.takeIf { it.kind == PlannerSheet.Rename } ?: return
         // A rename sheet is open only over its block's day.
         val date = selectedDate
-        sheetWrite(current, title) { repository.updateTitle(date, current.blockId, title) }
+        sheetWrite(current, title) { repository.updateTitle(date, current.value, title) }
     }
 
     // A sheet's write keeps running if the sheet goes away meanwhile: the user asked for
     // it, so a late failure surfaces as a message instead of a silently lost write.
-    private fun sheetWrite(current: PlannerSheet, title: String, action: Supplier<PlannerWriteResult>) {
+    private fun sheetWrite(current: PlannerSheet, title: String, action: Supplier<Int>) {
         if (title.isBlankTitle() || sheetWriting) return
         sheetWriting = true
         setSheetError(null)

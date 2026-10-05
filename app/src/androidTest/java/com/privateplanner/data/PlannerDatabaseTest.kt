@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteDatabase
 import android.os.Build
+import android.system.Os
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
@@ -118,8 +119,9 @@ class PlannerDatabaseTest {
     @Test
     fun twentyYearsOfVersionFiveTasksMigrateAndDeletedPagesAreReclaimed() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        context.deleteDatabase(TestDatabase)
-        val file = context.getDatabasePath(TestDatabase)
+        forget(context, TestDatabase)
+        val earlier = context.getDatabasePath(TestDatabase)
+        val file = File(context.dataDir, TestDatabase)
         val count = 50_400
         val firstId = 200_000L
         val firstDay = 20_000L
@@ -149,10 +151,11 @@ class PlannerDatabaseTest {
             }
             old.version = 5
         }
-        val oldBytes = file.length()
+        val oldBytes = earlier.length()
         val database = PlannerDatabase(context, TestDatabase)
         try {
             assertEquals(7, database.getBlocksForDate(firstDay).size)
+            assertFalse("The file leaves the platform's folder", earlier.exists() || File(earlier.path + "-journal").exists())
             assertEquals(firstId, database.getBlocksForDate(firstDay).first().id)
             assertEquals(firstId + count - 1, database.getBlocksForDate(lastDay).last().id)
             assertTrue("Dropping both indices must give their pages back", file.length() < oldBytes / 2)
@@ -172,17 +175,15 @@ class PlannerDatabaseTest {
                     assertTrue(it.moveToFirst())
                     assertEquals(1, it.getInt(0))
                 }
-                // The table alone is left, beside the empty record of ids SQLite never drops
-                // and, before Android 9, the platform's record of the locale.
+                assertEquals(1024L, check.pageSize)
+                // The table alone is left and, before Android 9, the platform's record of the
+                // locale. SQLite's record of ids, which cannot be dropped, is not written out
+                // again with the file.
                 check.rawQuery("SELECT name FROM sqlite_master ORDER BY name", null).use {
                     val names = ArrayList<String>()
                     while (it.moveToNext()) names += it.getString(0)
                     val locale = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) emptyList() else listOf("android_metadata")
-                    assertEquals(locale + listOf("blocks", "sqlite_sequence"), names)
-                }
-                check.rawQuery("SELECT COUNT(*) FROM sqlite_sequence", null).use {
-                    assertTrue(it.moveToFirst())
-                    assertEquals(0, it.getInt(0))
+                    assertEquals(locale + listOf("blocks"), names)
                 }
                 // Every ordered query reads the table in its own order, with nothing to sort.
                 for (query in listOf(
@@ -224,7 +225,7 @@ class PlannerDatabaseTest {
             assertEquals("Reopening must not rewrite the database header", lastWrite, file.lastModified())
         } finally {
             reopened.close()
-            context.deleteDatabase(TestDatabase)
+            forget(context, TestDatabase)
         }
     }
 
@@ -237,7 +238,7 @@ class PlannerDatabaseTest {
 
     private fun checkMigratedIds(version: Int) {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        context.deleteDatabase(TestDatabase)
+        forget(context, TestDatabase)
         val day = 20_000L
         context.openOrCreateDatabase(TestDatabase, Context.MODE_PRIVATE, null).use { old ->
             old.execSQL("CREATE TABLE IF NOT EXISTS `blocks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `dateEpochDay` INTEGER NOT NULL, `title` TEXT NOT NULL COLLATE NOCASE, `startMinutes` INTEGER NOT NULL, `durationMinutes` INTEGER NOT NULL)")
@@ -262,12 +263,102 @@ class PlannerDatabaseTest {
                 database.getBlocksForDate(day)
             )
             assertEquals(PlannerBlock(2, LocalDate.ofEpochDay(day - 400), "Long ago", 0, 1440), database.getBlock(day - 400, 2))
+            // The moved file is open once: the opening that brought it over was closed
+            // before the move.
+            val held = File("/proc/self/fd").listFiles()!!.mapNotNull { runCatching { Os.readlink(it.path) }.getOrNull() }
+            assertEquals(held.toString(), 1, held.count { it.endsWith("/$TestDatabase") })
             assertEquals(1440, database.getLatestPreviousDurationForTitle("long AGO", day, 0))
             database.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(day + 1), title = "New", startMinutes = 0, durationMinutes = 10))
             assertEquals(13L, database.getBlocksForDate(day + 1).single().id)
         } finally {
             database.close()
-            context.deleteDatabase(TestDatabase)
+            forget(context, TestDatabase)
+        }
+    }
+
+    // Version 8 was this table in the platform's pages and the platform's folder, and went
+    // to no release: a copy that opened one keeps its blocks and its count of ids.
+    @Test
+    fun versionEightIsWrittenOutInSmallPagesAndMoved() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        forget(context, TestDatabase)
+        val earlier = context.getDatabasePath(TestDatabase)
+        val day = 20_000L
+        context.openOrCreateDatabase(TestDatabase, Context.MODE_PRIVATE, null).use { old ->
+            old.execSQL("CREATE TABLE blocks (day INTEGER, start INTEGER, id INTEGER, title TEXT NOT NULL COLLATE NOCASE, duration INTEGER NOT NULL, PRIMARY KEY (day, start, id)) WITHOUT ROWID")
+            old.execSQL("INSERT INTO blocks VALUES ($day, 540, 3, 'Kept', 45)")
+            old.execSQL("PRAGMA application_id = 7")
+            old.version = 8
+            assertEquals(4096L, old.pageSize)
+        }
+        val database = PlannerDatabase(context, TestDatabase)
+        try {
+            assertEquals(listOf(PlannerBlock(3, LocalDate.ofEpochDay(day), "Kept", 540, 45)), database.getBlocksForDate(day))
+            database.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(day), title = "Next", startMinutes = 600, durationMinutes = 10))
+            assertEquals(listOf(3L, 8L), database.getBlocksForDate(day).map { it.id })
+            assertFalse(earlier.exists())
+            SQLiteDatabase.openDatabase(File(context.dataDir, TestDatabase).path, null, SQLiteDatabase.OPEN_READONLY).use {
+                assertEquals(1024L, it.pageSize)
+                assertEquals(9, it.version)
+            }
+        } finally {
+            database.close()
+            forget(context, TestDatabase)
+        }
+    }
+
+    // A new database is one block of storage in the planner's own folder: three pages a
+    // quarter the size of the platform's, where the platform's folder and pages took four
+    // blocks. Before Android 9 the platform adds its record of the locale, a fourth page.
+    @Test
+    fun aNewDatabaseIsOneBlockOfStorageOutsideThePlatformsFolder() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        forget(context, TestDatabase)
+        val file = File(context.dataDir, TestDatabase)
+        val database = PlannerDatabase(context, TestDatabase)
+        try {
+            database.open()
+            assertEquals(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) 3072L else 4096L, file.length())
+            assertFalse(context.getDatabasePath(TestDatabase).exists())
+            database.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(0), title = "First", startMinutes = 0, durationMinutes = 10))
+            assertEquals(1L, database.getBlocksForDate(0).single().id)
+            assertTrue(file.length() <= 4096)
+        } finally {
+            database.close()
+        }
+        val lastWrite = file.lastModified()
+        Thread.sleep(10)
+        val reopened = PlannerDatabase(context, TestDatabase)
+        try {
+            assertEquals("First", reopened.getBlocksForDate(0).single().title)
+            assertEquals("Reopening must not write the file out again", lastWrite, file.lastModified())
+            SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { assertEquals(1024L, it.pageSize) }
+        } finally {
+            reopened.close()
+            forget(context, TestDatabase)
+        }
+    }
+
+    // The file in the planner's folder is the planner's. One in the platform's folder
+    // beside it is not moved over it.
+    @Test
+    fun aFileInThePlatformsFolderNeverReplacesThePlanners() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        forget(context, TestDatabase)
+        PlannerDatabase(context, TestDatabase).apply {
+            insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(0), title = "Mine", startMinutes = 0, durationMinutes = 10))
+            close()
+        }
+        val other = context.getDatabasePath(TestDatabase)
+        context.openOrCreateDatabase(TestDatabase, Context.MODE_PRIVATE, null).use { it.version = 9 }
+        val bytes = other.length()
+        val database = PlannerDatabase(context, TestDatabase)
+        try {
+            assertEquals("Mine", database.getBlocksForDate(0).single().title)
+            assertEquals(bytes, other.length())
+        } finally {
+            database.close()
+            forget(context, TestDatabase)
         }
     }
 
@@ -275,7 +366,7 @@ class PlannerDatabaseTest {
     @Test
     fun emptyVersionSevenDatabaseStartsCountingAtOne() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        context.deleteDatabase(TestDatabase)
+        forget(context, TestDatabase)
         context.openOrCreateDatabase(TestDatabase, Context.MODE_PRIVATE, null).use { old ->
             old.execSQL("CREATE TABLE blocks (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, dateEpochDay INTEGER NOT NULL, title TEXT NOT NULL COLLATE NOCASE, startMinutes INTEGER NOT NULL, durationMinutes INTEGER NOT NULL)")
             old.execSQL("CREATE INDEX index_blocks_dateEpochDay_startMinutes ON blocks (dateEpochDay, startMinutes)")
@@ -287,19 +378,20 @@ class PlannerDatabaseTest {
             assertEquals(1L, database.getBlocksForDate(0).single().id)
         } finally {
             database.close()
-            context.deleteDatabase(TestDatabase)
+            forget(context, TestDatabase)
         }
     }
 
     // Versions up to 1.3.3 kept a write-ahead log, and a process that ended without closing
-    // the database, as every one does, left its latest writes there.
+    // the database, as every one does, left its latest writes there. They are folded into
+    // the file before it is moved, so nothing of it stays in the platform's folder.
     @Test
     fun writeAheadLogLeftByAnOlderVersionIsFoldedIntoTheDatabase() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val original = context.getDatabasePath(TestDatabase)
+        val original = File(context.dataDir, TestDatabase)
         val abandoned = context.getDatabasePath(AbandonedDatabase)
-        context.deleteDatabase(TestDatabase)
-        context.deleteDatabase(AbandonedDatabase)
+        forget(context, TestDatabase)
+        forget(context, AbandonedDatabase)
         val day = 20_000L
         PlannerDatabase(context, TestDatabase).apply {
             open()
@@ -313,6 +405,7 @@ class PlannerDatabaseTest {
             execSQL("INSERT INTO blocks (id, day, title, start, duration) VALUES (5, $day, 'Logged', 540, 45)")
             // Closing would fold the log in, so the files are taken as a dead process leaves them.
             assertTrue(File(original.path + "-wal").length() > 0)
+            abandoned.parentFile!!.mkdirs()
             original.copyTo(abandoned)
             File(original.path + "-wal").copyTo(File(abandoned.path + "-wal"))
             close()
@@ -323,12 +416,14 @@ class PlannerDatabaseTest {
             assertEquals("Logged", database.getBlocksForDate(day).single().title)
             database.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(day), title = "After", startMinutes = 600, durationMinutes = 30))
             assertEquals(listOf("Logged", "After"), database.getBlocksForDate(day).map { it.title })
-            assertFalse(File(abandoned.path + "-wal").exists())
-            assertFalse(File(abandoned.path + "-shm").exists())
+            for (left in listOf("", "-wal", "-shm", "-journal")) assertFalse(left, File(abandoned.path + left).exists())
+            val moved = File(context.dataDir, AbandonedDatabase)
+            assertTrue(moved.exists())
+            assertFalse(File(moved.path + "-wal").exists() || File(moved.path + "-shm").exists())
         } finally {
             database.close()
-            context.deleteDatabase(TestDatabase)
-            context.deleteDatabase(AbandonedDatabase)
+            forget(context, TestDatabase)
+            forget(context, AbandonedDatabase)
         }
     }
 
@@ -374,6 +469,12 @@ class PlannerDatabaseTest {
         } finally {
             database.close()
         }
+    }
+
+    // Wherever a test left it: the platform's folder, as an earlier release's, or the planner's.
+    private fun forget(context: Context, name: String) {
+        context.deleteDatabase(name)
+        SQLiteDatabase.deleteDatabase(File(context.dataDir, name))
     }
 
     private companion object {

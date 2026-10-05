@@ -122,10 +122,6 @@ internal open class PlannerScreen(
         addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(snackbars, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
-        setOnApplyWindowInsetsListener { _, insets ->
-            applyInsets(insets)
-            insets
-        }
         followKeyboard()
         // Nothing is acted on while another app draws over the planner.
         filterTouchesWhenObscured = true
@@ -245,11 +241,7 @@ internal open class PlannerScreen(
     // A rename or actions sheet exists only while its block does.
     private fun showSheet(typed: String?, month: java.time.YearMonth?) {
         val sheet = viewModel.sheet?.takeIf {
-            when (it) {
-                is PlannerSheet.RenameBlock -> block(it.blockId) != null
-                is PlannerSheet.BlockActions -> block(it.blockId) != null
-                else -> true
-            }
+            it.kind == PlannerSheet.Create || it.kind == PlannerSheet.Date || block(it.value) != null
         }
         if (sheet !== shownSheet || (sheet != null && sheetContent == null)) {
             closeSheet()
@@ -257,28 +249,26 @@ internal open class PlannerScreen(
         }
         when (val content = sheetContent) {
             is InputSheet -> content.setError(viewModel.sheetError)
-            is ActionsSheet -> block((sheet as PlannerSheet.BlockActions).blockId)?.let { content.bind(it) }
+            is ActionsSheet -> block(sheet!!.value)?.let { content.bind(it) }
             is DateSheet -> content.setReminders(viewModel.remindersOn)
         }
     }
 
     private fun openSheet(sheet: PlannerSheet, typed: String?, month: java.time.YearMonth?) {
         val title: String
-        val content: View = when (sheet) {
-            is PlannerSheet.CreateBlock -> {
+        val content: View = when (sheet.kind) {
+            PlannerSheet.Create -> {
                 title = "Add block"
                 InputSheet(context, palette, "", "Add") { viewModel.createBlock(it) }
             }
-            is PlannerSheet.RenameBlock -> {
+            PlannerSheet.Rename -> {
                 title = "Rename block"
-                InputSheet(context, palette, block(sheet.blockId)!!.title, "Rename") { viewModel.renameBlock(it) }
+                InputSheet(context, palette, block(sheet.value)!!.title, "Rename") { viewModel.renameBlock(it) }
             }
-            is PlannerSheet.BlockActions -> {
+            PlannerSheet.Actions -> {
                 title = "Block actions"
-                ActionsSheet(context, palette, { viewModel.openRename(sheet.blockId) }, { deleteBlock(sheet.blockId) })
+                ActionsSheet(context, palette, { viewModel.openRename(sheet.value) }, { deleteBlock(sheet.value) })
             }
-            // PlannerSheet.DateJump, the one that is left: naming it would compile in an
-            // exception for a fifth kind that does not exist.
             else -> {
                 title = "Choose date"
                 DateSheet(context, palette, viewModel.selectedDate, today, month, { toggleReminders(!viewModel.remindersOn) }) {
@@ -347,6 +337,11 @@ internal open class PlannerScreen(
     }
 
     // --- Insets ---------------------------------------------------------------------
+
+    override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        applyInsets(insets)
+        return insets
+    }
 
     private fun applyInsets(insets: WindowInsets) {
         val keyboard: Int

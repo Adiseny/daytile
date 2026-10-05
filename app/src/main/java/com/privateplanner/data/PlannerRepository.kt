@@ -7,13 +7,15 @@ import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.TimeSnapper
 import java.time.LocalDate
 
-enum class PlannerWriteResult {
-    Success,
-    NoSpace,
-    MissingBlock,
-    RejectedOverlap,
-    InvalidInput,
-    Failed
+// How a write ended. Numbers rather than an enum, whose every constant would be an object
+// the app carries by name and makes as it starts.
+object PlannerWriteResult {
+    const val Success = 0
+    const val NoSpace = 1
+    const val MissingBlock = 2
+    const val RejectedOverlap = 3
+    const val InvalidInput = 4
+    const val Failed = 5
 }
 
 // The planner's rules over its queries. Like them, called from one thread at a time.
@@ -29,7 +31,7 @@ class PlannerRepository(
 
     // Snapping and clamping below always yield a valid time, so only restoring a
     // stored block needs an explicit range check.
-    fun createBlock(date: LocalDate, startMinutes: Int, title: String): PlannerWriteResult {
+    fun createBlock(date: LocalDate, startMinutes: Int, title: String): Int {
         return writeCatching {
             val normalizedTitle = normalizeTitle(title)
             val start = TimeSnapper.floorToValidStart(startMinutes)
@@ -65,13 +67,13 @@ class PlannerRepository(
     }
 
     // A block is named by its day and id, as it is stored.
-    fun updateTitle(date: LocalDate, id: Long, title: String): PlannerWriteResult {
+    fun updateTitle(date: LocalDate, id: Long, title: String): Int {
         return writeCatching {
             rowResult(dao.updateTitle(date.toEpochDay(), id, normalizeTitle(title)))
         }
     }
 
-    fun updateTime(date: LocalDate, id: Long, startMinutes: Int, durationMinutes: Int): PlannerWriteResult {
+    fun updateTime(date: LocalDate, id: Long, startMinutes: Int, durationMinutes: Int): Int {
         return writeCatching {
             dao.withTransaction {
                 // The clamped duration always fits after the snapped start.
@@ -90,13 +92,13 @@ class PlannerRepository(
         }
     }
 
-    fun deleteBlock(date: LocalDate, id: Long): PlannerWriteResult {
+    fun deleteBlock(date: LocalDate, id: Long): Int {
         return writeCatching {
             rowResult(dao.deleteBlock(date.toEpochDay(), id))
         }
     }
 
-    fun restoreBlock(block: PlannerBlock): PlannerWriteResult {
+    fun restoreBlock(block: PlannerBlock): Int {
         return writeCatching {
             dao.withTransaction transaction@{
                 if (dao.getBlock(block.date.toEpochDay(), block.id) != null) {
@@ -129,7 +131,7 @@ class PlannerRepository(
         excludedBlockId
     )
 
-    private inline fun writeCatching(block: () -> PlannerWriteResult): PlannerWriteResult {
+    private inline fun writeCatching(block: () -> Int): Int {
         val result = try {
             block()
         } catch (_: IllegalArgumentException) {
@@ -145,7 +147,7 @@ class PlannerRepository(
     }
 }
 
-private fun rowResult(rows: Int): PlannerWriteResult =
+private fun rowResult(rows: Int): Int =
     if (rows == 1) PlannerWriteResult.Success else PlannerWriteResult.MissingBlock
 
 private fun normalizeTitle(title: String): String {

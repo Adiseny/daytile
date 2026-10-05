@@ -13,7 +13,7 @@ import java.util.concurrent.Executors
 // The planner's one background thread. Every database call and reminder sync runs on it,
 // in the order asked: a transaction's statements share a thread, as the platform requires,
 // and nothing needs a lock.
-internal val Worker: Executor = Executors.newSingleThreadExecutor { Thread(it, "planner-db") }
+internal val Worker: Executor = Executors.newSingleThreadExecutor()
 
 private val MainHandler = Handler(Looper.getMainLooper())
 
@@ -59,6 +59,6 @@ class PlannerApp : Application() {
     fun warmUpInterfaceOnce() {
         if (interfaceWarmedUp) return
         interfaceWarmedUp = true
-        Thread({ runCatching { warmUpInterface() } }, "planner-warm-up-ui").start()
+        Thread { runCatching { warmUpInterface() } }.start()
     }
 }
