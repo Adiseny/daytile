@@ -187,6 +187,41 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         assertEquals(1008, storedToday().size)
     }
 
+    @Test fun denseDayKeepsLongAndHeldTilesAcrossWindowChanges() {
+        launch {
+            withTransaction {
+                for (start in 0 until 1440 step 10) repeat(7) { column -> add("Window $start/$column", start, 10) }
+                add("All day", start = 0, duration = 1440)
+            }
+        }
+        scrollTo(0)
+        awaitTile("Window 0/0")
+        val held = main { tile("Window 0/0") }
+        val long = main { tile("All day") }
+        main {
+            val now = SystemClock.uptimeMillis()
+            MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, held.width * 0.1f, held.height * 0.4f, 0).let {
+                held.onTouchEvent(it)
+                it.recycle()
+            }
+        }
+        await { main { (held.parent as DayView).activeBlockId == held.block.id } }
+        scrollTo(100_000)
+        main {
+            assertSame(held, tile("Window 0/0"))
+            assertSame(long, tile("All day"))
+            held.cancelGesture()
+        }
+        scrollTo(main { screen.descendants().filterIsInstance<android.widget.ScrollView>().first().scrollY - screen.context.px(HourHeight) })
+        main {
+            assertFalse(screen.descendants().filterIsInstance<TimeBlockView>().any { it === held })
+            assertSame(long, tile("All day"))
+        }
+        scrollTo(0)
+        awaitTile("Window 0/0")
+        assertEquals(1009, storedToday().size)
+    }
+
     @Test fun detachingDuringAHoldCancelsAutoScrollAndKeepsTheSavedBlock() {
         launch { add("Held", duration = 180) }
         awaitTile("Held")

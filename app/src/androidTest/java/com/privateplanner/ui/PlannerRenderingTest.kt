@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.widget.ScrollView
 import com.privateplanner.domain.PlannerBlock
@@ -18,6 +19,49 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PlannerRenderingTest : PlannerTestHost() {
+    @Test fun cancelledResizeRestoresEveryPixelAndItsSpokenTime() {
+        launch { add("Resize 保持", start = 540, duration = 60) }
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(480)) })
+        awaitTile("Resize 保持")
+        main {
+            val tile = tile("Resize 保持")
+            fun capture(): Bitmap = Bitmap.createBitmap(tile.width, activity.px(240f), Bitmap.Config.ARGB_8888).also {
+                Canvas(it).apply { drawColor(screen.palette.Paper); tile.draw(this) }
+            }
+            val before = capture()
+            val spoken = tile.contentDescription
+            val down = SystemClock.uptimeMillis()
+            val y = tile.height - activity.dp(4f)
+            fun send(action: Int, at: Float) {
+                MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, tile.width / 2f, at, 0).let {
+                    tile.onTouchEvent(it)
+                    it.recycle()
+                }
+            }
+            try {
+                send(MotionEvent.ACTION_DOWN, y)
+                send(MotionEvent.ACTION_MOVE, y + activity.dp(80f))
+                val preview = capture()
+                try {
+                    assertFalse("The preview must have resized", before.sameAs(preview))
+                    assertNotEquals(spoken, tile.contentDescription)
+                    assertEquals(tile.contentDescription, tile.createAccessibilityNodeInfo().contentDescription)
+                } finally { preview.recycle() }
+                send(MotionEvent.ACTION_CANCEL, y + activity.dp(80f))
+                val cancelled = capture()
+                try {
+                    assertTrue("Cancel must restore text, geometry and ink", before.sameAs(cancelled))
+                    assertEquals(spoken, tile.contentDescription)
+                    assertEquals(spoken, tile.createAccessibilityNodeInfo().contentDescription)
+                } finally { cancelled.recycle() }
+            } finally {
+                tile.cancelGesture()
+                before.recycle()
+            }
+        }
+        assertEquals(60, stored("Resize 保持")!!.durationMinutes)
+    }
+
     @Test fun editedTilesMatchFreshLayoutsInEveryPixel() {
         launch()
         main {

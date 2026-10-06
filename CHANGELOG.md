@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.1 — 6 October 2026
+
+- Crowded-day scrolling no longer clones the tile lookup's key and value arrays or searches that clone for every retained tile. Long blocks and a block being dragged remain in the visible window as before.
+- Tile placement formats accessibility descriptions only when the spoken content changes. Initial placement and resize steps each format the description once, and moving a short tile retains its title layout when only its visual offset changes.
+- Pending moves and shared text paints use primitive ID lookups. Resizing a block preserves the day's existing order without sorting it again, and title submission reads the input once.
+- Removed four duplicate gesture fields; previews and active styling follow the existing gesture state. Features, resources, database schema and stored task size are unchanged. Verification and size measurements are recorded in `docs/optimisation.md`.
+
 ## 1.5.0 — 5 October 2026
 
 - Changing day follows the finger. A sideways drag carries the day's blocks with it and the next day's in beside them, behind the hour column. Let go 72dp along, or flick, and the day changes; short of that, or flicking back, it returns. The heading leans after the finger and changes, with the tick and the current time's line, at the point where letting go changes day. A day picked from the date sheet or reached with Back slides in the same way. Where animations are switched off the blocks still follow the finger and nothing moves by itself.

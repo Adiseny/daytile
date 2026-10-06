@@ -1,5 +1,6 @@
 package com.privateplanner.ui
 
+import android.util.LongSparseArray
 import com.privateplanner.Reminders
 import com.privateplanner.Worker
 import com.privateplanner.data.PlannerRepository
@@ -77,7 +78,7 @@ class PlannerViewModel(
     fun cachedBlocks(date: LocalDate): List<PlannerBlock>? = dayCache[date]
 
     // Moves and resizes that are on screen but not yet saved, by block.
-    private val pendingTimes = HashMap<Long, PendingTime>()
+    private val pendingTimes = LongSparseArray<PendingTime>()
     private val deletingBlockIds = HashSet<Long>()
     private var sheetWriting = false
     private var undoing = false
@@ -266,7 +267,7 @@ class PlannerViewModel(
     // On screen at once and saved behind. A save that fails leaves the day as stored.
     private fun setTime(block: PlannerBlock, startMinutes: Int, durationMinutes: Int) {
         val pending = PendingTime(startMinutes, durationMinutes)
-        pendingTimes[block.id] = pending
+        pendingTimes.put(block.id, pending)
         publish(block.date, blocks)
         write(block.date, { repository.updateTime(block.date, block.id, startMinutes, durationMinutes) }) { result ->
             // A later change to the same block has taken over, and its result settles both.
@@ -302,16 +303,18 @@ class PlannerViewModel(
     private fun block(blockId: Long): PlannerBlock? = blocks.firstOrNull { it.id == blockId }
 
     private fun withPendingTimes(blocks: List<PlannerBlock>): List<PlannerBlock> {
-        if (pendingTimes.isEmpty()) return blocks
+        if (pendingTimes.size() == 0) return blocks
         var merged: ArrayList<PlannerBlock>? = null
+        var moved = false
         for (index in blocks.indices) {
             val block = blocks[index]
             val pending = pendingTimes[block.id] ?: continue
             if (pending.startMinutes == block.startMinutes && pending.durationMinutes == block.durationMinutes) continue
             if (merged == null) merged = ArrayList(blocks)
+            if (pending.startMinutes != block.startMinutes) moved = true
             merged[index] = block.copy(startMinutes = pending.startMinutes, durationMinutes = pending.durationMinutes)
         }
-        merged?.sortWith(PlannerBlockOrder)
+        if (moved) merged?.sortWith(PlannerBlockOrder)
         return merged ?: blocks
     }
 

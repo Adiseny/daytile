@@ -198,28 +198,36 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         val dense = blocks.size > 64
         val windowStart = if (dense) visibleStart() else Int.MIN_VALUE
         val end = if (dense) windowStart + ceil(viewportHeight() / hourPx * 60).toInt() + 90 else Int.MAX_VALUE
-        val stale = tiles.clone()
         for (block in blocks) {
             if (dense && block.startMinutes > end && activeBlockId == 0L) break
             if (dense && block.id != activeBlockId &&
                 (block.endMinutes < windowStart || block.startMinutes > end)
             ) continue
-            stale.remove(block.id)
             val columns = layouts[block.id]!!
             val tile = tiles[block.id]
             if (tile != null) {
+                tile.retained = true
                 tile.bind(block, columns)
             } else {
                 TimeBlockView(context, host, this, block, columns).also {
+                    it.retained = true
                     it.translationX = shift
                     tiles.put(block.id, it)
                     addView(it, childCount - 1)
                 }
             }
         }
-        for (index in 0 until stale.size()) {
-            tiles.remove(stale.keyAt(index))
-            removeView(stale.valueAt(index))
+        // Do not clone both sparse-array buffers or search the clone for every kept
+        // tile. Collect removals first: valueAt() compacts after a remove, so deleting
+        // during this scan would copy the remaining tiles once per removed child.
+        val stale = ArrayList<TimeBlockView>()
+        for (index in 0 until tiles.size()) {
+            val tile = tiles.valueAt(index)
+            if (tile.retained) tile.retained = false else stale.add(tile)
+        }
+        for (tile in stale) {
+            tiles.remove(tile.block.id)
+            removeView(tile)
         }
         // Adding/removing a child already requests layout. Existing tiles place only
         // themselves when their geometry changes; scrolling needs no whole-screen layout.

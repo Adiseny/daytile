@@ -1,3 +1,56 @@
+# Fewer allocations in interactions — 1.5.1, 6 October 2026
+
+This pass audits all production Kotlin files, resources, dependencies and packaging on
+top of 1.5.0. The remaining useful changes are in tile updates, crowded-day scrolling
+and pending saves. No dependency, database column, index, setting or persistent cache is
+added, and no feature or resource changes.
+
+## Changes
+
+- Initial tile placement formats its accessibility description once instead of twice.
+  A snapped resize step also formats it once instead of twice. Geometry updates only
+  invalidate the text layout when its width or height changes; a changed visual offset
+  retains the existing title and duration layouts. Descriptions still use the platform
+  setter, so accessibility services receive content updates.
+- A tile's preview and active styling follow its gesture phase and last snapped value.
+  The two duplicate preview fields and two duplicate active flags are removed.
+- Visible tiles are marked and unmarked in one pass instead of cloning both buffers of
+  the tile lookup and removing each retained ID from the clone. Only removed views go
+  into a temporary list. Removals occur after the scan to avoid repeatedly compacting
+  Android's sparse array. Long tiles crossing the viewport and the active gesture are
+  retained, including while the two days of a swipe are paired.
+- Pending times and shared text paints use the platform's primitive-key
+  `LongSparseArray`, avoiding boxed keys in those lookups. A pending resize changes no
+  start or ID, so its merged day keeps the existing order without another sort. Pending
+  moves still sort, including when an earlier save finishes underneath a newer move.
+- Title submission copies the input to a string once instead of twice. Tile binding
+  checks block equality once, and placement checks its text geometry once.
+
+## Size
+
+| Measurement | 1.5.0 | 1.5.1 |
+| --- | ---: | ---: |
+| Uncompressed `classes.dex` | 99,100 bytes | 99,024 bytes |
+| Unsigned release APK | 111,685 bytes | 111,609 bytes |
+
+The database and its queries are unchanged; a history of hundreds or thousands of
+tasks needs exactly the same storage as before. The gain here is avoided work and
+temporary allocations rather than a smaller download.
+
+## Verification and limits
+
+- `:app:test` (66 unit tests), `:app:lintRelease` (no errors), `:app:verifyPrivacy` and
+  `:app:assembleRelease` pass, including the R8 checks that discard every Kotlin library
+  class and interface.
+- All 46 instrumented tests pass on the Android 17 emulator with animations on. Two are
+  new: every pixel and the spoken time after a cancelled resize, and long and held tiles
+  across crowded-day window changes.
+- A minified copy of published 1.5.0 with blocks on two days was updated in place. Both
+  days match 1.5.0 pixel for pixel, and a move, a resize and a day change then work as
+  before.
+- No timing was measured. The emulator cannot resolve differences of a few
+  milliseconds, so no speed figure is claimed.
+
 # The day follows the finger — 5 October 2026
 
 One change on top of 1.4.2, released as 1.5.0: a sideways drag carries the day's blocks

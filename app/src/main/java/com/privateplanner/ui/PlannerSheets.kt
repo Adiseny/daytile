@@ -175,7 +175,8 @@ internal class InputSheet(
     }
 
     private fun submit() {
-        if (!text.isBlankTitle()) onSubmit.accept(text)
+        val title = text
+        if (!title.isBlankTitle()) onSubmit.accept(title)
     }
 
     private fun submittable(yes: Boolean) {

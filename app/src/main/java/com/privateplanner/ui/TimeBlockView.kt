@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.os.Bundle
 import android.text.TextPaint
+import android.util.LongSparseArray
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
@@ -77,11 +78,13 @@ internal fun titleFollowOffsetPx(
 
 // Tiles draw one at a time on the main thread, each setting what it needs, so they share one paint.
 private val TilePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-private val TextPaints = HashMap<Long, TextPaint>()
+private val TextPaints = LongSparseArray<TextPaint>()
 
 // Tiles share a text paint per size and weight; each sets its ink as it draws.
-private fun Context.tilePaint(size: Float, weight: Int): TextPaint =
-    TextPaints.getOrPut((sp(size) * 64f).toLong() * 1000 + weight) { textPaint(size, weight) }
+private fun Context.tilePaint(size: Float, weight: Int): TextPaint {
+    val key = (sp(size) * 64f).toLong() * 1000 + weight
+    return TextPaints[key] ?: textPaint(size, weight).also { TextPaints.put(key, it) }
+}
 
 // What a block offers accessibility services beyond a tap. A service names a custom action
 // by its id alone, and these lie where an app's own ids do, apart from every platform action.
@@ -115,16 +118,14 @@ internal class TimeBlockView(
     var columns = columns
         private set
 
-    private var previewStartMinutes = NoPreviewMinutes
-    private var previewDurationMinutes = NoPreviewMinutes
-    private var moveActive = false
-    private var resizeActive = false
+    // Set while the day's visible tiles are synchronised, then cleared in one pass.
+    var retained = false
 
     private val displayedStartMinutes: Int
-        get() = if (previewStartMinutes != NoPreviewMinutes) previewStartMinutes else block.startMinutes
+        get() = if (phase == Moving) lastSnapped else block.startMinutes
 
     val displayedDurationMinutes: Int
-        get() = if (previewDurationMinutes != NoPreviewMinutes) previewDurationMinutes else block.durationMinutes
+        get() = if (phase == Resizing) lastSnapped else block.durationMinutes
 
     // The visual tile within the touch target: its width and height in dp, which choose
     // the text, and its place in pixels.
@@ -148,11 +149,12 @@ internal class TimeBlockView(
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-        contentChanged()
+        describe()
     }
 
     fun bind(block: PlannerBlock, columns: BlockLayout) {
-        if (this.block == block && this.columns == columns) return
+        val changed = this.block != block
+        if (!changed && this.columns == columns) return
         val renamed = this.block.title != block.title
         val moved = this.block.startMinutes != block.startMinutes ||
             this.block.durationMinutes != block.durationMinutes || this.columns != columns
@@ -160,17 +162,17 @@ internal class TimeBlockView(
         this.columns = columns
         if (moved) day.place(this)
         contentChanged(layout = renamed)
+        if (changed) describe()
     }
 
     fun setVisual(tileWidth: Float, visualHeight: Float, visualOffsetPx: Int, visualHeightPx: Int) {
-        if (this.tileWidth == tileWidth && this.visualHeight == visualHeight &&
-            this.visualOffsetPx == visualOffsetPx && this.visualHeightPx == visualHeightPx
-        ) return
+        val textChanged = this.tileWidth != tileWidth || this.visualHeight != visualHeight || this.visualHeightPx != visualHeightPx
+        if (!textChanged && this.visualOffsetPx == visualOffsetPx) return
         this.tileWidth = tileWidth
         this.visualHeight = visualHeight
         this.visualOffsetPx = visualOffsetPx
         this.visualHeightPx = visualHeightPx
-        contentChanged()
+        contentChanged(layout = textChanged)
     }
 
     fun paletteChanged() = invalidate()
@@ -187,12 +189,17 @@ internal class TimeBlockView(
         }
     }
 
-    private fun contentChanged(layout: Boolean = true) {
+    private fun contentChanged(layout: Boolean) {
         contentStale = contentStale || layout
+        invalidate()
+    }
+
+    // Geometry alone does not change what a screen reader says. In particular, the
+    // first placement and every resize must not format the same description twice.
+    private fun describe() {
         contentDescription = "${block.title}, " +
             "${TimeFormatter.range(block.startMinutes, displayedDurationMinutes, " to ")}, " +
             "${TimeFormatter.duration(displayedDurationMinutes)}. Actions: Rename, Delete."
-        invalidate()
     }
 
     private fun px(dp: Float): Int = Math.round(dp * density)
@@ -286,7 +293,7 @@ internal class TimeBlockView(
         if (contentStale) layOutContent()
         // Moving changes only the time label. Keep the title and duration layouts.
         if (metaStart != displayedStartMinutes) meta = meta?.let { timeText(it.width, it.height) }
-        val active = moveActive || resizeActive
+        val active = phase == Moving || phase == Resizing
         val background = blockBackgroundArgb(block.startMinutes, columns.columnIndex)
         val composite = compositedTileBackground(background, host.palette.Paper, active)
         if (inkBackground != composite) {
@@ -459,7 +466,6 @@ internal class TimeBlockView(
     private fun startMove() {
         startGesture()
         phase = Moving
-        moveActive = true
         lastSnapped = initial.startMinutes
         lastSavable = initial.startMinutes
         hasDraggedAfterHold = false
@@ -471,7 +477,6 @@ internal class TimeBlockView(
     private fun startResize() {
         startGesture()
         phase = Resizing
-        resizeActive = true
         lastSnapped = initial.durationMinutes
         lastSavable = initial.durationMinutes
         invalidate()
@@ -503,7 +508,6 @@ internal class TimeBlockView(
         translationY = (snapped - initial.startMinutes) / 60f * hourPx
         if (snapped == lastSnapped) return
         lastSnapped = snapped
-        previewStartMinutes = snapped
         invalidate()
         if (ticks(host.overlapPolicy(block.id).placement(snapped, initial.durationMinutes))) lastSavable = snapped
     }
@@ -516,9 +520,8 @@ internal class TimeBlockView(
         )
         if (snapped == lastSnapped) return
         lastSnapped = snapped
-        previewDurationMinutes = snapped
         day.place(this)
-        contentChanged()
+        describe()
         if (ticks(host.overlapPolicy(block.id).placement(initial.startMinutes, snapped))) lastSavable = snapped
     }
 
@@ -534,15 +537,12 @@ internal class TimeBlockView(
             if (was == Moving && lastSavable != initial.startMinutes) host.onBlockMove(block.id, lastSavable)
             if (was == Resizing && lastSavable != initial.durationMinutes) host.onBlockResize(block.id, lastSavable)
         }
-        moveActive = false
-        resizeActive = false
-        previewStartMinutes = NoPreviewMinutes
-        previewDurationMinutes = NoPreviewMinutes
         translationY = 0f
         translationZ = 0f
         day.activeBlockId = 0
         day.place(this)
         contentChanged(layout = false)
+        if (was == Resizing) describe()
     }
 
     fun cancelGesture() = finish(cancelled = true)
