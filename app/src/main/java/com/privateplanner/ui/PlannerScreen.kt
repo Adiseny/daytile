@@ -1099,9 +1099,16 @@ internal open class PlannerScreen(
 
         override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
             super.onLayout(changed, left, top, right, bottom)
-            if (!weekAtFirstHour || height == 0) return
-            weekAtFirstHour = false
-            scrollTo(0, Math.round(WeekFirstHour * week.hourPx))
+            if (weekAtFirstHour && height > 0) {
+                weekAtFirstHour = false
+                scrollTo(0, Math.round(WeekFirstHour * week.hourPx))
+            }
+            week.scrolled()
+        }
+
+        override fun onScrollChanged(left: Int, top: Int, oldLeft: Int, oldTop: Int) {
+            super.onScrollChanged(left, top, oldLeft, oldTop)
+            week.scrolled()
         }
 
         // The week is drawn from beneath its dates down and nowhere above: the heading and

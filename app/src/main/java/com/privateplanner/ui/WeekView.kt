@@ -14,6 +14,7 @@ import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import com.privateplanner.domain.BlockLayout
+import com.privateplanner.domain.BlockLayouts
 import com.privateplanner.domain.MovePlacement
 import com.privateplanner.domain.OverlapLayoutCalculator
 import com.privateplanner.domain.OverlapPolicy
@@ -21,6 +22,7 @@ import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.blockBackgroundArgb
+import com.privateplanner.domain.sameBlockTimes
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -98,6 +100,8 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
     private var page = Page(context)
     private var other = Page(context)
     private var paired = false
+    private var windowStart = Int.MIN_VALUE
+    private var windowHeight = 0
 
     // Where the day begins beneath the heading and how tall an hour is, both given by the
     // screen: from the first hour to midnight fills what the heading leaves, where an
@@ -144,6 +148,7 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
         topPx = top
         bottomPx = bottom
         hourPx = hour
+        scrolled()
         requestLayout()
         invalidate()
     }
@@ -165,15 +170,43 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
 
     // One day of the week on show. A day whose list is the one already shown costs nothing.
     fun setDay(day: Int, blocks: List<PlannerBlock>) {
-        if (page.shown[day] === blocks) return
-        page.shown[day] = blocks
-        sync(day, blocks, page)
+        setDay(day, blocks, page)
+    }
+
+    private fun setDay(day: Int, blocks: List<PlannerBlock>, into: Page) {
+        val before = into.shown[day]
+        if (before === blocks) return
+        if (!sameBlockTimes(before, blocks)) into.layouts[day] = OverlapLayoutCalculator.calculate(blocks)
+        into.shown[day] = blocks
+        sync(day, blocks, into)
+    }
+
+    // Like the day, crowded columns keep a half-hour lead on each side of the
+    // viewport. A long block crossing it and a held block are always retained.
+    private fun visibleStart(): Int = (max(host.weekScrollPx - topPx, 0) / hourPx * 2).toInt() * 30 - 30
+
+    fun scrolled() {
+        val start = visibleStart()
+        val height = host.visibleBottomPx
+        if (windowStart == start && windowHeight == height) return
+        windowStart = start
+        windowHeight = height
+        for (day in 0..6) {
+            page.shown[day]?.let { if (it.size > 64) sync(day, it, page) }
+            if (paired) other.shown[day]?.let { if (it.size > 64) sync(day, it, other) }
+        }
     }
 
     private fun sync(day: Int, blocks: List<PlannerBlock>, into: Page) {
         val tiles = into.tiles
-        val layouts = OverlapLayoutCalculator.calculate(blocks)
+        val layouts = into.layouts[day]
+        val dense = blocks.size > 64
+        val start = visibleStart()
+        val viewport = host.visibleBottomPx.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        val end = start + ceil(viewport / hourPx * 60).toInt() + 90
         for (block in blocks) {
+            if (dense && block.startMinutes > end && active?.day != day) break
+            if (dense && active?.block?.id != block.id && (block.endMinutes < start || block.startMinutes > end)) continue
             val columns = layouts[block.id]!!
             val tile = tiles[block.id]
             if (tile != null) {
@@ -214,8 +247,7 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
         other.visibility = VISIBLE
         other.today = today
         for (day in 0..6) {
-            other.shown[day] = days[day]
-            sync(day, days[day], other)
+            setDay(day, days[day], other)
         }
     }
 
@@ -329,6 +361,7 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
     private inner class Page(context: Context) : ViewGroup(context) {
         val tiles = LongSparseArray<WeekTile>()
         val shown = arrayOfNulls<List<PlannerBlock>>(7)
+        val layouts = Array(7) { BlockLayouts.Empty }
 
         // Today's place in this week, or -1.
         var today = -1
@@ -350,7 +383,10 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
         fun clear() {
             removeAllViews()
             tiles.clear()
-            for (day in 0..6) shown[day] = null
+            for (day in 0..6) {
+                shown[day] = null
+                layouts[day] = BlockLayouts.Empty
+            }
             today = -1
         }
 
@@ -437,6 +473,8 @@ internal class WeekTile(
         private set
     private var titleY = 0
     private var stale = true
+    private var inkBackground = 0
+    private var ink = 0
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -495,12 +533,16 @@ internal class WeekTile(
         // next band, whose edge must not show through it, and one being carried must hide
         // what it passes over.
         val paper = host.palette.Paper
-        val ink = tileInkFor(background, paper, moving)
+        val composite = compositedTileBackground(background, paper, moving)
+        if (inkBackground != composite) {
+            inkBackground = composite
+            ink = tileInkFor(composite)
+        }
         val w = width.toFloat()
         val h = height.toFloat()
         val radius = min(WeekTileRadius * density, min(w, h) / 2f)
         TilePaint.style = Paint.Style.FILL
-        TilePaint.color = compositedTileBackground(background, paper, moving)
+        TilePaint.color = composite
         canvas.drawRoundRect(0f, 0f, w, h, radius, radius, TilePaint)
         val handleHeight = min(2f * density, h / 3f)
         val handleTop = if (phase == Resizing) h - min(2f * density, h / 4f) - handleHeight else h
@@ -642,7 +684,6 @@ internal class WeekTile(
         if (to == lastDay && start == lastStart) return
         lastDay = to
         lastStart = start
-        invalidate()
         val placement = host.overlapPolicy(to, block.id).placement(start, block.durationMinutes)
         if (placement != MovePlacement.Invalid) host.haptic(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
         if (placement == MovePlacement.Savable) {

@@ -35,7 +35,10 @@ internal fun compositedTileBackground(background: Int, paper: Int, active: Boole
     compositeOver(withAlpha(background, if (active) ActiveTileAlpha else IdleTileAlpha), paper)
 
 internal fun tileInkFor(background: Int, paper: Int, active: Boolean): Int =
-    if (luminance(compositedTileBackground(background, paper, active)) >= BlackWhiteContrastSwitchLuminance) {
+    tileInkFor(compositedTileBackground(background, paper, active))
+
+internal fun tileInkFor(composite: Int): Int =
+    if (luminance(composite) >= BlackWhiteContrastSwitchLuminance) {
         0xFF000000.toInt()
     } else {
         0xFFFFFFFF.toInt()
@@ -190,6 +193,12 @@ internal class TimeBlockView(
 
     fun paletteChanged() = invalidate()
 
+    // A carried tile changes only its time label. Compact tiles have no time label,
+    // so their recorded drawing can simply travel with the translation.
+    fun carried() {
+        if (meta != null) invalidate()
+    }
+
     // Only a long tile's pinned title follows the scroll.
     private var followOffset = 0
 
@@ -313,7 +322,7 @@ internal class TimeBlockView(
         val composite = compositedTileBackground(background, host.palette.Paper, active)
         if (inkBackground != composite) {
             inkBackground = composite
-            ink = tileInkFor(background, host.palette.Paper, active)
+            ink = tileInkFor(composite)
         }
         val w = width.toFloat()
         val h = visualHeightPx.toFloat()

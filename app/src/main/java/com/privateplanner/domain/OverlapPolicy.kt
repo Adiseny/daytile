@@ -1,5 +1,7 @@
 package com.privateplanner.domain
 
+import java.util.Arrays
+
 enum class MovePlacement {
     Invalid,
     TransientOnly,
@@ -100,7 +102,7 @@ class OverlapPolicy private constructor(
                 durationMinutes % TimeSnapper.SnapMinutes == 0
         }
 
-        private fun isSnappedValidBlock(block: PlannerBlock): Boolean {
+        internal fun isSnappedValidBlock(block: PlannerBlock): Boolean {
             return block.startMinutes >= 0 &&
                 block.durationMinutes > 0 &&
                 block.endMinutes <= TimeSnapper.MinutesPerDay &&
@@ -114,23 +116,53 @@ class OverlapPolicy private constructor(
 // of them leaves the day, and each has room where it lands with the others moved too. All
 // of them go or none does.
 fun canShift(blocks: List<PlannerBlock>, ids: LongArray, deltaMinutes: Int): Boolean {
-    val shifted = ArrayList<PlannerBlock>(blocks.size)
-    for (block in blocks) {
-        if (!ids.holds(block.id)) {
-            shifted.add(block)
-            continue
+    if (ids.isEmpty() || blocks.isEmpty()) return true
+    // Selection order has no meaning. Sort only an unsorted caller's IDs; the timeline
+    // already keeps them sorted, so a gesture needs no copied selection or boxed keys.
+    val selected = ids.sortedIds()
+    var minutesPerSlot = TimeSnapper.SnapMinutes
+    if (blocks.size > OverlapPolicy.MaxSavedOverlap) for (block in blocks) {
+        if (!OverlapPolicy.isSnappedValidBlock(block)) {
+            minutesPerSlot = 1
+            break
         }
-        val start = block.startMinutes + deltaMinutes
-        if (start < 0 || start + block.durationMinutes > TimeSnapper.MinutesPerDay) return false
-        shifted.add(block.copy(startMinutes = start))
     }
-    for (block in shifted) {
-        if (ids.holds(block.id) && !OverlapPolicy.from(shifted, block.id).canPlace(block.startMinutes, block.durationMinutes)) return false
+    // Each difference stores total occupancy in the low word and selected occupancy
+    // in the high word. Small days cannot exceed the limit and need no scratch array.
+    val counts = if (blocks.size > OverlapPolicy.MaxSavedOverlap) LongArray(TimeSnapper.MinutesPerDay / minutesPerSlot + 1) else null
+    for (block in blocks) {
+        val held = Arrays.binarySearch(selected, block.id) >= 0
+        var start = block.startMinutes
+        var end = block.endMinutes
+        if (held) {
+            start += deltaMinutes
+            end += deltaMinutes
+            if (start < 0 || block.durationMinutes < TimeSnapper.MinimumDurationMinutes ||
+                start > TimeSnapper.MinutesPerDay - block.durationMinutes ||
+                start % TimeSnapper.SnapMinutes != 0 || block.durationMinutes % TimeSnapper.SnapMinutes != 0
+            ) return false
+        }
+        if (counts == null) continue
+        start = start.coerceAtLeast(0).coerceAtMost(TimeSnapper.MinutesPerDay)
+        end = end.coerceAtLeast(0).coerceAtMost(TimeSnapper.MinutesPerDay)
+        if (start >= end) continue
+        val change = if (held) 0x100000001L else 1L
+        counts[start / minutesPerSlot] += change
+        counts[end / minutesPerSlot] -= change
+    }
+    // One sweep checks every moved block together. Crowding outside the selection is
+    // irrelevant. Minute slots retain the rules for older, unsnapped blocks too.
+    var active = 0L
+    for (change in counts ?: return true) {
+        active += change
+        if (active >= 0x100000000L && active.toInt() > OverlapPolicy.MaxSavedOverlap) return false
     }
     return true
 }
 
-fun LongArray.holds(id: Long): Boolean {
-    for (held in this) if (held == id) return true
-    return false
+internal fun LongArray.sortedIds(): LongArray {
+    for (index in 1 until size) if (this[index - 1] > this[index]) {
+        return copyOf().also { Arrays.sort(it) }
+    }
+    return this
 }

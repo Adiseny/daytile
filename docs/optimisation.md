@@ -1,3 +1,69 @@
+# Crowded plans — 1.6.1, 8 October 2026
+
+This pass audits the production code, queries, resources and release packaging on top of
+1.6.0. The substantial remaining work was in group moves and crowded weeks. Features,
+colours, overlap limits, reminder behaviour and the database schema stay the same.
+
+## Changes
+
+- Group moves check all selected blocks in one occupancy sweep, without copying the
+  day's blocks or constructing a policy for each selected block. One primitive array
+  holds total and selected occupancy. Normal days use five-minute slots; older unsnapped
+  days retain minute precision. Days with seven or fewer blocks need no scratch array.
+  Crowding outside the moved blocks remains irrelevant.
+- Lifted IDs are sorted once, with primitive binary searches during drawing, checking
+  and bulk saves. The redundant linear lookup helper is removed.
+  The selected blocks' earliest start and latest end are computed when the selection or
+  its times change, rather than on every pointer event. All lifted tiles survive crowded
+  day window changes, including blocks outside the viewport.
+- Crowded week columns keep nearby tiles, long blocks crossing the viewport and a held
+  block. Ordinary columns keep all their tiles. Scrolling maintains both pages during a
+  week swipe. Renaming keeps existing overlap layouts, using the same geometry check as
+  the day view.
+- Moving a week tile reuses its recorded drawing. Compact day tiles also reuse their
+  drawing when carried together; larger tiles update their time labels. Week tiles cache
+  their contrast ink, and both views avoid blending the same background twice.
+- Pending cross-day moves copy each affected list once and sort once. A move publishes
+  both days before notifying the screen, avoiding an intermediate render.
+
+## Measurements
+
+| Measurement | 1.6.0 | 1.6.1 |
+| --- | ---: | ---: |
+| Signed release APK | 140,029 bytes | 141,149 bytes |
+| Uncompressed `classes.dex` | 123,348 bytes | 124,468 bytes |
+
+The APK grows by 1,120 bytes (0.8%). Dex stays uncompressed, and no library class ships.
+No database column, index, persistent cache or settings file is added: task storage is
+unchanged, however many historical tasks are kept. The existing migrations remain
+necessary for users of earlier releases.
+
+On the Android 17 emulator, a valid five-minute move of 504 selected tasks took about
+10–11 ms with the previous check and roughly 0.03–0.15 ms with the replacement across
+separate runs. JIT warm-up and emulator variation affect these measurements. The reproducible
+host and Android benchmarks retain the previous algorithm as a reference. These timings
+measure the overlap check, not complete gestures or app launches.
+
+With 57,456 tasks (50,400 historical and 7,056 in the current week), alternating
+force-stopped minified copies gave launch medians of 261 ms and 250 ms. After discarding
+two warm-up runs each, the samples were 252, 263, 273, 261, 247 ms before and 243, 250,
+267, 241, 257 ms after. Launch performance is unchanged within the emulator's variation.
+
+## Verification
+
+- 77 unit tests pass, including 2,000 generated comparisons with the previous group
+  check, snapped and unsnapped boundaries, missing IDs and unrelated overcrowding.
+- 75 Android tests pass on Android 17, including a week containing 7,063 blocks, retaining
+  held and all-day tiles across viewport changes, updating carry bounds after edits,
+  gestures, accessibility, reminders and the 50,400-task migration and reclamation test.
+- Sixteen captures from instrumented copies of 1.6.0 and 1.6.1 match pixel for pixel:
+  ordinary and crowded days and weeks at both ends, in fixed light and dark palettes.
+- `:app:test`, `:app:lintRelease`, `:app:verifyPrivacy` and the signed release build pass.
+  Lint reports no errors; R8 verifies that no Kotlin library class or interface remains.
+- The release signature matches 1.6.0. Minified copies use isolated application IDs and
+  a debug signing key for launch, pinch and week-swipe checks. Updating an isolated copy
+  preserves all 57,456 tasks and every database byte; SQLite integrity checks pass.
+
 # Fewer allocations in interactions — 1.5.1, 6 October 2026
 
 This pass audits all production Kotlin files, resources, dependencies and packaging on

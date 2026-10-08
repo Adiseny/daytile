@@ -2,6 +2,17 @@ package com.privateplanner.domain
 
 import java.time.LocalDate
 
+// A title edit leaves every overlap column in place, in either view.
+internal fun sameBlockTimes(before: List<PlannerBlock>?, after: List<PlannerBlock>): Boolean {
+    if (before == null || before.size != after.size) return false
+    for (index in after.indices) {
+        val a = before[index]
+        val b = after[index]
+        if (a.id != b.id || a.startMinutes != b.startMinutes || a.durationMinutes != b.durationMinutes) return false
+    }
+    return true
+}
+
 const val MaxTitleLength = 120
 
 // A title of nothing but spaces is no title.

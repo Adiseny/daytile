@@ -418,6 +418,37 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         assertEquals(1009, storedToday().size)
     }
 
+    @Test fun liftedBlocksSurviveCrowdedWindowsAndCarryBoundsFollowEdits() {
+        launch {
+            withTransaction {
+                add("Lift 0/0", 0, 10)
+                for (start in 20 until 1440 step 10) repeat(7) { column -> add("Lift $start/$column", start, 10) }
+            }
+        }
+        scrollTo(0)
+        awaitTile("Lift 0/0")
+        val first = main { tile("Lift 0/0") }
+        val day = main { first.parent as DayView }
+        main { day.lift(first.block.id) }
+        scrollTo(100_000)
+        awaitTile("Lift 1430/6")
+        val last = main { tile("Lift 1430/6") }
+        main {
+            day.lift(last.block.id)
+            assertSame(first, tile("Lift 0/0"))
+            assertSame(last, tile("Lift 1430/6"))
+            assertEquals(0, day.clampCarry(-60))
+            assertEquals(0, day.clampCarry(60))
+            day.toggle(last.block.id)
+            assertEquals(60, day.clampCarry(60))
+            // Optimistic edits update the cached bounds before their save completes.
+            model.moveBlock(first.block.id, 5)
+            assertEquals(-5, day.clampCarry(-60))
+            day.putDownAll()
+        }
+        await { stored("Lift 0/0")!!.startMinutes == 5 }
+    }
+
     @Test fun detachingDuringAHoldCancelsAutoScrollAndKeepsTheSavedBlock() {
         launch { add("Held", duration = 180) }
         awaitTile("Held")

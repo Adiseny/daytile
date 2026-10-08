@@ -6,8 +6,9 @@ import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.canShift
-import com.privateplanner.domain.holds
+import com.privateplanner.domain.sortedIds
 import java.time.LocalDate
+import java.util.Arrays
 
 // How a write ended. Numbers rather than an enum, whose every constant would be an object
 // the app carries by name and makes as it starts.
@@ -106,10 +107,11 @@ class PlannerRepository(
             dao.withTransaction transaction@{
                 val day = date.toEpochDay()
                 val blocks = dao.getBlocksForDate(day)
-                if (!canShift(blocks, ids, deltaMinutes)) return@transaction PlannerWriteResult.RejectedOverlap
+                val selected = ids.sortedIds()
+                if (!canShift(blocks, selected, deltaMinutes)) return@transaction PlannerWriteResult.RejectedOverlap
                 var rows = 0
                 for (block in blocks) {
-                    if (ids.holds(block.id)) rows += dao.updateTime(day, block.id, block.startMinutes + deltaMinutes, block.durationMinutes)
+                    if (Arrays.binarySearch(selected, block.id) >= 0) rows += dao.updateTime(day, block.id, block.startMinutes + deltaMinutes, block.durationMinutes)
                 }
                 // One that has gone since takes none of the others with it.
                 if (rows > 0) PlannerWriteResult.Success else PlannerWriteResult.MissingBlock

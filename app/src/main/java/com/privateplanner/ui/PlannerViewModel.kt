@@ -192,10 +192,8 @@ class PlannerViewModel(
     }
 
     // The cached day again, with whatever is now pending.
-    private fun republish(date: LocalDate) {
-        val cached = dayCache[date]
-        if (cached != null) publish(date, cached)
-    }
+    private fun republish(date: LocalDate, quiet: Boolean = false): Boolean =
+        dayCache[date]?.let { publish(date, it, quiet) } ?: false
 
     // The day as the write now ending left it, for what the write's end has to find in it.
     private var written: List<PlannerBlock> = Collections.emptyList()
@@ -425,8 +423,9 @@ class PlannerViewModel(
         val moved = block.copy(date = toDate, startMinutes = start)
         pendingTimes.remove(block.id)
         pendingDays.put(block.id, moved)
-        republish(block.date)
-        republish(toDate)
+        val fromChanged = republish(block.date, quiet = true)
+        val toChanged = republish(toDate, quiet = true)
+        if (fromChanged || toChanged) changed()
         Worker.execute {
             val result = repository.moveToDay(block.date, block.id, toDate, start)
             val from = repository.getBlocksForDate(block.date)
@@ -487,24 +486,23 @@ class PlannerViewModel(
     // A day as read, with what is on screen ahead of its save: a block bound for another
     // day gone from this one and standing on that one, and moves and resizes within the day.
     private fun withPending(date: LocalDate, read: List<PlannerBlock>): List<PlannerBlock> {
-        var blocks = read
+        if (pendingDays.size() == 0 && pendingTimes.size() == 0) return read
+        var merged: ArrayList<PlannerBlock>? = null
+        var moved = false
         for (index in 0 until pendingDays.size()) {
             val bound = pendingDays.valueAt(index)
-            val at = blocks.indexOfFirst { it.id == bound.id }
+            val at = (merged ?: read).indexOfFirst { it.id == bound.id }
             // Here and staying, or neither here nor coming.
             if ((at >= 0) == (bound.date == date)) continue
-            val changed = ArrayList(blocks)
+            val changed = merged ?: ArrayList(read).also { merged = it }
             if (at >= 0) {
                 changed.removeAt(at)
             } else {
                 changed.add(bound)
-                changed.sortWith(PlannerBlockOrder)
+                moved = true
             }
-            blocks = changed
         }
-        if (pendingTimes.size() == 0) return blocks
-        var merged: ArrayList<PlannerBlock>? = null
-        var moved = false
+        val blocks = merged ?: read
         for (index in blocks.indices) {
             val block = blocks[index]
             val pending = pendingTimes[block.id] ?: continue

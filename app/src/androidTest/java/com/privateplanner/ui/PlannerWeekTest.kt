@@ -45,6 +45,74 @@ class PlannerWeekTest : PlannerTestHost() {
 
     private fun bounds(view: View) = main { Rect().also { view.getDrawingRect(it); screen.offsetDescendantRectToMyCoords(view, it) } }
 
+    @Test fun crowdedWeeksKeepNearbyLongAndHeldTilesAndReachBothEnds() {
+        launch {
+            withTransaction {
+                for (day in 0..6) {
+                    for (start in 0 until 1440 step 10) repeat(7) { column -> on(day, "Dense $day/$start/$column", start, 10) }
+                    on(day, "Long $day", 0, 1440)
+                }
+            }
+        }
+        showWeek()
+        awaitWeekTile("Dense 0/600/0")
+        val scroll = main { week().parent as View }
+        main { scroll.scrollTo(0, 0) }
+        awaitWeekTile("Dense 0/0/0")
+        val held = main { weekTile("Dense 0/0/0") }
+        val long = main { weekTile("Long 0") }
+        main {
+            val now = android.os.SystemClock.uptimeMillis()
+            android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, held.width / 2f, 0f, 0).let {
+                held.onTouchEvent(it)
+                it.recycle()
+            }
+        }
+        await { main { week().active === held } }
+        main { scroll.scrollTo(0, 100_000) }
+        awaitWeekTile("Dense 6/1430/6")
+        main {
+            assertSame(held, weekTile("Dense 0/0/0"))
+            assertSame(long, weekTile("Long 0"))
+            assertTrue("Offscreen tasks must have no tile", screen.descendants().filterIsInstance<WeekTile>().count() < 7 * 1008)
+            held.cancelGesture()
+            scroll.scrollTo(0, scroll.scrollY - Math.round(week().hourPx))
+        }
+        main {
+            assertFalse(screen.descendants().filterIsInstance<WeekTile>().any { it === held })
+            assertSame(long, weekTile("Long 0"))
+            scroll.scrollTo(0, 0)
+        }
+        awaitWeekTile("Dense 0/0/0")
+        assertEquals(1009, stored(0).size)
+        // Returning to a crowded day must preserve its separate window and stored tasks.
+        main { model.openDay(monday) }
+        await { main { !model.week } }
+        scrollTo(0)
+        awaitTile("Dense 0/0/0")
+    }
+
+    @Test fun aRenameRetainsWeekGeometryAndOnlyChangesTheTitlesLayout() {
+        launch { on(other, "Before", 600, 60); on(other, "Beside", 630, 60) }
+        showWeek()
+        awaitWeekTile("Before")
+        val before = main { weekTile("Before") }
+        val columns = main { before.columns }
+        val area = bounds(before)
+        main {
+            model.selectDay(before.block.date)
+            model.openRename(before.block.id)
+            model.renameBlock("After")
+        }
+        awaitWeekTile("After")
+        main {
+            assertSame(before, weekTile("After"))
+            assertSame(columns, before.columns)
+            assertTrue(before.contentDescription.startsWith("After,"))
+        }
+        assertEquals(area, bounds(before))
+    }
+
     @Test fun theWeekStandsEachDaysBlocksInItsOwnColumnUnderItsDate() {
         launch { for (day in 0..6) on(day, "Day $day", start = 600 + day * 30) }
         showWeek()

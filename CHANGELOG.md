@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.1 — 8 October 2026
+
+- Faster group moves on crowded days: one shared overlap check replaces block copies and a separate policy for every selected block. Small days need no scratch array; older unsnapped blocks retain the same rules.
+- Lifted blocks use faster ID lookups in drawing, checks and bulk saves, with cached drag bounds. All lifted tiles stay available when scrolling through a crowded day, and edits update the bounds immediately. The redundant linear lookup helper is removed.
+- Crowded weeks create tiles near the viewport, retaining long blocks and the block being held. Both pages stay current during a week swipe, and renaming retains the existing overlap layout.
+- Moving week tiles and carrying compact day tiles reuse their drawing. Contrast colours are cached, and duplicate background blending is removed.
+- Pending cross-day moves copy and sort each affected list once, then update both days in one screen refresh.
+- Features, appearance, reminder behaviour and task storage are unchanged. The signed APK grows by 1,120 bytes (0.8%). All 77 unit and 75 Android tests pass; sixteen day and week captures match 1.6.0 pixel for pixel in both palettes. Measurements are recorded in `docs/optimisation.md`.
+
 ## 1.6.0 — 8 October 2026
 
 - The week. Two fingers closing on the day bring in the week that holds it: seven columns from Monday to Sunday under their dates, headed by the month alone. From 6:00 to midnight fills the screen where it is tall enough for an hour to be 40dp, and the night is a scroll away. Each column is a stack of bands three hours tall in the colour blocks take in those hours, so the bands divide the time as the columns divide the days, and nothing is ruled. Swipe sideways for the next or the last week, which follows the finger as a change of day does. Tap a date to go into its day. Two fingers opening, or Back, return to the day the week was come into from, as it was left, wherever the fingers are and whatever was touched in the week meanwhile; after a swipe to another week, to the same day of that week. Between the two, the one fades and falls back before the other comes forward, so the day and the week are never on screen together.

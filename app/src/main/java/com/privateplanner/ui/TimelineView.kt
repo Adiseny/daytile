@@ -16,7 +16,7 @@ import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import com.privateplanner.domain.TimeSnapper
-import com.privateplanner.domain.holds
+import com.privateplanner.domain.sameBlockTimes
 import java.util.Arrays
 import java.util.Collections
 import kotlin.math.abs
@@ -145,11 +145,25 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
 
     val hasLifted: Boolean get() = lifted.size != 0
 
-    fun isLifted(id: Long): Boolean = lifted.holds(id)
+    fun isLifted(id: Long): Boolean = Arrays.binarySearch(lifted, id) >= 0
+
+    private var earliestLifted = TimeSnapper.MinutesPerDay
+    private var latestLifted = 0
+
+    private fun carryBounds() {
+        earliestLifted = TimeSnapper.MinutesPerDay
+        latestLifted = 0
+        for (block in blocks) if (isLifted(block.id)) {
+            earliestLifted = min(earliestLifted, block.startMinutes)
+            latestLifted = max(latestLifted, block.endMinutes)
+        }
+    }
 
     private fun setLifted(ids: LongArray) {
         val before = lifted
+        Arrays.sort(ids)
         lifted = ids
+        carryBounds()
         for (id in before) tiles[id]?.invalidate()
         for (id in ids) tiles[id]?.invalidate()
         host.onLiftedChanged()
@@ -187,14 +201,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
 
     // As far as the lifted blocks can go that way with all of them still in the day.
     fun clampCarry(deltaMinutes: Int): Int {
-        var earliest = TimeSnapper.MinutesPerDay
-        var latest = 0
-        for (block in blocks) {
-            if (!isLifted(block.id)) continue
-            earliest = min(earliest, block.startMinutes)
-            latest = max(latest, block.endMinutes)
-        }
-        return deltaMinutes.coerceAtLeast(-earliest).coerceAtMost(TimeSnapper.MinutesPerDay - latest)
+        return deltaMinutes.coerceAtLeast(-earliestLifted).coerceAtMost(TimeSnapper.MinutesPerDay - latestLifted)
     }
 
     // The lifted blocks follow the one that is held.
@@ -204,7 +211,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
             val tile = tiles[id] ?: continue
             tile.translationY = minutes / 60f * hourPx
             tile.translationZ = if (minutes != 0) 2f else 0f
-            tile.invalidate()
+            tile.carried()
         }
     }
 
@@ -245,15 +252,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
     fun setBlocks(value: List<PlannerBlock>) {
         if (blocks === value) return
         // A title edit leaves every column in place.
-        var moved = blocks.size != value.size
-        if (!moved) for (index in value.indices) {
-            val before = blocks[index]
-            val after = value[index]
-            if (before.id != after.id || before.startMinutes != after.startMinutes || before.durationMinutes != after.durationMinutes) {
-                moved = true
-                break
-            }
-        }
+        val moved = !sameBlockTimes(blocks, value)
         if (moved) layouts = OverlapLayoutCalculator.calculate(value)
         blocks = value
         // A lifted block that is no longer of this day is no longer lifted.
@@ -265,7 +264,7 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
                 kept = 0
                 for (block in value) if (isLifted(block.id)) ids[kept++] = block.id
                 setLifted(ids)
-            }
+            } else if (moved) carryBounds()
         }
         syncTiles()
     }
@@ -293,8 +292,8 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         val windowStart = if (dense) visibleStart() else Int.MIN_VALUE
         val end = if (dense) windowStart + ceil(viewportHeight() / hourPx * 60).toInt() + 90 else Int.MAX_VALUE
         for (block in blocks) {
-            if (dense && block.startMinutes > end && activeBlockId == 0L) break
-            if (dense && block.id != activeBlockId &&
+            if (dense && block.startMinutes > end && activeBlockId == 0L && !hasLifted) break
+            if (dense && block.id != activeBlockId && !isLifted(block.id) &&
                 (block.endMinutes < windowStart || block.startMinutes > end)
             ) continue
             val columns = layouts[block.id]!!
