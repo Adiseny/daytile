@@ -10,9 +10,13 @@ Download the APK from the [latest GitHub release](https://github.com/Adiseny/day
 
 ## Use
 
-Tap an empty time to add a block. Tap a block for its actions, hold and drag it to move it, or drag its lower handle to resize it. Swipe horizontally to change day and tap the date heading to jump further.
+Tap an empty time to add a block. The keyboard's own key adds it and stays for the next one, which starts where the last ended; the Add button adds it and closes. Tap a block for its actions, hold and drag it to move it, or drag its lower handle to resize it. Swipe horizontally to change day and tap the date heading to jump further.
 
-Tap the date heading and use the bell at the bottom left to switch reminders on. While they are on, every block reminds you five minutes before it starts, counting down to the start, and again as it starts, counting down to the end. A reminder clears itself when its countdown ends, or as soon as you delete or move the block. Reminders are off until you turn them on.
+To move several blocks at once, hold two of them together: both lift and stay lifted. Tap others to lift them too, then drag any lifted block up or down, and they all move together. A tap on empty time or Back puts them down where they were.
+
+Pinch in to see the week the day is in, and pinch out to go back to the day you were on. In the week, swipe horizontally to change week, tap a date to open that day, tap an empty time to add a block to that day, hold a block to move it to another day or time, and hold its lower edge to make it longer or shorter.
+
+Tap the date heading and use the bell at the bottom left to switch reminders on. While they are on, every block reminds you ten minutes before it starts, counting down to the start, and again as it starts, counting down to the end. A reminder clears itself when its countdown ends, or as soon as you delete or move the block. Reminders are off until you turn them on.
 
 Blocks take their colour from the time of day they start, and the planner follows the clock rather than the system theme: light by day, dark from 20:00 to 07:00.
 

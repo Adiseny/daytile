@@ -147,6 +147,8 @@ class PlannerDatabase(private val context: Context, private val name: String? = 
 
     override fun getBlocksForDate(dateEpochDay: Long) = blocks(BlocksForDateQuery, dateEpochDay)
 
+    override fun getBlocksForDays(firstEpochDay: Long, endEpochDay: Long) = blocks(BlocksForDaysQuery, firstEpochDay, endEpochDay)
+
     override fun getPotentiallyOverlappingBlocks(
         dateEpochDay: Long,
         startMinutes: Int,
@@ -187,6 +189,11 @@ class PlannerDatabase(private val context: Context, private val name: String? = 
     override fun updateTime(dateEpochDay: Long, id: Long, startMinutes: Int, durationMinutes: Int) =
         write("UPDATE blocks SET start = ?, duration = ?$OneBlock", null, startMinutes.toLong(), durationMinutes.toLong(), dateEpochDay, id)
 
+    override fun moveBlock(dateEpochDay: Long, id: Long, toEpochDay: Long, startMinutes: Int, durationMinutes: Int) = write(
+        "UPDATE blocks SET day = ?, start = ?, duration = ?$OneBlock",
+        null, toEpochDay, startMinutes.toLong(), durationMinutes.toLong(), dateEpochDay, id
+    )
+
     override fun deleteBlock(dateEpochDay: Long, id: Long) = write("DELETE FROM blocks$OneBlock", null, dateEpochDay, id)
 
     override fun getBlock(dateEpochDay: Long, id: Long) =
@@ -205,10 +212,17 @@ class PlannerDatabase(private val context: Context, private val name: String? = 
         try {
             if (!cursor.moveToFirst()) return Collections.emptyList()
             // Every block query binds its day first. Share that date across rows instead
-            // of copying the same column into SQLite's cursor window for every task.
-            val date = LocalDate.ofEpochDay(numbers[0])
+            // of copying the same column into SQLite's cursor window for every task. Only
+            // a query over several days carries the day, as its last column.
+            var day = numbers[0]
+            var date = LocalDate.ofEpochDay(day)
+            val severalDays = cursor.columnCount > 4
             val rows = ArrayList<PlannerBlock>(cursor.count)
             do {
+                if (severalDays && cursor.getLong(4) != day) {
+                    day = cursor.getLong(4)
+                    date = LocalDate.ofEpochDay(day)
+                }
                 rows += PlannerBlock(
                     id = cursor.getLong(0),
                     date = date,
@@ -267,6 +281,9 @@ private const val LastId = "PRAGMA application_id"
 
 // The orders asked for below are the table's own, so none of them sorts.
 private const val BlocksForDateQuery = "SELECT $BlockColumns FROM blocks WHERE day = ? ORDER BY start, id"
+
+// A week is one run of neighbouring rows too.
+private const val BlocksForDaysQuery = "SELECT $BlockColumns, day FROM blocks WHERE day >= ? AND day < ? ORDER BY day, start, id"
 
 // Only feeds overlap counts, so row order does not matter.
 private const val OverlappingQuery =

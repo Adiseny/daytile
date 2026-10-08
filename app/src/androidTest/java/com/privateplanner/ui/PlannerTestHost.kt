@@ -112,6 +112,40 @@ open class PlannerTestHost {
     internal fun PlannerDatabase.add(title: String, start: Int = 540, duration: Int = 60) =
         insertBlock(PlannerBlock(date = LocalDate.now(), title = title, startMinutes = start, durationMinutes = duration))
 
+    // One event of a gesture with any number of fingers, given to the screen.
+    internal fun touch(downTime: Long, action: Int, ids: IntArray, xs: FloatArray, ys: FloatArray) = main {
+        val properties = Array(ids.size) {
+            MotionEvent.PointerProperties().apply { id = ids[it]; toolType = MotionEvent.TOOL_TYPE_FINGER }
+        }
+        val coords = Array(ids.size) {
+            MotionEvent.PointerCoords().apply { x = xs[it]; y = ys[it]; pressure = 1f; size = 1f }
+        }
+        MotionEvent.obtain(
+            downTime, SystemClock.uptimeMillis(), action, ids.size, properties, coords, 0, 0, 1f, 1f, 0, 0,
+            android.view.InputDevice.SOURCE_TOUCHSCREEN, 0
+        ).let {
+            screen.dispatchTouchEvent(it)
+            it.recycle()
+        }
+    }
+
+    // Two fingers, one above the other about a point, drawn together or apart.
+    internal fun pinch(x: Float, y: Float, from: Float, to: Float) {
+        val down = SystemClock.uptimeMillis()
+        val both = intArrayOf(0, 1)
+        val xs = floatArrayOf(x, x)
+        fun ys(span: Float) = floatArrayOf(y - span / 2f, y + span / 2f)
+        touch(down, MotionEvent.ACTION_DOWN, intArrayOf(0), floatArrayOf(x), floatArrayOf(y - from / 2f))
+        touch(down, MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), both, xs, ys(from))
+        for (step in 1..10) {
+            SystemClock.sleep(12)
+            touch(down, MotionEvent.ACTION_MOVE, both, xs, ys(from + (to - from) * step / 10f))
+        }
+        touch(down, MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), both, xs, ys(to))
+        touch(down, MotionEvent.ACTION_UP, intArrayOf(0), floatArrayOf(x), floatArrayOf(y - to / 2f))
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+    }
+
     internal fun gesture(x: Float, y: Float, dx: Float, dy: Float, hold: Long = 0, cancel: Boolean = false) {
         val down = SystemClock.uptimeMillis()
         fun event(action: Int, px: Float, py: Float) = main {

@@ -253,6 +253,110 @@ class PlannerRepositoryTest {
     }
 
     @Test
+    fun aBlockMovesToAnotherDayKeepingItsLength() {
+        val dao = FakePlannerBlockDao(
+            listOf(
+                entity(1, "2026-10-05", "Dentist", 15 * 60 + 30, 45),
+                entity(2, "2026-10-07", "Lunch", 12 * 60, 60)
+            )
+        )
+        val repository = PlannerRepository(dao)
+
+        val result = repository.moveToDay(LocalDate.of(2026, 10, 5), 1, LocalDate.of(2026, 10, 7), 9 * 60 + 15)
+
+        assertEquals(PlannerWriteResult.Success, result)
+        assertTrue(repository.getBlocksForDate(LocalDate.of(2026, 10, 5)).isEmpty())
+        assertEquals(
+            listOf(entity(1, "2026-10-07", "Dentist", 9 * 60 + 15, 45), entity(2, "2026-10-07", "Lunch", 12 * 60, 60)),
+            repository.getBlocksForDate(LocalDate.of(2026, 10, 7))
+        )
+    }
+
+    @Test
+    fun aMoveToADayWithNoRoomIsRefusedAndChangesNothing() {
+        val dao = FakePlannerBlockDao(
+            List(7) { index -> entity(index + 1L, "2026-10-07", "Full", 9 * 60, 60) } +
+                entity(8, "2026-10-05", "Dentist", 9 * 60, 60)
+        )
+        val repository = PlannerRepository(dao)
+
+        val result = repository.moveToDay(LocalDate.of(2026, 10, 5), 8, LocalDate.of(2026, 10, 7), 9 * 60)
+
+        assertEquals(PlannerWriteResult.RejectedOverlap, result)
+        assertEquals(listOf(entity(8, "2026-10-05", "Dentist", 9 * 60, 60)), repository.getBlocksForDate(LocalDate.of(2026, 10, 5)))
+        assertEquals(7, repository.getBlocksForDate(LocalDate.of(2026, 10, 7)).size)
+    }
+
+    @Test
+    fun blocksLiftedTogetherMoveTogetherAndLeaveTheRestOfTheDayAlone() {
+        val dao = FakePlannerBlockDao(
+            listOf(
+                entity(1, "2026-10-05", "Gym", 7 * 60, 60),
+                entity(2, "2026-10-05", "Emails", 8 * 60 + 30, 30),
+                entity(3, "2026-10-05", "Lunch", 12 * 60, 60)
+            )
+        )
+        val repository = PlannerRepository(dao)
+
+        val result = repository.shiftBlocks(LocalDate.of(2026, 10, 5), longArrayOf(1, 2), 45)
+
+        assertEquals(PlannerWriteResult.Success, result)
+        assertEquals(
+            listOf(
+                entity(1, "2026-10-05", "Gym", 7 * 60 + 45, 60),
+                entity(2, "2026-10-05", "Emails", 9 * 60 + 15, 30),
+                entity(3, "2026-10-05", "Lunch", 12 * 60, 60)
+            ),
+            repository.getBlocksForDate(LocalDate.of(2026, 10, 5))
+        )
+    }
+
+    @Test
+    fun blocksLiftedTogetherAllMoveOrNoneDoes() {
+        // Seven blocks stand over the hour from 12:00, where one of the two lifted would land.
+        val day = List(7) { index -> entity(index + 10L, "2026-10-05", "Full", 12 * 60, 60) } +
+            entity(1, "2026-10-05", "Gym", 7 * 60, 60) + entity(2, "2026-10-05", "Emails", 11 * 60, 30)
+        val repository = PlannerRepository(FakePlannerBlockDao(day))
+        val before = repository.getBlocksForDate(LocalDate.of(2026, 10, 5))
+
+        assertEquals(PlannerWriteResult.RejectedOverlap, repository.shiftBlocks(LocalDate.of(2026, 10, 5), longArrayOf(1, 2), 60))
+        assertEquals(before, repository.getBlocksForDate(LocalDate.of(2026, 10, 5)))
+        // And none leaves the day at either end.
+        assertEquals(PlannerWriteResult.RejectedOverlap, repository.shiftBlocks(LocalDate.of(2026, 10, 5), longArrayOf(1, 2), -8 * 60))
+        assertEquals(before, repository.getBlocksForDate(LocalDate.of(2026, 10, 5)))
+        // Lifted blocks that overlap one another keep the room they give each other.
+        assertEquals(PlannerWriteResult.Success, repository.shiftBlocks(LocalDate.of(2026, 10, 5), longArrayOf(1, 2), -30))
+    }
+
+    @Test
+    fun aMoveOfABlockThatHasGoneChangesNothing() {
+        val dao = FakePlannerBlockDao(listOf(entity(1, "2026-10-05", "Dentist", 9 * 60, 60)))
+        val repository = PlannerRepository(dao)
+
+        val result = repository.moveToDay(LocalDate.of(2026, 10, 6), 1, LocalDate.of(2026, 10, 7), 9 * 60)
+
+        assertEquals(PlannerWriteResult.MissingBlock, result)
+        assertEquals(1, repository.getBlocksForDate(LocalDate.of(2026, 10, 5)).size)
+    }
+
+    @Test
+    fun aWeekIsReadInTheOrderOfItsDaysAndStopsAtItsSunday() {
+        val dao = FakePlannerBlockDao(
+            listOf(
+                entity(1, "2026-10-11", "Sunday", 9 * 60, 60),
+                entity(2, "2026-10-05", "Monday late", 18 * 60, 60),
+                entity(3, "2026-10-05", "Monday early", 7 * 60, 60),
+                entity(4, "2026-10-12", "Next week", 9 * 60, 60),
+                entity(5, "2026-10-04", "Last week", 9 * 60, 60)
+            )
+        )
+
+        val week = PlannerRepository(dao).getBlocksForWeek(LocalDate.of(2026, 10, 5))
+
+        assertEquals(listOf(3L, 2L, 1L), week.map { it.id })
+    }
+
+    @Test
     fun updateTimeRejectsEighthOverlapWithoutChangingDuration() {
         val date = "2026-05-29"
         val dao = FakePlannerBlockDao(
@@ -558,6 +662,23 @@ class PlannerRepositoryTest {
                         startMinutes = startMinutes,
                         durationMinutes = durationMinutes
                     )
+                } else {
+                    existing
+                }
+            }
+            return updated
+        }
+
+        override fun getBlocksForDays(firstEpochDay: Long, endEpochDay: Long): List<PlannerBlock> =
+            blocks.filter { it.date.toEpochDay() >= firstEpochDay && it.date.toEpochDay() < endEpochDay }
+                .sortedWith(compareBy<PlannerBlock> { it.date.toEpochDay() }.thenBy { it.startMinutes }.thenBy { it.id })
+
+        override fun moveBlock(dateEpochDay: Long, id: Long, toEpochDay: Long, startMinutes: Int, durationMinutes: Int): Int {
+            var updated = 0
+            blocks.replaceAll { existing ->
+                if (existing.date.toEpochDay() == dateEpochDay && existing.id == id) {
+                    updated = 1
+                    existing.copy(date = LocalDate.ofEpochDay(toEpochDay), startMinutes = startMinutes, durationMinutes = durationMinutes)
                 } else {
                     existing
                 }

@@ -12,6 +12,9 @@ interface PlannerBlockDao {
     // A day's blocks by start then id.
     fun getBlocksForDate(dateEpochDay: Long): List<PlannerBlock>
 
+    // The blocks of the days from the first up to, not including, the end: by day, start then id.
+    fun getBlocksForDays(firstEpochDay: Long, endEpochDay: Long): List<PlannerBlock>
+
     // Blocks on the day that overlap [startMinutes, endMinutes), other than the excluded one.
     fun getPotentiallyOverlappingBlocks(
         dateEpochDay: Long,
@@ -35,11 +38,14 @@ interface PlannerBlockDao {
 
     fun getBlocksStartingAt(dateEpochDay: Long, startMinutes: Int): List<PlannerBlock>
 
-    // A block is named by its day and id: blocks are stored by day, and never change day.
-    // The update and delete calls return the number of rows changed.
+    // A block is named by its day and id, as blocks are stored by day. The update and delete
+    // calls return the number of rows changed.
     fun updateTitle(dateEpochDay: Long, id: Long, title: String): Int
 
     fun updateTime(dateEpochDay: Long, id: Long, startMinutes: Int, durationMinutes: Int): Int
+
+    // To another day, where it is named by that day from then on.
+    fun moveBlock(dateEpochDay: Long, id: Long, toEpochDay: Long, startMinutes: Int, durationMinutes: Int): Int
 
     fun deleteBlock(dateEpochDay: Long, id: Long): Int
 

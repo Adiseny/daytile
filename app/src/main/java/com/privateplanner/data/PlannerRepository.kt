@@ -5,6 +5,8 @@ import com.privateplanner.domain.MaxTitleLength
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.TimeSnapper
+import com.privateplanner.domain.canShift
+import com.privateplanner.domain.holds
 import java.time.LocalDate
 
 // How a write ended. Numbers rather than an enum, whose every constant would be an object
@@ -27,6 +29,11 @@ class PlannerRepository(
 ) {
     fun getBlocksForDate(date: LocalDate): List<PlannerBlock> {
         return dao.getBlocksForDate(date.toEpochDay())
+    }
+
+    // Seven days from the first, in order: the days themselves, then each day's blocks.
+    fun getBlocksForWeek(first: LocalDate): List<PlannerBlock> {
+        return dao.getBlocksForDays(first.toEpochDay(), first.toEpochDay() + 7)
     }
 
     // Snapping and clamping below always yield a valid time, so only restoring a
@@ -87,6 +94,40 @@ class PlannerRepository(
                 } else {
                     // A block that has gone changes no row.
                     rowResult(dao.updateTime(date.toEpochDay(), id, start, duration))
+                }
+            }
+        }
+    }
+
+    // Several blocks of one day by the same number of minutes, all or none: each is checked
+    // where it lands with the others already moved, before any is written.
+    fun shiftBlocks(date: LocalDate, ids: LongArray, deltaMinutes: Int): Int {
+        return writeCatching {
+            dao.withTransaction transaction@{
+                val day = date.toEpochDay()
+                val blocks = dao.getBlocksForDate(day)
+                if (!canShift(blocks, ids, deltaMinutes)) return@transaction PlannerWriteResult.RejectedOverlap
+                var rows = 0
+                for (block in blocks) {
+                    if (ids.holds(block.id)) rows += dao.updateTime(day, block.id, block.startMinutes + deltaMinutes, block.durationMinutes)
+                }
+                // One that has gone since takes none of the others with it.
+                if (rows > 0) PlannerWriteResult.Success else PlannerWriteResult.MissingBlock
+            }
+        }
+    }
+
+    // To another day, keeping its length, under the rules of a move within a day.
+    fun moveToDay(date: LocalDate, id: Long, toDate: LocalDate, startMinutes: Int): Int {
+        return writeCatching {
+            dao.withTransaction transaction@{
+                val block = dao.getBlock(date.toEpochDay(), id) ?: return@transaction PlannerWriteResult.MissingBlock
+                val start = TimeSnapper.floorToValidStart(startMinutes)
+                val duration = TimeSnapper.clampDuration(start, TimeSnapper.snapDurationToNearest(block.durationMinutes))
+                if (!overlapPolicy(toDate, start, start + duration, id).canPlace(start, duration)) {
+                    PlannerWriteResult.RejectedOverlap
+                } else {
+                    rowResult(dao.moveBlock(date.toEpochDay(), id, toDate.toEpochDay(), start, duration))
                 }
             }
         }

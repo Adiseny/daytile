@@ -109,3 +109,28 @@ class OverlapPolicy private constructor(
         }
     }
 }
+
+// Whether some of a day's blocks can move together by the same number of minutes: none
+// of them leaves the day, and each has room where it lands with the others moved too. All
+// of them go or none does.
+fun canShift(blocks: List<PlannerBlock>, ids: LongArray, deltaMinutes: Int): Boolean {
+    val shifted = ArrayList<PlannerBlock>(blocks.size)
+    for (block in blocks) {
+        if (!ids.holds(block.id)) {
+            shifted.add(block)
+            continue
+        }
+        val start = block.startMinutes + deltaMinutes
+        if (start < 0 || start + block.durationMinutes > TimeSnapper.MinutesPerDay) return false
+        shifted.add(block.copy(startMinutes = start))
+    }
+    for (block in shifted) {
+        if (ids.holds(block.id) && !OverlapPolicy.from(shifted, block.id).canPlace(block.startMinutes, block.durationMinutes)) return false
+    }
+    return true
+}
+
+fun LongArray.holds(id: Long): Boolean {
+    for (held in this) if (held == id) return true
+    return false
+}

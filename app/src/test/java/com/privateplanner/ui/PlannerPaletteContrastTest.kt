@@ -86,6 +86,26 @@ class PlannerPaletteContrastTest {
         }
     }
 
+    // The week stands its blocks on bands of their own colour. A band must show against the
+    // paper at every hour of the day's changing light, and a tile, which is the colour and
+    // the ink the day gives it, must show against its band.
+    @Test
+    fun weekBandsShowOnThePaperAndTilesShowOnTheirBandsAtEveryMinute() {
+        forEachMinutePalette(step = 5) { minute, palette ->
+            for (hour in 0 until 24) {
+                val band = bandColour(hour * 60, palette.Paper)
+                val shows = contrast(band, palette.Paper)
+                assertTrue("Band of $hour:00 ratio $shows < 1.1 at minute $minute", shows >= 1.1f)
+                for (variant in 0 until 3) {
+                    val tile = blockBackgroundArgb(hour * 60, variant)
+                    val solid = compositedTileBackground(tile, palette.Paper, false)
+                    val stands = contrast(solid, band)
+                    assertTrue("Tile of $hour:00 variant $variant ratio $stands < 1.5 on its band at minute $minute", stands >= 1.5f)
+                }
+            }
+        }
+    }
+
     @Test
     fun paletteFollowsTheClock() {
         val night = paletteForMinute(3 * 60)

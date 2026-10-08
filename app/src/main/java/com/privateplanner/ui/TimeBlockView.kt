@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.TextPaint
 import android.util.LongSparseArray
 import android.view.HapticFeedbackConstants
@@ -23,8 +24,8 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
-private const val ActiveTileAlpha = 0.70f
-private const val IdleTileAlpha = 0.86f
+internal const val ActiveTileAlpha = 0.70f
+internal const val IdleTileAlpha = 0.86f
 private const val BlackWhiteContrastSwitchLuminance = 0.17912878f
 private const val DurationVisibleMinWidthDp = 112f
 private const val DurationTitleRemainderMinDp = 56f
@@ -77,11 +78,11 @@ internal fun titleFollowOffsetPx(
 }
 
 // Tiles draw one at a time on the main thread, each setting what it needs, so they share one paint.
-private val TilePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+internal val TilePaint = Paint(Paint.ANTI_ALIAS_FLAG)
 private val TextPaints = LongSparseArray<TextPaint>()
 
 // Tiles share a text paint per size and weight; each sets its ink as it draws.
-private fun Context.tilePaint(size: Float, weight: Int): TextPaint {
+internal fun Context.tilePaint(size: Float, weight: Int): TextPaint {
     val key = (sp(size) * 64f).toLong() * 1000 + weight
     return TextPaints[key] ?: textPaint(size, weight).also { TextPaints.put(key, it) }
 }
@@ -94,6 +95,10 @@ internal const val EarlierAction = 0x7f000003
 internal const val LaterAction = 0x7f000004
 internal const val ShortenAction = 0x7f000005
 internal const val LengthenAction = 0x7f000006
+internal const val PreviousDayAction = 0x7f000007
+internal const val NextDayAction = 0x7f000008
+// Between the day and the week, for a service that cannot pinch.
+internal const val WeekAction = 0x7f000009
 
 private const val Idle = 0
 private const val Pending = 1
@@ -109,7 +114,7 @@ internal class TimeBlockView(
     private val day: DayView,
     block: PlannerBlock,
     columns: BlockLayout
-) : View(context) {
+) : View(context), EdgeDragged, Runnable {
     private val density = resources.displayMetrics.density
     private val hourPx = HourHeight * density
 
@@ -121,8 +126,16 @@ internal class TimeBlockView(
     // Set while the day's visible tiles are synchronised, then cleared in one pass.
     var retained = false
 
+    // Where it is held, or has been carried with the other lifted blocks.
     private val displayedStartMinutes: Int
-        get() = if (phase == Moving) lastSnapped else block.startMinutes
+        get() = when {
+            phase == Moving -> lastSnapped
+            day.carried != 0 && day.isLifted(block.id) -> block.startMinutes + day.carried
+            else -> block.startMinutes
+        }
+
+    // Held, and not yet taken anywhere: another block held now is lifted with it.
+    val heldStill: Boolean get() = phase == Moving && !hasDraggedAfterHold
 
     val displayedDurationMinutes: Int
         get() = if (phase == Resizing) lastSnapped else block.durationMinutes
@@ -293,7 +306,9 @@ internal class TimeBlockView(
         if (contentStale) layOutContent()
         // Moving changes only the time label. Keep the title and duration layouts.
         if (metaStart != displayedStartMinutes) meta = meta?.let { timeText(it.width, it.height) }
-        val active = phase == Moving || phase == Resizing
+        // Only a block lifted to be moved changes its look, for as long as it is lifted. One
+        // whose edge is held stays as it is, and its handle darkens.
+        val active = phase == Moving || day.isLifted(block.id)
         val background = blockBackgroundArgb(block.startMinutes, columns.columnIndex)
         val composite = compositedTileBackground(background, host.palette.Paper, active)
         if (inkBackground != composite) {
@@ -323,7 +338,7 @@ internal class TimeBlockView(
         val handleHeight = ResizeHandleHeight * density
         val handleLeft = (w - handleWidth) / 2f
         val handleTop = h - ResizeHandleBottomPadding * density - handleHeight
-        TilePaint.color = withAlpha(ink, 0.18f)
+        TilePaint.color = withAlpha(ink, if (phase == Resizing) ResizeHandleHeldAlpha else ResizeHandleAlpha)
         canvas.drawRoundRect(
             handleLeft, handleTop, handleLeft + handleWidth, handleTop + handleHeight, handleHeight / 2f, handleHeight / 2f, TilePaint
         )
@@ -347,6 +362,7 @@ internal class TimeBlockView(
     private var preHoldX = 0f
     private var preHoldY = 0f
     private var startsInResizeZone = false
+    private var startsLifted = false
     private var startsOnResizeHandle = false
     private var holdStillThresholdSquared = 0f
     private var quickResizeDragThreshold = 0f
@@ -358,7 +374,6 @@ internal class TimeBlockView(
     private var lastSavable = 0
     private var hasDraggedAfterHold = false
     private var autoScroll: EdgeAutoScroll? = null
-    private val hold = Runnable { held() }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -379,6 +394,7 @@ internal class TimeBlockView(
                     }
                     Resizing -> {
                         totalDy += dy
+                        if (!hasDraggedAfterHold && abs(totalDy) > touchSlop) hasDraggedAfterHold = true
                         resizeTo()
                     }
                 }
@@ -386,7 +402,8 @@ internal class TimeBlockView(
             }
             MotionEvent.ACTION_UP -> if (phase == Pending) {
                 finish(cancelled = true)
-                host.onBlockTap(block.id)
+                // With blocks lifted a tap lifts another or puts one down.
+                if (day.manyFingers) Unit else if (day.hasLifted) day.toggle(block.id) else host.onBlockTap(block.id)
             } else {
                 finish(cancelled = false)
             }
@@ -402,7 +419,11 @@ internal class TimeBlockView(
         preHoldX = 0f
         preHoldY = 0f
         val heightPx = initial.durationMinutes / 60f * hourPx
-        startsInResizeZone = TimelineGeometry.isInResizeZone(
+        // A stroke that follows a scroll at once goes on scrolling, wherever it lands, and
+        // one on a lifted block carries it.
+        startsLifted = day.isLifted(block.id)
+        startsInResizeZone = !startsLifted &&
+            SystemClock.uptimeMillis() - host.lastScrollMillis >= ScrollOwnsTouchMillis && TimelineGeometry.isInResizeZone(
             x = event.x,
             yInVisual = downYInVisual,
             blockWidthPx = width.toFloat(),
@@ -426,16 +447,19 @@ internal class TimeBlockView(
         holdStillThresholdSquared = holdStill * holdStill
         quickResizeDragThreshold = max(touchSlop, QuickResizeDragThreshold * density)
         phase = Pending
-        // A drag down the resize lane is this block's, not the scrolling day's.
-        if (startsInResizeZone) parent.requestDisallowInterceptTouchEvent(true)
-        postDelayed(hold, BlockMoveHoldMillis)
+        // A drag down the resize lane, or up or down on a lifted block, is this block's, not
+        // the scrolling day's.
+        if (startsInResizeZone || startsLifted) parent.requestDisallowInterceptTouchEvent(true)
+        postDelayed(this, BlockMoveHoldMillis)
     }
 
-    // Before the hold: a vertical drag in the resize lane resizes at once; any other
-    // movement past the tolerance leaves the gesture to scrolling or the day swipe.
+    // Before the hold: a vertical drag in the resize lane resizes at once, and one on a
+    // lifted block carries it and the others at once, since they have been lifted already;
+    // any other movement past the tolerance leaves the gesture to scrolling or the day swipe.
     private fun waited(dx: Float, dy: Float) {
         preHoldX += dx
         preHoldY += dy
+        if (startsLifted && abs(preHoldY) > abs(preHoldX) && abs(preHoldY) >= touchSlop && day.activeBlockId == 0L) return startMove()
         val usefulResizeDrag = preHoldY > 0f || initial.durationMinutes > TimeSnapper.MinimumDurationMinutes
         val potentialQuickResize = startsInResizeZone && abs(preHoldY) > abs(preHoldX) && usefulResizeDrag
         if (potentialQuickResize) {
@@ -445,16 +469,28 @@ internal class TimeBlockView(
         }
     }
 
-    private fun held() {
+    // The hold has lasted: the tile is its own timer for it.
+    override fun run() {
         if (phase != Pending) return
         if (preHoldX * preHoldX + preHoldY * preHoldY > holdStillThresholdSquared) return finish(cancelled = true)
+        if (day.activeBlockId != 0L) {
+            // Another block is held already: the two are lifted together, to stay so when
+            // both are let go.
+            finish(cancelled = true)
+            if (day.liftWith(block.id)) host.haptic(HapticFeedbackConstants.LONG_PRESS)
+            return
+        }
         parent.requestDisallowInterceptTouchEvent(true)
+        // The long buzz says a block has been lifted, and a held edge lifts nothing.
+        if (startsOnResizeHandle) return startResize()
         host.haptic(HapticFeedbackConstants.LONG_PRESS)
-        if (startsOnResizeHandle) startResize() else startMove()
+        // Held while others are lifted, it is carried with them.
+        if (day.hasLifted) day.lift(block.id)
+        startMove()
     }
 
     private fun startGesture() {
-        removeCallbacks(hold)
+        removeCallbacks(this)
         initialScroll = host.scrollPx
         initialPointerViewportY =
             TimelineTopClearance * density + initial.startMinutes / 60f * hourPx - initialScroll + downYInVisual
@@ -479,19 +515,21 @@ internal class TimeBlockView(
         phase = Resizing
         lastSnapped = initial.durationMinutes
         lastSavable = initial.durationMinutes
+        hasDraggedAfterHold = false
         invalidate()
         resizeTo()
-        autoScroll = EdgeAutoScroll(host, density, this)
+        autoScroll = EdgeAutoScroll(host, density, this, ResizeScrollSpeed)
     }
 
     // What the edge scrolling asks of the gesture: where the finger is in the viewport,
-    // whether it may scroll yet (a move waits for the first drag after the hold), and to
-    // follow the day once it has scrolled.
-    val pointerViewportY: Float get() = initialPointerViewportY + totalDy
+    // whether it may scroll yet (not until the finger has travelled: an edge or a block
+    // held still near the screen's edge stays where it is), and to follow the day once it
+    // has scrolled.
+    override val pointerViewportY: Float get() = initialPointerViewportY + totalDy
 
-    val scrollsAtEdges: Boolean get() = phase == Resizing || hasDraggedAfterHold
+    override val scrollsAtEdges: Boolean get() = hasDraggedAfterHold
 
-    fun edgeScrolled() = if (phase == Moving) moveTo() else resizeTo()
+    override fun edgeScrolled() = if (phase == Moving) moveTo() else resizeTo()
 
     // Every snapped step ticks unless the spot is unusable; only a savable one may be dropped on.
     private fun ticks(placement: MovePlacement): Boolean {
@@ -500,16 +538,27 @@ internal class TimeBlockView(
     }
 
     private fun moveTo() {
-        val effectiveDy = totalDy + (host.scrollPx - initialScroll)
-        val snapped = TimeSnapper.clampStart(
-            initial.startMinutes + TimeSnapper.deltaMinutesFromY(effectiveDy, hourPx),
-            initial.durationMinutes
-        )
+        val delta = TimeSnapper.deltaMinutesFromY(totalDy + (host.scrollPx - initialScroll), hourPx)
+        val together = day.isLifted(block.id)
+        val snapped = if (together) {
+            initial.startMinutes + day.clampCarry(delta)
+        } else {
+            TimeSnapper.clampStart(initial.startMinutes + delta, initial.durationMinutes)
+        }
         translationY = (snapped - initial.startMinutes) / 60f * hourPx
         if (snapped == lastSnapped) return
         lastSnapped = snapped
         invalidate()
-        if (ticks(host.overlapPolicy(block.id).placement(snapped, initial.durationMinutes))) lastSavable = snapped
+        if (together) {
+            // The others go where this one goes, and there is room for all of them or for none.
+            day.carry(snapped - initial.startMinutes)
+            if (host.canShift(day.lifted, snapped - initial.startMinutes)) {
+                host.haptic(HapticFeedbackConstants.TEXT_HANDLE_MOVE)
+                lastSavable = snapped
+            }
+        } else if (ticks(host.overlapPolicy(block.id).placement(snapped, initial.durationMinutes))) {
+            lastSavable = snapped
+        }
     }
 
     private fun resizeTo() {
@@ -526,14 +575,22 @@ internal class TimeBlockView(
     }
 
     private fun finish(cancelled: Boolean) {
-        removeCallbacks(hold)
+        removeCallbacks(this)
         val was = phase
         phase = if (was == Idle) Idle else Done
         if (was != Idle) parent?.requestDisallowInterceptTouchEvent(false)
         if (was != Moving && was != Resizing) return
         autoScroll?.stop()
         autoScroll = null
-        if (!cancelled) {
+        if (was == Moving && day.isLifted(block.id)) {
+            // Put down together where they were carried to, and no longer lifted; let go
+            // where they were, they stay lifted.
+            day.carry(0)
+            if (!cancelled && lastSavable != initial.startMinutes) {
+                host.onBlocksShift(day.lifted, lastSavable - initial.startMinutes)
+                day.putDownAll()
+            }
+        } else if (!cancelled) {
             if (was == Moving && lastSavable != initial.startMinutes) host.onBlockMove(block.id, lastSavable)
             if (was == Resizing && lastSavable != initial.durationMinutes) host.onBlockResize(block.id, lastSavable)
         }

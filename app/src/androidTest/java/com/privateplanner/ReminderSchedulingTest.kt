@@ -77,13 +77,15 @@ class ReminderSchedulingTest {
             var found: StatusBarNotification? = null
             await("Notification missing: $title") {
                 found = manager.activeNotifications.firstOrNull {
-                    it.id == 1 && it.notification.extras.getString(Notification.EXTRA_TITLE) == title
+                    it.id == 1 && it.notification.extras.getString(Notification.EXTRA_TEXT) == title
                 }
                 found != null
             }
             return found!!
         }
         val original = posted("Running")
+        // What the countdown runs to, above the block's name.
+        assertEquals("Until 24:00", original.notification.extras.getString(Notification.EXTRA_TITLE))
         SystemClock.sleep(25)
         repository.createBlock(today.plusYears(20), 540, "Future")
         reminders.sync()

@@ -16,6 +16,8 @@ import com.privateplanner.domain.OverlapPolicy
 import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.TimeFormatter
 import com.privateplanner.domain.TimeSnapper
+import com.privateplanner.domain.holds
+import java.util.Arrays
 import java.util.Collections
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -23,17 +25,14 @@ import kotlin.math.max
 import kotlin.math.min
 
 // What the day and its blocks need from the screen around them.
-internal interface TimelineHost {
+internal interface TimelineHost : EdgeScrollHost {
     val palette: PlannerPalette
     val scrollPx: Int
     val viewportHeightPx: Int
-    // The bottom edge of the heading's solid part, where the top scroll zone begins.
-    val headerHeightPx: Int
-    // The bottom of the fade beneath it, where pinned titles rest: clear of the tint.
+    // The bottom of the fade beneath the heading, where pinned titles rest: clear of the tint.
     val headerFadeBottomPx: Int
-    // The viewport's bottom edge above the navigation bar.
-    val visibleBottomPx: Int
-    fun scrollTimelineBy(delta: Float): Boolean
+    // When the day last scrolled, by the clock touches are timed by.
+    val lastScrollMillis: Long
     fun haptic(constant: Int)
     fun overlapPolicy(blockId: Long): OverlapPolicy
     fun onEmptyTimeTap(minutes: Int)
@@ -42,6 +41,12 @@ internal interface TimelineHost {
     fun onBlockDelete(id: Long)
     fun onBlockMove(id: Long, startMinutes: Int): Boolean
     fun onBlockResize(id: Long, durationMinutes: Int): Boolean
+    // Blocks lifted together: whether they have room that many minutes on, to move them
+    // there, and that which are lifted has changed.
+    fun canShift(ids: LongArray, deltaMinutes: Int): Boolean
+    fun onBlocksShift(ids: LongArray, deltaMinutes: Int)
+    fun onLiftedChanged()
+    fun onShowWeek()
 }
 
 // The 48 label layouts, measured once. Layout depends only on text, size, density and font
@@ -91,6 +96,8 @@ internal fun centredTouchTop(top: Float, contentHeight: Float): Float {
     return (top - (touchHeight - contentHeight) / 2).coerceAtLeast(0f).coerceAtMost(max(DayHeight - touchHeight, 0f))
 }
 
+private val NoBlocks = LongArray(0)
+
 // The whole day: the grid and its labels, one view per block, and the current time. It is
 // as tall as the day and sits in the scroll view; scrolling re-draws nothing. While the
 // day is changing a second day's blocks stand beside the selected day's: the day arriving
@@ -124,6 +131,82 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
     private var windowHeight = 0
     // Kept through a dense day's windowing while its gesture runs.
     var activeBlockId = 0L
+
+    // Blocks lifted to be moved together. Two held at once are lifted and stay so when let
+    // go; then a tap lifts another or puts one down, a hold on any carries them all, and a
+    // tap on empty time puts them down where they were.
+    var lifted = NoBlocks
+        private set
+    // How many minutes the lifted blocks have been carried, while one of them is held.
+    var carried = 0
+        private set
+    // A touch that has had two fingers: nothing in it is a tap.
+    var manyFingers = false
+
+    val hasLifted: Boolean get() = lifted.size != 0
+
+    fun isLifted(id: Long): Boolean = lifted.holds(id)
+
+    private fun setLifted(ids: LongArray) {
+        val before = lifted
+        lifted = ids
+        for (id in before) tiles[id]?.invalidate()
+        for (id in ids) tiles[id]?.invalidate()
+        host.onLiftedChanged()
+    }
+
+    fun lift(id: Long) {
+        if (isLifted(id)) return
+        val ids = Arrays.copyOf(lifted, lifted.size + 1)
+        ids[ids.size - 1] = id
+        setLifted(ids)
+    }
+
+    fun toggle(id: Long) {
+        if (!isLifted(id)) return lift(id)
+        val ids = LongArray(lifted.size - 1)
+        var index = 0
+        for (other in lifted) if (other != id) ids[index++] = other
+        setLifted(ids)
+    }
+
+    fun putDownAll() {
+        if (hasLifted) setLifted(NoBlocks)
+    }
+
+    // The block being held, lifted with another held after it: unless the first is already
+    // on its way somewhere, which the second then leaves alone.
+    fun liftWith(id: Long): Boolean {
+        val first = tiles[activeBlockId] ?: return false
+        if (!first.heldStill) return false
+        first.cancelGesture()
+        lift(first.block.id)
+        lift(id)
+        return true
+    }
+
+    // As far as the lifted blocks can go that way with all of them still in the day.
+    fun clampCarry(deltaMinutes: Int): Int {
+        var earliest = TimeSnapper.MinutesPerDay
+        var latest = 0
+        for (block in blocks) {
+            if (!isLifted(block.id)) continue
+            earliest = min(earliest, block.startMinutes)
+            latest = max(latest, block.endMinutes)
+        }
+        return deltaMinutes.coerceAtLeast(-earliest).coerceAtMost(TimeSnapper.MinutesPerDay - latest)
+    }
+
+    // The lifted blocks follow the one that is held.
+    fun carry(minutes: Int) {
+        carried = minutes
+        for (id in lifted) {
+            val tile = tiles[id] ?: continue
+            tile.translationY = minutes / 60f * hourPx
+            tile.translationZ = if (minutes != 0) 2f else 0f
+            tile.invalidate()
+        }
+    }
 
     var showsNow = false
         set(value) {
@@ -173,6 +256,17 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         }
         if (moved) layouts = OverlapLayoutCalculator.calculate(value)
         blocks = value
+        // A lifted block that is no longer of this day is no longer lifted.
+        if (hasLifted) {
+            var kept = 0
+            for (block in value) if (isLifted(block.id)) kept++
+            if (kept != lifted.size) {
+                val ids = LongArray(kept)
+                kept = 0
+                for (block in value) if (isLifted(block.id)) ids[kept++] = block.id
+                setLifted(ids)
+            }
+        }
         syncTiles()
     }
 
@@ -414,8 +508,9 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
     // A tap that no block took is on empty time. A scroll or a day swipe takes the gesture
     // away before it lifts.
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_UP && event.y >= topPx) {
-            host.onEmptyTimeTap(TimeSnapper.minutesFromY(event.y - topPx, hourPx))
+        if (event.actionMasked == MotionEvent.ACTION_UP && event.y >= topPx && !manyFingers) {
+            // With blocks lifted, it puts them down.
+            if (hasLifted) putDownAll() else host.onEmptyTimeTap(TimeSnapper.minutesFromY(event.y - topPx, hourPx))
         }
         return true
     }
@@ -432,9 +527,14 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         info.contentDescription = "Day timeline, $time"
         info.isClickable = true
         info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, "Add block at $time"))
+        info.addAction(AccessibilityNodeInfo.AccessibilityAction(WeekAction, "Show week"))
     }
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+        if (action == WeekAction) {
+            host.onShowWeek()
+            return true
+        }
         if (action != AccessibilityNodeInfo.ACTION_CLICK) return super.performAccessibilityAction(action, arguments)
         host.onEmptyTimeTap(focusMinutes())
         return true

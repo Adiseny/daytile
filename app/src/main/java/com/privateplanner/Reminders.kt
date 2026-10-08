@@ -34,7 +34,7 @@ private const val StartChannel = "reminders.start"
 private const val ExtraEpochMinute = "minute"
 
 // Enough warning to finish what you are doing and get to the next thing.
-private const val LeadMinutes = 5
+private const val LeadMinutes = 10
 
 // No real event minute can collide with either: one means "nothing to arm", the
 // other "we have not looked yet".
@@ -242,11 +242,13 @@ class Reminders(private val context: Context, private val blocks: PlannerBlockDa
             val column = layouts.getOrPut(block.date) {
                 OverlapLayoutCalculator.calculate(blocks.getBlocksForDate(block.date.toEpochDay()))
             }[block.id]?.columnIndex ?: 0
-            val length = " · " + TimeFormatter.duration(block.durationMinutes)
-            val text = if (upcoming) {
-                "Starts " + TimeFormatter.time(block.startMinutes) + length
+            // The first line says what the countdown beside it runs to, in words that stay
+            // true for as long as the reminder stands; the second is the block's name, with
+            // the line to itself.
+            val headline = if (upcoming) {
+                "Next up at " + TimeFormatter.time(block.startMinutes)
             } else {
-                TimeFormatter.range(block.startMinutes, block.durationMinutes) + length
+                "Until " + TimeFormatter.time(block.endMinutes)
             }
             val colour = blockBackgroundArgb(block.startMinutes, column)
             val channel = if (upcoming) UpcomingChannel else StartChannel
@@ -255,15 +257,15 @@ class Reminders(private val context: Context, private val blocks: PlannerBlockDa
             // a new Notification nor another binder call to post the same contents.
             // Clock changes also reset the timeout: Android expires it by elapsed time.
             if (!clockChanged && previous != null && previous.channelId == channel && previous.`when` == until &&
-                previous.color == colour && previous.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == block.title &&
-                previous.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() == text
+                previous.color == colour && previous.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == headline &&
+                previous.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() == block.title
             ) return@forEach
             manager.notify(
                 id,
                 Notification.Builder(context, channel)
                     .setSmallIcon(R.drawable.ic_bell)
-                    .setContentTitle(block.title)
-                    .setContentText(text)
+                    .setContentTitle(headline)
+                    .setContentText(block.title)
                     // Countdown to the start, then to the end, ticked by the system: no
                     // wakeups, no redraw work, nothing for the app to keep alive, and the
                     // system withdraws each one as its moment arrives.

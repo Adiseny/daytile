@@ -23,6 +23,8 @@ class PlannerRenderingTest : PlannerTestHost() {
         launch { add("Resize 保持", start = 540, duration = 60) }
         scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(480)) })
         awaitTile("Resize 保持")
+        // A stroke straight after a scroll would be the scroll's.
+        SystemClock.sleep(ScrollOwnsTouchMillis + 50)
         main {
             val tile = tile("Resize 保持")
             fun capture(): Bitmap = Bitmap.createBitmap(tile.width, activity.px(240f), Bitmap.Config.ARGB_8888).also {

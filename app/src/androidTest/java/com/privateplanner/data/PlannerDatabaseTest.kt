@@ -111,6 +111,18 @@ class PlannerDatabaseTest {
             dao.insertBlock(PlannerBlock(date = LocalDate.ofEpochDay(day + 1), title = "Run", startMinutes = 540, durationMinutes = 30))
             assertEquals(listOf(3L, 4L, 5L), dao.getBlocksForDate(day + 1).map { it.id })
             assertEquals(listOf(3L, 4L, 5L), dao.getBlocksStartingAt(day + 1, 540).map { it.id })
+            // Several days in one read: each row carries its own day, and the end is not included.
+            assertEquals(
+                listOf(day to 2L, day + 1 to 3L, day + 1 to 4L, day + 1 to 5L),
+                dao.getBlocksForDays(day, day + 2).map { it.date.toEpochDay() to it.id }
+            )
+            assertEquals(listOf(2L), dao.getBlocksForDays(day, day + 1).map { it.id })
+            assertEquals(emptyList<Long>(), dao.getBlocksForDays(day + 2, day + 9).map { it.id })
+            // To another day: the block is that day's from then on, with its id and title.
+            assertEquals(1, dao.moveBlock(day, 2, day + 3, 600, 30))
+            assertNull(dao.getBlock(day, 2))
+            assertEquals(PlannerBlock(2, LocalDate.ofEpochDay(day + 3), "Late lunch", 600, 30), dao.getBlock(day + 3, 2))
+            assertEquals(0, dao.moveBlock(day, 2, day + 4, 600, 30))
         } finally {
             database.close()
         }

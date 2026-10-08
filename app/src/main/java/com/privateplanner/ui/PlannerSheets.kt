@@ -104,7 +104,10 @@ internal class InputSheet(
     private val colours: PlannerPalette,
     title: String,
     buttonLabel: String,
-    private val onSubmit: Consumer<String>
+    private val onSubmit: Consumer<String>,
+    // What the keyboard's own key does with the title, blank or not, where that is not what
+    // the button does: then the key is the keyboard's Next.
+    private val onKey: Consumer<String>? = null
 ) : Flow(context, vertical = true) {
     private val theme = if (colours.LightBackground) R.style.Theme_Daytile_Day else R.style.Theme_Daytile_Night
     private val input = TitleInput(ContextThemeWrapper(context, theme))
@@ -139,7 +142,8 @@ internal class InputSheet(
             inputType = InputType.TYPE_CLASS_TEXT or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
                 InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
-            imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_FULLSCREEN
+            imeOptions = (if (onKey != null) EditorInfo.IME_ACTION_NEXT else EditorInfo.IME_ACTION_DONE) or
+                EditorInfo.IME_FLAG_NO_FULLSCREEN
             // Never splits a surrogate pair at the limit.
             filters = arrayOf(InputFilter.LengthFilter(MaxTitleLength))
             addTextChangedListener(object : TextWatcher {
@@ -153,7 +157,9 @@ internal class InputSheet(
             // Done on the keyboard arrives once, with no event; Enter on a physical
             // keyboard arrives as the key goes down and again as it comes up.
             setOnEditorActionListener { _, _, event ->
-                if (event == null || event.action == KeyEvent.ACTION_DOWN) submit()
+                if (event == null || event.action == KeyEvent.ACTION_DOWN) {
+                    if (onKey != null) onKey.accept(this@InputSheet.text) else submit()
+                }
                 true
             }
         }
@@ -184,6 +190,9 @@ internal class InputSheet(
         button.container = if (yes) colours.PrimaryText else colours.AddButtonDisabled
         label.colour = if (yes) colours.Sheet else colours.MutedText
     }
+
+    // Emptied for the next block of a row, the keyboard staying up.
+    fun clear() = input.setText("")
 
     // A title to rename opens selected, so typing replaces it; one carried over a change
     // of palette keeps its caret at the end.

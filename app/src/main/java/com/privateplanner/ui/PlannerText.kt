@@ -112,7 +112,9 @@ internal fun textBlock(
     ellipsis: Boolean = false,
     maxHeight: Int = Unbounded,
     fill: Boolean = false,
-    centred: Boolean = false
+    centred: Boolean = false,
+    // A word too long for its line is divided at a syllable, with a hyphen.
+    hyphenate: Boolean = false
 ): TextBlock {
     val span = if (lineHeight > 0f && text.isNotEmpty()) CentredLineHeight(lineHeight) else null
     val content: CharSequence = if (span == null) text else SpannableString(text).apply {
@@ -127,7 +129,7 @@ internal fun textBlock(
             .setMaxLines(lines)
             .setEllipsize(if (ellipsis) TextUtils.TruncateAt.END else null)
             // BREAK_STRATEGY_SIMPLE is the platform builder's default.
-            .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+            .setHyphenationFrequency(if (hyphenate) Layout.HYPHENATION_FREQUENCY_NORMAL else Layout.HYPHENATION_FREQUENCY_NONE)
             .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setUseLineSpacingFromFallbacks(true) }
             .build()
     var layout = build(maxLines)

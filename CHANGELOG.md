@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.6.0 — 8 October 2026
+
+- The week. Two fingers closing on the day bring in the week that holds it: seven columns from Monday to Sunday under their dates, headed by the month alone. From 6:00 to midnight fills the screen where it is tall enough for an hour to be 40dp, and the night is a scroll away. Each column is a stack of bands three hours tall in the colour blocks take in those hours, so the bands divide the time as the columns divide the days, and nothing is ruled. Swipe sideways for the next or the last week, which follows the finger as a change of day does. Tap a date to go into its day. Two fingers opening, or Back, return to the day the week was come into from, as it was left, wherever the fingers are and whatever was touched in the week meanwhile; after a swipe to another week, to the same day of that week. Between the two, the one fades and falls back before the other comes forward, so the day and the week are never on screen together.
+- In the week, a tap on empty time adds a block to that day at its quarter hour, a tap on a block opens its actions, a hold moves it to any day and time in quarter-hour steps, keeping its minutes, and a hold on its lower edge lengthens or shortens it by quarter hours. A move to another day is shown at once and saved in one checked write. The schema is unchanged.
+- A block has the same colour and the same ink in the week as on the day. The heading and the dates stand on the bare paper: the week is drawn from beneath its dates down and never behind them, at rest or while it comes and goes.
+- The week's titles and hour labels keep their size at larger text settings, where seven columns hold no more, and its dates grow as far as 130%; the day, a pinch away, has every size. A block of 20 minutes or more shows its title, and one of two side by side, too narrow for a few letters, is its colour alone.
+- Several blocks move together. Two held at once are lifted and stay lifted when let go; a tap then lifts another or puts one down, and a drag up or down on any of them carries them all at once, with no hold: they are lifted already. They are put down together in one write, all of them or none, and a tap on empty time or Back puts them down where they were.
+- The keyboard's key adds the block and leaves the sheet open for the next, which starts where the last ended, with the day brought up so that it shows; on an empty field the key closes the sheet. The Add button adds and closes as before.
+- A block whose lower edge is held keeps its look and gives no long buzz: only its handle darkens. Lightening and the buzz now mean lifted, and nothing else. Held still near the bottom of the screen, an edge no longer sets the day scrolling by itself, and once the finger moves the day goes by a quarter as fast as under a carried block.
+- A stroke within 300 ms of the day last scrolling belongs to the scroll and resizes nothing.
+- Reminders come ten minutes before a block, not five, and say what their countdown runs to: “Next up at 15:20” before a block and “Until 16:05” while it runs, each over the block's name on a line of its own.
+- A second finger no longer changes the day when the first lifts, and nothing in a touch with two fingers is a tap.
+- A screen reader gets the same in the week: a block's actions move it a day or a quarter hour either way and lengthen or shorten it, each date opens its day, and the day and the week each offer the other.
+- The unsigned release APK is 135,933 bytes, against 111,609. Tested on Android 17.
+
 ## 1.5.1 — 6 October 2026
 
 - Crowded-day scrolling no longer clones the tile lookup's key and value arrays or searches that clone for every retained tile. Long blocks and a block being dragged remain in the visible window as before.

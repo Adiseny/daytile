@@ -7,6 +7,7 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.EditText
+import android.widget.ScrollView
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.pressImeActionButton
 import androidx.test.espresso.action.ViewActions.replaceText
@@ -144,12 +145,207 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         gesture(area.exactCenterX(), area.exactCenterY(), 0f, screen.context.dp(40f), hold = 450)
         await { stored("Move me")!!.startMinutes != before.startMinutes }
         val moved = stored("Move me")!!
+        // The move's own edge scrolling is a scroll like any other: a stroke straight after it resizes nothing.
+        SystemClock.sleep(ScrollOwnsTouchMillis + 50)
         area = bounds()
         gesture(area.exactCenterX(), area.bottom - screen.context.dp(4f), 0f, screen.context.dp(40f))
         await { stored("Move me")!!.durationMinutes != moved.durationMinutes }
         val resized = stored("Move me")!!
         main { assertTrue(tile("Move me").performAccessibilityAction(LengthenAction, null)) }
         await { stored("Move me")!!.durationMinutes == resized.durationMinutes + 5 }
+    }
+
+    @Test fun anEdgeHeldStillLiftsNothingBuzzesNothingAndScrollsNothing() {
+        launch { add("Edge", 660, 60) }
+        // The block's lower edge in the bottom fifth of the screen, where a carried block scrolls.
+        val density = screen.resources.displayMetrics.density
+        scrollTo(Math.round((TimelineTopClearance + heightForMinutes(720)) * density - screen.height * 0.9f))
+        awaitTile("Edge")
+        val tile = main { tile("Edge") }
+        val scroll = main { screen.scrollPx }
+        main { haptics.clear() }
+        val down = SystemClock.uptimeMillis()
+        fun send(action: Int, y: Float) = main {
+            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, tile.width / 2f, y, 0)
+            tile.onTouchEvent(event)
+            event.recycle()
+        }
+        val y = tile.height - 6f * density
+        send(MotionEvent.ACTION_DOWN, y)
+        await { main { screen.descendants().filterIsInstance<DayView>().first().activeBlockId != 0L } }
+        SystemClock.sleep(500)
+        // Held still it stays where it is, however near the screen's edge it is.
+        assertEquals(scroll, main { screen.scrollPx })
+        main {
+            assertEquals(60, tile.displayedDurationMinutes)
+            assertTrue(haptics.isEmpty())
+        }
+        // Drawn down, the day follows, a quarter as fast as under a carried block.
+        send(MotionEvent.ACTION_MOVE, y + 30f * density)
+        await { main { screen.scrollPx > scroll } }
+        val started = SystemClock.uptimeMillis()
+        val from = main { screen.scrollPx }
+        SystemClock.sleep(400)
+        val hoursASecond = (main { screen.scrollPx } - from) / (HourHeight * density) / ((SystemClock.uptimeMillis() - started) / 1000f)
+        assertTrue("An edge scrolled $hoursASecond hours a second", hoursASecond < 21f * ResizeScrollSpeed * 1.2f)
+        send(MotionEvent.ACTION_CANCEL, y)
+        assertEquals(60, stored("Edge")!!.durationMinutes)
+        main { assertFalse(haptics.contains(android.view.HapticFeedbackConstants.LONG_PRESS)) }
+    }
+
+    @Test fun aStrokeStraightAfterAScrollGoesOnScrollingAndResizesNothing() {
+        launch { add("Short", 540, 30) }
+        val density = screen.resources.displayMetrics.density
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(420)) })
+        awaitTile("Short")
+        fun area() = main { Rect().also { tile("Short").getDrawingRect(it); screen.offsetDescendantRectToMyCoords(tile("Short"), it) } }
+        // A scroll, and at once a stroke down the short block's middle, where a stroke resizes.
+        main { screen.descendants().filterIsInstance<ScrollView>().first().scrollBy(0, Math.round(8f * density)) }
+        var at = area()
+        gesture(at.exactCenterX(), at.exactCenterY(), 0f, 40f * density)
+        SystemClock.sleep(200)
+        assertEquals(30, stored("Short")!!.durationMinutes)
+        // Once the day has been still a moment the same stroke is the block's.
+        SystemClock.sleep(ScrollOwnsTouchMillis + 100)
+        at = area()
+        gesture(at.exactCenterX(), at.exactCenterY(), 0f, 40f * density)
+        await { stored("Short")!!.durationMinutes > 30 }
+    }
+
+    @Test fun theKeyboardsKeyAddsABlockAndStaysForTheNextWhichStartsWhereItEnded() {
+        launch()
+        main { model.openCreate(540) }
+        input().check(matches(hasFocus())).perform(replaceText("First"), pressImeActionButton())
+        await { stored("First")?.startMinutes == 540 }
+        // The same sheet, emptied, for a block that starts where the first ended.
+        await { main { model.sheet?.kind == PlannerSheet.Create && model.sheet?.value == 600L } }
+        input().check(matches(hasFocus())).check(matches(withText("")))
+        input().perform(replaceText("Second"), pressImeActionButton())
+        await { stored("Second")?.startMinutes == 600 }
+        await { main { model.sheet?.value == 660L } }
+        // On nothing, the key is done.
+        input().perform(pressImeActionButton())
+        await { main { model.sheet == null } }
+        assertEquals(2, storedToday().size)
+        // The button adds and closes, as it did.
+        main { model.openCreate(720) }
+        input().perform(replaceText("Third"))
+        clickLabel("Add")
+        await { stored("Third")?.startMinutes == 720 }
+        await { main { model.sheet == null } }
+    }
+
+    @Test fun aSecondFingerNeverChangesTheDay() {
+        launch { add("Left", 540, 60); add("Right", 540, 60) }
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(480)) })
+        awaitTile("Left")
+        val day = main { model.selectedDate }
+        val first = main { Rect().also { tile("Left").getDrawingRect(it); screen.offsetDescendantRectToMyCoords(tile("Left"), it) } }
+        val second = main { Rect().also { tile("Right").getDrawingRect(it); screen.offsetDescendantRectToMyCoords(tile("Right"), it) } }
+        val down = SystemClock.uptimeMillis()
+        val pointer = 1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT
+        val xs = floatArrayOf(first.exactCenterX(), second.exactCenterX())
+        val ys = floatArrayOf(first.exactCenterY(), second.exactCenterY())
+        touch(down, MotionEvent.ACTION_DOWN, intArrayOf(0), floatArrayOf(xs[0]), floatArrayOf(ys[0]))
+        touch(down, MotionEvent.ACTION_POINTER_DOWN or pointer, intArrayOf(0, 1), xs, ys)
+        SystemClock.sleep(450)
+        // The first finger lifts, and the one left, far from where the first came down, moves a little.
+        touch(down, MotionEvent.ACTION_POINTER_UP, intArrayOf(0, 1), xs, ys)
+        touch(down, MotionEvent.ACTION_MOVE, intArrayOf(1), floatArrayOf(xs[1] + 2f), floatArrayOf(ys[1]))
+        touch(down, MotionEvent.ACTION_MOVE, intArrayOf(1), floatArrayOf(xs[1] + 4f), floatArrayOf(ys[1]))
+        touch(down, MotionEvent.ACTION_UP, intArrayOf(1), floatArrayOf(xs[1] + 4f), floatArrayOf(ys[1]))
+        SystemClock.sleep(400)
+        assertEquals(day, main { model.selectedDate })
+    }
+
+    @Test fun twoBlocksHeldAtOnceAreLiftedAndAHoldOnEitherCarriesBoth() {
+        launch { add("One", 540, 60); add("Two", 660, 60); add("Three", 780, 30) }
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(480)) })
+        awaitTile("One")
+        val day = main { screen.descendants().filterIsInstance<DayView>().first() }
+        fun area(title: String) = main { Rect().also { tile(title).getDrawingRect(it); screen.offsetDescendantRectToMyCoords(tile(title), it) } }
+        val ids = main { longArrayOf(tile("One").block.id, tile("Two").block.id, tile("Three").block.id) }
+        fun holdBoth() {
+            val one = area("One")
+            val two = area("Two")
+            val down = SystemClock.uptimeMillis()
+            val pointer = 1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT
+            val xs = floatArrayOf(one.exactCenterX(), two.exactCenterX())
+            val ys = floatArrayOf(one.exactCenterY(), two.exactCenterY())
+            touch(down, MotionEvent.ACTION_DOWN, intArrayOf(0), floatArrayOf(xs[0]), floatArrayOf(ys[0]))
+            touch(down, MotionEvent.ACTION_POINTER_DOWN or pointer, intArrayOf(0, 1), xs, ys)
+            SystemClock.sleep(500)
+            // Fingers that have lifted blocks are no pinch, however they drift as they leave.
+            ys[1] += screen.context.dp(60f)
+            touch(down, MotionEvent.ACTION_MOVE, intArrayOf(0, 1), xs, ys)
+            touch(down, MotionEvent.ACTION_POINTER_UP or pointer, intArrayOf(0, 1), xs, ys)
+            touch(down, MotionEvent.ACTION_UP, intArrayOf(0), floatArrayOf(xs[0]), floatArrayOf(ys[0]))
+        }
+        holdBoth()
+        main {
+            assertTrue(day.isLifted(ids[0]) && day.isLifted(ids[1]))
+            assertFalse(day.isLifted(ids[2]))
+            assertEquals(0L, day.activeBlockId)
+            assertTrue(screen.backEnabled)
+            assertNull(model.sheet)
+            assertFalse(model.week)
+        }
+        assertEquals(540, stored("One")!!.startMinutes)
+        // A tap lifts another and a tap puts it down again; neither opens its actions.
+        var three = area("Three")
+        gesture(three.exactCenterX(), three.exactCenterY(), 0f, 0f)
+        main { assertTrue(day.isLifted(ids[2])) }
+        gesture(three.exactCenterX(), three.exactCenterY(), 0f, 0f)
+        main {
+            assertFalse(day.isLifted(ids[2]))
+            assertNull(model.sheet)
+        }
+        // A hold on one of them carries both, and they are put down together.
+        val one = area("One")
+        gesture(one.exactCenterX(), one.exactCenterY(), 0f, screen.context.dp(60f), hold = 450)
+        await { stored("One")!!.startMinutes == 570 && stored("Two")!!.startMinutes == 690 }
+        assertEquals(780, stored("Three")!!.startMinutes)
+        main { assertFalse(day.hasLifted) }
+        await { main { tile("Two").translationY == 0f && tile("Two").top == tile("One").top + screen.context.px(240f) } }
+        // Lifted again, a drag up or down on either carries both at once, with no hold: they
+        // are lifted already.
+        holdBoth()
+        main { assertTrue(day.hasLifted) }
+        val scrolled = main { screen.scrollPx }
+        val two = area("Two")
+        gesture(two.exactCenterX(), two.exactCenterY(), 0f, -screen.context.dp(60f))
+        await { stored("One")!!.startMinutes == 540 && stored("Two")!!.startMinutes == 660 }
+        main {
+            assertFalse(day.hasLifted)
+            assertEquals(scrolled, screen.scrollPx)
+        }
+        // The same drag on a block that is not lifted, beside the lane that resizes it,
+        // scrolls the day and moves nothing.
+        val plain = area("Three")
+        gesture(plain.left + screen.context.dp(16f), plain.exactCenterY(), 0f, -screen.context.dp(60f))
+        assertEquals(780, stored("Three")!!.startMinutes)
+        assertEquals(30, stored("Three")!!.durationMinutes)
+        assertTrue(main { screen.scrollPx } > scrolled)
+        // The day glides on after the drag, and a touch during the glide is the scroll's.
+        SystemClock.sleep(1500)
+        scrollTo(scrolled)
+        SystemClock.sleep(ScrollOwnsTouchMillis + 50)
+        holdBoth()
+        main { assertTrue(day.hasLifted) }
+        // A tap on empty time puts them down where they are, and adds nothing.
+        gesture(screen.width * 0.6f, area("Three").bottom + screen.context.dp(90f), 0f, 0f)
+        main {
+            assertFalse(day.hasLifted)
+            assertNull(model.sheet)
+        }
+        // And so does Back, before it does anything else.
+        holdBoth()
+        main {
+            assertTrue(day.hasLifted)
+            screen.handleBack()
+            assertFalse(day.hasLifted)
+        }
+        assertEquals(540, stored("One")!!.startMinutes)
     }
 
     @Test fun cancelledDragDoesNotSaveOrKeepScrolling() {
