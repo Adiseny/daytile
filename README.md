@@ -21,15 +21,9 @@ Tap the date heading and use the bell at the bottom left to switch reminders on.
 Blocks take their colour from the time of day they start, and the planner follows the clock rather than the system theme: light by day, dark from 20:00 to 07:00.
 
 <p align="center">
-  <img src="docs/readme/daytile-timeline.png" width="240" alt="A full day planned as blocks on the timeline">
-  <img src="docs/readme/daytile-add.gif" width="240" alt="Adding a block: tap an empty time, type a title, tap Add">
-  <img src="docs/readme/daytile-move.gif" width="240" alt="Holding a block to move it, then dragging its lower handle to lengthen it">
-</p>
-
-<p align="center">
-  <img src="docs/readme/daytile-days.gif" width="240" alt="Swiping to the next days, then jumping to a date from the calendar">
-  <img src="docs/readme/daytile-reminder.gif" width="240" alt="A reminder counting down to a block’s start">
-  <img src="docs/readme/daytile-evening.png" width="240" alt="The same day in the evening, on dark paper">
+  <img src="docs/readme/daytile-day.png" width="240" alt="A full day planned as blocks on the timeline">
+  <img src="docs/readme/daytile-week.png" width="240" alt="The week: seven days side by side, coloured by the time of day">
+  <img src="docs/readme/daytile-night.png" width="240" alt="The same day at night, on dark paper">
 </p>
 
 ## Privacy
