@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.2 — 9 October 2026
+
+- Consistent black tile text in the light palette and white in the dark palette, with dark washes adjusted for at least 4.5:1 contrast at every hour and in held and lifted states. Day and week use the same solid fill, so overlapping blocks retain their colours and contrast.
+- Week titles use the lines that fit complete measured glyphs and ellipsise when needed, including multilingual text. Enlarging a tile no longer hides the whole title at particular sizes. The held resize edge sits on the lower border and leaves the title visible during the gesture and after release.
+- Reminder chimes now decode on Android 8. Compatible FLAC headers add four bytes per file; the decoded audio and reminder timing are unchanged.
+- Removed the obsolete luminance calculation, colour-switch helpers and four cached fields. Corrected the README reminder caption. No dependencies or stored data are added; task storage is unchanged.
+- The signed APK is 140,897 bytes, 252 bytes smaller than 1.6.1. All 77 unit tests pass, along with all 81 Android tests on both Android 8 and Android 17. Pixel checks cover fitting, resizing, cancellation, saving and day/week colours; an isolated minified update preserves 57,456 tasks byte for byte. Verification is recorded in `docs/optimisation.md`.
+
 ## 1.6.1 — 8 October 2026
 
 - Faster group moves on crowded days: one shared overlap check replaces block copies and a separate policy for every selected block. Small days need no scratch array; older unsnapped blocks retain the same rules.

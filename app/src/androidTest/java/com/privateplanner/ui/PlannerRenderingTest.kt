@@ -2,6 +2,7 @@ package com.privateplanner.ui
 
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.os.SystemClock
@@ -10,6 +11,7 @@ import android.view.View
 import android.widget.ScrollView
 import com.privateplanner.domain.PlannerBlock
 import java.time.LocalDate
+import java.io.FileInputStream
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlin.concurrent.thread
@@ -19,6 +21,13 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PlannerRenderingTest : PlannerTestHost() {
+    // Capture the actual compositor output. Older UiAutomation screenshot readback
+    // can return an all-black image on emulator graphics backends.
+    private fun screenshot(): Bitmap = InstrumentationRegistry.getInstrumentation().uiAutomation
+        .executeShellCommand("screencap -p").use { descriptor ->
+            FileInputStream(descriptor.fileDescriptor).use { checkNotNull(BitmapFactory.decodeStream(it)) }
+        }
+
     @Test fun cancelledResizeRestoresEveryPixelAndItsSpokenTime() {
         launch { add("Resize 保持", start = 540, duration = 60) }
         scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(480)) })
@@ -111,6 +120,8 @@ class PlannerRenderingTest : PlannerTestHost() {
         instrumentation.setInTouchMode(false)
         try {
             val scroll = main { screen.descendants().filterIsInstance<ScrollView>().first().also { it.requestFocus() } }
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+            main { scroll.requestFocus() }
             await("The day should hold the focus out of touch mode") { main { scroll.isFocused && !scroll.isInTouchMode } }
             // The platform's highlight fades in over its first frames.
             SystemClock.sleep(400)
@@ -173,16 +184,20 @@ class PlannerRenderingTest : PlannerTestHost() {
     @Test fun scrollingTileShowsThroughStatusBarAndHeaderAfterSheetDismissal() {
         launch()
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        await { main { activity.hasWindowFocus() && screen.isShown } }
         automation.waitForIdle(100, 5_000)
-        val empty = checkNotNull(automation.takeScreenshot())
         val statusHeight = main {
             @Suppress("DEPRECATION")
             activity.window.decorView.rootWindowInsets.systemWindowInsetTop
         }
         assertTrue(statusHeight > 0)
-        val x = (empty.width * 0.7f).toInt()
-        val paper = empty.getPixel(x, statusHeight / 2)
-        empty.recycle()
+        val x = main { (activity.resources.displayMetrics.widthPixels * 0.7f).toInt() }
+        val paper = main { screen.palette.Paper }
+        await("The empty planner must reach the compositor") {
+            val empty = screenshot()
+            try { empty.getPixel(x, statusHeight / 2) == paper }
+            finally { empty.recycle() }
+        }
         // Added through the planner, which reads a day again after its own writes.
         main {
             model.openCreate(0)
@@ -194,14 +209,18 @@ class PlannerRenderingTest : PlannerTestHost() {
         fun assertGlass() {
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             automation.waitForIdle(100, 5_000)
-            val image = checkNotNull(automation.takeScreenshot())
-            try {
-                val status = image.getPixel(x, statusHeight / 2)
-                val heading = image.getPixel(x, statusHeight + 6)
-                val channels = listOf<(Int) -> Int>(Color::red, Color::green, Color::blue)
-                assertTrue("Tile should show through system bar: paper=$paper status=$status heading=$heading", channels.sumOf { kotlin.math.abs(it(status) - it(paper)) } > 20)
-                channels.forEach { assertTrue("Status and heading tint should be continuous", kotlin.math.abs(it(status) - it(heading)) <= 5) }
-            } finally { image.recycle() }
+            // Main-thread idleness does not wait for SurfaceFlinger or window transitions.
+            // Keep the same pixel expectations, allowing the actual frame to be presented.
+            await("The tile must tint the system bar and heading continuously") {
+                val image = screenshot()
+                try {
+                    val status = image.getPixel(x, statusHeight / 2)
+                    val heading = image.getPixel(x, statusHeight + 6)
+                    val channels = listOf<(Int) -> Int>(Color::red, Color::green, Color::blue)
+                    channels.sumOf { kotlin.math.abs(it(status) - it(paper)) } > 20 &&
+                        channels.all { kotlin.math.abs(it(status) - it(heading)) <= 5 }
+                } finally { image.recycle() }
+            }
         }
         assertGlass()
         main { model.openDateJump() }

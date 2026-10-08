@@ -28,7 +28,7 @@ Blocks take their colour from the time of day they start, and the planner follow
 
 <p align="center">
   <img src="docs/readme/daytile-days.gif" width="240" alt="Swiping to the next days, then jumping to a date from the calendar">
-  <img src="docs/readme/daytile-reminder.gif" width="240" alt="A reminder arriving five minutes before a block and counting down to its start">
+  <img src="docs/readme/daytile-reminder.gif" width="240" alt="A reminder counting down to a block’s start">
   <img src="docs/readme/daytile-evening.png" width="240" alt="The same day in the evening, on dark paper">
 </p>
 

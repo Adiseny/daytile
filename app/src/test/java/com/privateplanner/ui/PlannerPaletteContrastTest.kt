@@ -5,11 +5,12 @@ import com.privateplanner.domain.blockBackgroundArgb
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.pow
 
 class PlannerPaletteContrastTest {
 
     @Test
-    fun nativeArgbLuminanceMatchesReferencePrimaries() {
+    fun contrastReferenceMatchesPrimaries() {
         assertEquals(0f, luminance(0xFF000000.toInt()), 0.000001f)
         assertEquals(1f, luminance(0xFFFFFFFF.toInt()), 0.000001f)
         assertEquals(0.2126f, luminance(0xFFFF0000.toInt()), 0.000001f)
@@ -66,13 +67,14 @@ class PlannerPaletteContrastTest {
 
     @Test
     fun everyBlockLabelMeetsNormalTextContrastOnEveryTile() {
-        forEachMinutePalette(step = 5) { minute, palette ->
+        forEachMinutePalette { minute, palette ->
             for (hour in 0 until 24) {
                 for (variant in 0 until 3) {
                     val tile = blockBackgroundArgb(hour * 60, variant)
                     for (active in listOf(false, true)) {
-                        val surface = compositedTileBackground(tile, palette.Paper, active)
-                        val ink = tileInkFor(tile, palette.Paper, active)
+                        val surface = compositedTileBackground(tile, palette, active)
+                        val ink = tileInkFor(palette)
+                        assertEquals(if (palette.LightBackground) 0xFF000000.toInt() else 0xFFFFFFFF.toInt(), ink)
                         assertContrast(
                             minute,
                             "Tile ink hour=$hour variant=$variant active=$active",
@@ -91,14 +93,14 @@ class PlannerPaletteContrastTest {
     // the ink the day gives it, must show against its band.
     @Test
     fun weekBandsShowOnThePaperAndTilesShowOnTheirBandsAtEveryMinute() {
-        forEachMinutePalette(step = 5) { minute, palette ->
+        forEachMinutePalette { minute, palette ->
             for (hour in 0 until 24) {
                 val band = bandColour(hour * 60, palette.Paper)
                 val shows = contrast(band, palette.Paper)
                 assertTrue("Band of $hour:00 ratio $shows < 1.1 at minute $minute", shows >= 1.1f)
                 for (variant in 0 until 3) {
                     val tile = blockBackgroundArgb(hour * 60, variant)
-                    val solid = compositedTileBackground(tile, palette.Paper, false)
+                    val solid = compositedTileBackground(tile, palette, false)
                     val stands = contrast(solid, band)
                     assertTrue("Tile of $hour:00 variant $variant ratio $stands < 1.5 on its band at minute $minute", stands >= 1.5f)
                 }
@@ -132,10 +134,19 @@ class PlannerPaletteContrastTest {
         )
     }
 
-    private fun forEachMinutePalette(step: Int = 1, check: (Int, PlannerPalette) -> Unit) {
-        for (minute in 0 until TimeSnapper.MinutesPerDay step step) {
+    private fun forEachMinutePalette(check: (Int, PlannerPalette) -> Unit) {
+        for (minute in 0 until TimeSnapper.MinutesPerDay) {
             check(minute, paletteForMinute(minute))
         }
+    }
+
+    // Independent sRGB reference; production drawing needs no luminance calculation.
+    private fun luminance(colour: Int): Float {
+        fun linear(shift: Int): Double {
+            val value = (colour ushr shift and 255) / 255.0
+            return if (value < 0.04045) value / 12.92 else ((value + 0.055) / 1.055).pow(2.4)
+        }
+        return (0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0)).toFloat()
     }
 
     private fun contrast(a: Int, b: Int): Float {

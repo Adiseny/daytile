@@ -24,25 +24,21 @@ import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
-internal const val ActiveTileAlpha = 0.70f
-internal const val IdleTileAlpha = 0.86f
-private const val BlackWhiteContrastSwitchLuminance = 0.17912878f
 private const val DurationVisibleMinWidthDp = 112f
 private const val DurationTitleRemainderMinDp = 56f
 private const val DurationMaxReserveFraction = 0.34f
 
-internal fun compositedTileBackground(background: Int, paper: Int, active: Boolean): Int =
-    compositeOver(withAlpha(background, if (active) ActiveTileAlpha else IdleTileAlpha), paper)
-
-internal fun tileInkFor(background: Int, paper: Int, active: Boolean): Int =
-    tileInkFor(compositedTileBackground(background, paper, active))
-
-internal fun tileInkFor(composite: Int): Int =
-    if (luminance(composite) >= BlackWhiteContrastSwitchLuminance) {
-        0xFF000000.toInt()
+// One ink per palette in both views. The wash is lighter by day and deeper at night,
+// keeping every time colour above normal-text contrast without flipping a tile's ink.
+internal fun compositedTileBackground(background: Int, palette: PlannerPalette, active: Boolean): Int =
+    compositeOver(withAlpha(background, if (palette.LightBackground) {
+        if (active) 0.70f else 0.86f
     } else {
-        0xFFFFFFFF.toInt()
-    }
+        if (active) 0.55f else 0.65f
+    }), palette.Paper)
+
+internal fun tileInkFor(palette: PlannerPalette): Int =
+    if (palette.LightBackground) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
 
 internal fun durationReserveDp(
     tileWidthDp: Float,
@@ -160,8 +156,6 @@ internal class TimeBlockView(
     private var metaY = 0
     private var durationX = 0
     private var durationY = 0
-    private var inkBackground = 0
-    private var ink = 0
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -319,18 +313,14 @@ internal class TimeBlockView(
         // whose edge is held stays as it is, and its handle darkens.
         val active = phase == Moving || day.isLifted(block.id)
         val background = blockBackgroundArgb(block.startMinutes, columns.columnIndex)
-        val composite = compositedTileBackground(background, host.palette.Paper, active)
-        if (inkBackground != composite) {
-            inkBackground = composite
-            ink = tileInkFor(composite)
-        }
+        val ink = tileInkFor(host.palette)
         val w = width.toFloat()
         val h = visualHeightPx.toFloat()
         canvas.save()
         canvas.translate(0f, visualOffsetPx.toFloat())
         val radius = min((if (displayedDurationMinutes <= QuickResizeMaxDurationMinutes) 13f else 16f) * density, min(w, h) / 2f)
         TilePaint.style = Paint.Style.FILL
-        TilePaint.color = withAlpha(background, if (active) ActiveTileAlpha else IdleTileAlpha)
+        TilePaint.color = compositedTileBackground(background, host.palette, active)
         canvas.drawRoundRect(0f, 0f, w, h, radius, radius, TilePaint)
 
         val follow = if (meta != null && visualHeight >= LongTitlePinMinHeight) {

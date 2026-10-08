@@ -46,11 +46,6 @@ private fun linear(channel: Int): Double {
 private fun encoded(linear: Double): Int =
     channel((if (linear >= 0.0031308) 1.055 * linear.pow(1 / 2.4) - 0.055 else linear * 12.92).toFloat())
 
-// Relative luminance, as contrast ratios are defined on.
-internal fun luminance(colour: Int): Float =
-    (0.2126 * linear(colour ushr 16 and 0xFF) + 0.7152 * linear(colour ushr 8 and 0xFF) + 0.0722 * linear(colour and 0xFF))
-        .toFloat().coerceAtLeast(0f).coerceAtMost(1f)
-
 // A straight line through Oklab, where equal steps look equal: the space the palettes
 // were tuned in.
 internal fun lerp(from: Int, to: Int, fraction: Float): Int {

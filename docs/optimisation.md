@@ -1,3 +1,77 @@
+# Stable tile text — 1.6.2, 9 October 2026
+
+## Changes
+
+Tile ink follows the palette in both views: black in light, white in dark. Light washes
+retain their previous values; dark washes use 65% at rest and 55% while lifted. Both
+views draw the same opaque composite, so text contrast is independent of a block behind
+it. The obsolete per-tile colour switch, luminance calculation and four cached fields
+are removed. No dependency, database change or persistent cache is added.
+
+Week titles fit the height of complete measured glyphs, including fallback fonts, rather
+than relying on fractional line estimates. The largest fitting line count is retained;
+long text ellipsises instead of disappearing. Padding uses the space left over. Small
+or narrow tiles that cannot fit a readable line remain their colour and retain their
+spoken title. Holding the resize edge marks the lower border and does not change the
+text layout or its available space.
+
+The README reminder caption no longer gives the former five-minute lead time.
+
+Android 8's [FLAC sniffer](https://android.googlesource.com/platform/frameworks/av/+/android-8.0.0_r1/media/libstagefright/FLACExtractor.cpp)
+requires the STREAMINFO block to be marked as non-final. The chimes previously used
+STREAMINFO as their sole metadata block, which the older sniffer rejected. An empty
+final padding block fixes this with four bytes per file. The compressed audio frames
+are identical, and both chimes decode to their original PCM hashes. No playback code,
+extra resource or dependency is added.
+
+## Verification
+
+The rendering regressions failed against 1.6.1: holding a 20-minute block hid its title,
+multilingual text could exceed its tile, and native resize previews could differ from
+fresh tiles. The following checks pass with the replacement:
+
+- All 77 unit tests, with an independent sRGB contrast reference. Tile ink meets the
+  [4.5:1 normal-text target](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)
+  for every minute of the palette clock, all 24 start hours, all three colour variants,
+  and both ordinary and lifted states: 207,360 combinations. Existing palette, band and
+  grid contrast checks also pass.
+- All 81 Android tests on both Android 8/API 26 and Android 17/API 37 emulators. The
+  added checks sweep every physical pixel of
+  height from 10 to 120dp at four widths, using short, long, unbroken, accented, Chinese
+  and emoji titles. Once drawn, a title must stay drawn as the tile grows. Its full
+  measured height must fit.
+- Both reminder chimes decode to the original PCM hashes on both Android versions.
+  Screenshot checks read the native compositor and wait for the expected pixels;
+  keyboard focus uses a real key event, and empty-time taps stay within the viewport.
+- Pixel comparisons check that holding reuses the title, resizing forwards and backwards
+  matches fresh layouts, cancellation restores every pixel, and saved resizes survive a
+  return through the day view. Rendered ink and fill are checked for each hour, variant
+  and held state across 11 palette times, including sunrise and dusk boundaries.
+- Sixteen full day/week captures cover ordinary and crowded plans at both ends in both
+  palettes. All-hour day/week and title-size atlases are visually reviewed in both
+  palettes, including Android 8's title-size atlases. These capture the intended
+  rendering changes; they are not described as
+  unchanged pixels from 1.6.1.
+- Isolated copies of the final minified APK pass native pinch, week-swipe and resize
+  checks. A multilingual block resized from 30 to 120 minutes and back saves the correct
+  times; held and released title pixels match. An update from 1.6.1 preserves all 57,456
+  tasks and every database byte, with SQLite integrity checks passing.
+- Unit tests, release lint, privacy verification, R8 and the signed build pass. Lint has
+  no errors and 29 existing warnings. No Kotlin library class or interface ships.
+
+## Size and launch checks
+
+| Measurement | 1.6.1 | 1.6.2 |
+| --- | ---: | ---: |
+| Signed APK | 141,149 bytes | 140,897 bytes |
+| Uncompressed `classes.dex` | 124,468 bytes | 124,208 bytes |
+
+The APK is 252 bytes smaller. Dex remains uncompressed and task storage is unchanged.
+On a dedicated Android 17 emulator, alternating force-stopped minified copies with
+57,456 tasks, then discarding two warm-up runs each, gave 247, 253, 261, 264, 254 ms before
+and 266, 262, 280, 251, 257 ms after: medians of 254 and 262 ms. These samples fall within emulator
+variation and are not used to claim a launch improvement.
+
 # Crowded plans — 1.6.1, 8 October 2026
 
 This pass audits the production code, queries, resources and release packaging on top of

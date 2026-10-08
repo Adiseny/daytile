@@ -333,7 +333,7 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         holdBoth()
         main { assertTrue(day.hasLifted) }
         // A tap on empty time puts them down where they are, and adds nothing.
-        gesture(screen.width * 0.6f, area("Three").bottom + screen.context.dp(90f), 0f, 0f)
+        gesture(screen.width * 0.6f, (area("One").bottom + area("Two").top) / 2f, 0f, 0f)
         main {
             assertFalse(day.hasLifted)
             assertNull(model.sheet)

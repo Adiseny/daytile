@@ -473,8 +473,6 @@ internal class WeekTile(
         private set
     private var titleY = 0
     private var stale = true
-    private var inkBackground = 0
-    private var ink = 0
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -509,16 +507,26 @@ internal class WeekTile(
     private fun layOut() {
         stale = false
         val paint = week.titlePaint(height >= 48f * density)
-        val line = paint.textSize * 1.2f
+        val line = ceil(paint.textSize * 1.2f).toInt()
         val inset = Math.round(WeekTitleInset * density)
-        var lines = ((height - inset - density) / line).toInt()
-        if (lines == 0 && height >= line) lines = 1
-        val text = if (lines == 0 || width - 2 * inset < paint.textSize * 2.4f) null else textBlock(
-            block.title, paint, line, width - 2 * inset, maxLines = lines, ellipsis = true, fill = true, hyphenate = true
-        )
+        var lines = height / line
+        var text: TextBlock? = null
+        if (width - 2 * inset >= paint.textSize * 2.4f) while (lines > 0) {
+            // Fallback fonts can be taller than the line box. Fit complete glyphs,
+            // reducing the line count and ellipsising rather than clipping the title.
+            val candidate = textBlock(
+                block.title, paint, line.toFloat(), width - 2 * inset, maxLines = lines,
+                ellipsis = true, fill = true, hyphenate = true
+            )
+            if (candidate.height <= height) {
+                text = candidate
+                break
+            }
+            lines--
+        }
         title = text
-        // One line sits in the middle of its tile; more start from the top.
-        titleY = if (text != null && lines == 1) Math.round((height - text.height) / 2f) else inset
+        // Short tiles centre a line; taller ones leave the title at the top.
+        titleY = if (text != null && lines == 1) (height - text.height) / 2 else min(inset, max((height - (text?.height ?: 0)) / 2, 0))
     }
 
     // In one pass and in this order: fill, title, handle, border, as the day's tiles are
@@ -532,23 +540,19 @@ internal class WeekTile(
         // shows over the paper. Here it is painted solid, since a tile may reach into the
         // next band, whose edge must not show through it, and one being carried must hide
         // what it passes over.
-        val paper = host.palette.Paper
-        val composite = compositedTileBackground(background, paper, moving)
-        if (inkBackground != composite) {
-            inkBackground = composite
-            ink = tileInkFor(composite)
-        }
+        val composite = compositedTileBackground(background, host.palette, moving)
+        val ink = tileInkFor(host.palette)
         val w = width.toFloat()
         val h = height.toFloat()
         val radius = min(WeekTileRadius * density, min(w, h) / 2f)
         TilePaint.style = Paint.Style.FILL
         TilePaint.color = composite
         canvas.drawRoundRect(0f, 0f, w, h, radius, radius, TilePaint)
-        val handleHeight = min(2f * density, h / 3f)
-        val handleTop = if (phase == Resizing) h - min(2f * density, h / 4f) - handleHeight else h
-        // On a tile too short for both, the handle is what is being looked at.
-        title?.let { if (titleY + it.height <= handleTop) it.draw(canvas, Math.round(WeekTitleInset * density).toFloat(), titleY.toFloat(), ink) }
+        title?.draw(canvas, Math.round(WeekTitleInset * density).toFloat(), titleY.toFloat(), ink)
         if (phase == Resizing) {
+            // Mark the lower border, leaving exactly the same room for text while held.
+            val handleHeight = min(density, h / 3f)
+            val handleTop = h - handleHeight
             val handleWidth = min(WeekHandleWidth * density, w / 2f)
             val handleLeft = (w - handleWidth) / 2f
             TilePaint.color = withAlpha(ink, ResizeHandleHeldAlpha)
