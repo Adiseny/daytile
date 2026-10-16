@@ -1,76 +1,45 @@
+# Daytile
 
-# PolyForm Noncommercial License 1.0.0
+https://github.com/user-attachments/assets/ceb70217-3c84-45ab-9bc0-2ae2aa94eb6a
 
-<https://polyformproject.org/licenses/noncommercial/1.0.0>
+Daytile is an offline Android app for planning your day as blocks on a 24-hour timeline.
 
-## Acceptance
+## Download
 
-In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
+Download the APK from the [latest GitHub release](https://github.com/Adiseny/daytile/releases/latest).
 
-## Copyright License
+## Use
 
-The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
+Tap an empty time to add a block. The keyboard's own key adds it and stays for the next one, which starts where the last ended; the Add button adds it and closes. Tap a block for its actions, hold and drag it to move it, or drag its lower handle to resize it. Swipe horizontally to change day and tap the date heading to jump further.
 
-## Distribution License
+To move several blocks at once, hold two of them together: both lift and stay lifted. Tap others to lift them too, then drag any lifted block up or down, and they all move together. A tap on empty time or Back puts them down where they were.
 
-The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
+Pinch in to see the week the day is in, and pinch out to go back to the day you were on. In the week, swipe horizontally to change week, tap a date to open that day, tap an empty time to add a block to that day, hold a block to move it to another day or time, and hold its lower edge to make it longer or shorter.
 
-## Notices
+Tap the date heading and use the bell at the bottom left to switch reminders on. While they are on, every block reminds you ten minutes before it starts, counting down to the start, and again as it starts, counting down to the end. A reminder clears itself when its countdown ends, or as soon as you delete or move the block. Reminders are off until you turn them on.
 
-You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
+Blocks take their colour from the time of day they start, and the planner follows the clock rather than the system theme: light by day, dark from 20:00 to 07:00.
 
-> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+<p align="center">
+  <img src="docs/readme/daytile-day.png" width="240" alt="A full day planned as blocks on the timeline">
+  <img src="docs/readme/daytile-week.png" width="240" alt="The week: seven days side by side, coloured by the time of day">
+  <img src="docs/readme/daytile-night.png" width="240" alt="The same day at night, on dark paper">
+</p>
 
-## Changes and New Works License
+## Privacy
 
-The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
+No account, no network, no analytics, no logging. No `INTERNET` permission, so planner data cannot leave your device. System backup and device transfer are disabled, and data is stored only in a local on-device database.
 
-## Patent License
+Daytile declares four permissions, all of them for reminders, and **none of them grants access to any data**: `POST_NOTIFICATIONS` (draw a reminder on your screen), `USE_EXACT_ALARM` and `SCHEDULE_EXACT_ALARM` (fire it at the right minute rather than whenever the system next wakes up), and `RECEIVE_BOOT_COMPLETED` (re-arm your reminders after a restart). Notification access is requested only the first time you switch reminders on, and never if you don't.
 
-The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+This is enforced, not just promised. The `verifyPrivacy` Gradle task fails the release build if any *other* permission — `INTERNET` included — or a networking or analytics dependency, or a logging call is added.
 
-## Noncommercial Purposes
+```bash
+./gradlew :app:verifyPrivacy
+```
 
-Any noncommercial purpose is a permitted purpose.
+## Licence
 
-## Personal Uses
+Proprietary, all rights reserved. The source is public so the privacy claims above can be verified, not reused. See [LICENSE](LICENSE).
 
-Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
-
-## Noncommercial Organizations
-
-Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
-
-## Fair Use
-
-You may have "fair use" rights for the software under the law. These terms do not limit them.
-
-## No Other Rights
-
-These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
-
-## Patent Defense
-
-If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
-
-## Violations
-
-The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
-
-## No Liability
-
-***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
-
-## Definitions
-
-The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
-
-**You** refers to the individual or entity agreeing to these terms.
-
-**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
-
-**Your licenses** are all the licenses granted to you for the software under these terms.
-
-**Use** means anything you do with the software requiring one of your licenses.
-
-Required Notice: Copyright (c) 2026 Adiseny
+Daytile is compiled from Kotlin and ships no libraries. A few functions of the Kotlin standard library are compiled into its own code; they are under the Apache License 2.0, reproduced in [docs/kotlin-licence.txt](docs/kotlin-licence.txt).
