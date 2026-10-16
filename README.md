@@ -40,6 +40,8 @@ This is enforced, not just promised. The `verifyPrivacy` Gradle task fails the r
 
 ## Licence
 
-Proprietary, all rights reserved. The source is public so the privacy claims above can be verified, not reused. See [LICENSE](LICENSE).
+Daytile is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
 
-Daytile is compiled from Kotlin and ships no libraries. A few functions of the Kotlin standard library are compiled into its own code; they are under the Apache License 2.0, reproduced in [docs/kotlin-licence.txt](docs/kotlin-licence.txt).
+You may use, modify, and distribute the software for non-commercial purposes. Commercial use requires separate permission. See [LICENSE](LICENSE).
+
+Daytile includes Kotlin standard library code under the Apache License 2.0. See [docs/kotlin-licence.txt](docs/kotlin-licence.txt).
