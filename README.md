@@ -41,8 +41,10 @@ This is enforced, not just promised. The `verifyPrivacy` Gradle task fails the r
 
 ## Licence
 
-Daytile is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).
+Copyright (c) 2026 Adiseny.
 
-Non-commercial use, modification, and distribution are permitted. Commercial use requires separate permission.
+Daytile is free software under the [GNU General Public License version 3 or later](LICENSE.md), identified as `GPL-3.0-or-later`. You may use, modify and redistribute it, including commercially, under those terms. Distributed modified versions must remain under the GPL and provide their corresponding source. There is no warranty.
 
-Kotlin standard library components are licensed under Apache 2.0. See [Kotlin licence](docs/kotlin-licence.txt).
+This licence covers Daytile's original source code, documentation and assets. Third party components retain their own licences. See [NOTICE.md](NOTICE.md).
+
+Kotlin standard library components remain under Apache 2.0. See [Kotlin licence](docs/kotlin-licence.txt).
