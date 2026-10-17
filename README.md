@@ -8,6 +8,8 @@ Daytile is an offline Android app for planning your day as blocks on a 24-hour t
 
 Download the APK from the [latest GitHub release](https://github.com/Adiseny/daytile/releases/latest).
 
+For updates through [Obtainium](https://obtainium.imranr.dev/), add `https://github.com/Adiseny/daytile` as an app source. This uses the APKs from the same GitHub releases. Install updates over the existing app to keep your plans.
+
 ## Use
 
 Tap an empty time to add a block. The keyboard's own key adds it and stays for the next one, which starts where the last ended; the Add button adds it and closes. Tap a block for its actions, hold and drag it to move it, or drag its lower handle to resize it. Swipe horizontally to change day and tap the date heading to jump further.

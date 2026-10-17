@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.3 unreleased
+
+- Daytile is now available under GPLv3 or later.
+- Include the Daytile and Kotlin licence notices in the APK.
+- Add catalogue descriptions, the existing icon and screenshots, and Obtainium update instructions.
+- No planner features, task storage, reminder timing or runtime dependencies have changed.
+
 ## 1.6.2 — 9 October 2026
 
 - Consistent black tile text in the light palette and white in the dark palette, with dark washes adjusted for at least 4.5:1 contrast at every hour and in held and lifted states. Day and week use the same solid fill, so overlapping blocks retain their colours and contrast.
