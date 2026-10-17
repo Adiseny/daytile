@@ -91,6 +91,8 @@ launch and frame measurements.
 
 ## 5. Publish
 
+- Confirm the APK includes `assets/daytile-licence.txt` and `assets/kotlin-licence.txt`.
+- Ensure the release's source tag includes the applicable licence and all source and build files corresponding to the APK. Link that tag in the release notes. Do not move an existing tag or describe an older APK as rebuilt from a newer source revision.
 - Commit and push the verified source.
 - Create an annotated `v<versionName>` tag on that commit and push it.
 - Rename the signed APK to `daytile-<versionName>.apk`.
