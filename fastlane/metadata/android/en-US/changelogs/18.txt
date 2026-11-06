@@ -1,1 +1,0 @@
-Daytile is now available under GPLv3 or later. This release includes the licence notices and catalogue information. No planner features have changed.
