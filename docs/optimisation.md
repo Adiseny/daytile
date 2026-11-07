@@ -1,3 +1,204 @@
+# Slightly quicker resizing after scrolling — 7 November 2026
+
+The existing scroll guard is reduced from 300 to 275ms. A touch during that interval
+still continues scrolling; resizing becomes available 25ms sooner. No gesture detection,
+state or storage is added. Long-press timing and resize snapping are unchanged.
+
+The existing continued-scroll and drag/resize/accessibility gesture tests pass on
+Android 17. All 77 unit tests, release lint, privacy verification, R8 and release build
+pass. The unsigned APK remains 153,392 bytes and dex remains 124,748 bytes.
+
+The follow-up verification adds native touch routing at 250ms and 285ms after the last
+scroll. The first stroke continues scrolling; the second resizes without scrolling;
+cancellation restores the original duration and saves nothing. Backdating the existing
+scroll timestamp on the UI thread avoids depending on a sleeping test thread waking
+inside a 25ms interval. The test fails at the intended resize assertion with the former
+300ms guard and passes with 275ms. The interval uses the same monotonic
+[uptime clock](https://developer.android.com/reference/android/os/SystemClock) on both
+sides. The 275ms choice is a conservative feel adjustment, not a proven universal optimum.
+
+Fresh verification passes all 77 unit tests and all **95 Android tests on each of Android
+8/API 26 and Android 17/API 37**, covering gestures, month boundaries, fitting text,
+font scales, rapid writes, reminders, migrations and dense plans. Release checks were
+rerun from their tasks, including lint (zero errors, 28 warnings), privacy and shrinking.
+The haptic API warnings are guarded with fallbacks for older Android versions; custom
+views are constructed directly, and the grid-label allocation uses a configuration cache.
+
+An isolated copy of the minified release passes crowded day/week navigation and pinch
+checks with 57,456 tasks. Updating it preserves every database byte and SQLite integrity;
+the installed dex matches the release. Native week resizes from 30 to 120 minutes and
+back save the correct values and retain identical held/released title pixels.
+Fresh 504-task repository-save medians are 6.93 to 1.87ms in memory and 7.50 to 2.15ms
+with disk commits, about 3.7 and 3.5 times faster respectively. These measure group saves,
+not overall app speed; they do not establish a startup improvement.
+
+Removed the explicit `-repackageclasses` rule: class repackaging has been the
+[AGP default since 9.1](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization),
+and this project uses 9.3.3. Rebuilding produces a **byte-identical APK**, SHA-256
+`b6e91143db8870fe3c15aab27493cb6c72078f75162e1ba2a989f1da3507da36`.
+APK inspection confirms no test fixtures, catalogue images or Kotlin library classes.
+The seven [external catalogue files](https://f-droid.org/docs/All_About_Descriptions_Graphics_and_Screenshots/)
+remain outside the APK; upstream licence assets remain compressed. There are no new
+dependencies, permissions, task fields, database indexes or persistent caches.
+
+# Stable title width while resizing — 7 November 2026
+
+The duration readout used to choose its column width from the current string and font
+size. Labels such as `55m`, `1h` and `1h 5m` therefore gave the title different widths.
+If a readout stopped fitting, the title reclaimed its column, then lost it again when a
+shorter readout returned. This caused sideways rewrapping during an otherwise vertical
+resize, including after a save or cancellation.
+
+The readout now has a bounded column based only on tile width and font scale. Its size
+covers the largest duration style where room permits and stays capped at 34% of the
+tile. Narrow columns keep their previous title-only layout. A readout is measured once
+and drawn in full, right-aligned with 8dp of outer padding and at least 4dp from the title;
+when it cannot fit, its column stays reserved so the title does not jump. Existing font
+sizes, vertical positioning and height-dependent title styles are retained.
+
+No gesture state or persistent data is added. A freshly drawn tile, a resize preview,
+a cancelled resize and a saved resize all use the same column. Tiles too narrow for a
+readout no longer format a duration string during text layout.
+
+The three new Android regressions fail against the preceding build and pass with this
+fix. They cover growing and shrinking through minute/hour, digit-count and font-size
+boundaries, five tile widths and four font scales; visible readouts must be complete,
+aligned and clear of the title. Native resize previews, cancellation and a saved
+55-to-65-minute resize must retain the same title boundary. All 77 unit tests and all
+94 Android tests pass on Android 8/API 26 and Android 17. Release lint, privacy checks,
+R8 and the release build pass.
+
+The unsigned APK changes from 153,376 to 153,392 bytes: **16 bytes added**. Only
+`classes.dex` differs. Resources, manifest, licence assets, external catalogue files,
+dependencies and task storage are unchanged.
+
+# Catalogue information outside the APK — 6 November 2026
+
+The size and performance goals apply to both downloaded and installed copies, and to
+plans with hundreds or thousands of tasks. Catalogue support must not add app code,
+dependencies, permissions, task fields, persistent caches or extra work in interactions.
+Downloaded APK size, installed storage and performance are measured separately; a smaller
+compressed download is not automatically a smaller or faster installed app.
+
+The catalogue-only part of PR #1 (reference `904d13a`) supplies seven files in the root
+`fastlane/metadata/android/en-US/` directory. This is an external listing format, not a
+build plugin or Android asset directory. The existing day, week and night screenshots
+are reused byte for byte; their Git blob IDs match the README pictures. The description
+now states the hold-to-move gesture, day/week views, reminder default and local storage
+precisely. No speculative release version or changelog is added.
+
+This checkout also predated the GPL and Kotlin notices already committed on upstream
+`main` (`a5bc6e1`). Those notices and the matching source licence documents are retained.
+They are separate from F-Droid catalogue metadata. The two notice assets are ordinary
+ZIP-compressed text, never loaded by the planner, and take no space per task. The app's
+code, resources and manifest are byte-identical before and after bringing them over.
+
+| Build | Unsigned APK |
+| --- | ---: |
+| Audited planner before the upstream notice files | 137,325 bytes |
+| Same planner with the upstream notices, before catalogue files | 153,376 bytes |
+| Same planner with notices and external catalogue files | 153,376 bytes |
+
+The 16,051-byte increase belongs entirely to the two upstream licence assets and their
+ZIP entries. **Catalogue information adds zero APK bytes.** A forced fresh build with
+the catalogue present has the exact same APK SHA-256 as the build without it:
+`2f84e9f3e3cb76eceb3304a14910b61544f205ef2e8b4c69aeca9971a370ef53`.
+
+Both notice texts match their source files, are compressed, and remain available offline.
+Dex remains stored uncompressed. No catalogue description, icon or screenshot is present
+in the APK. The 77 unit tests, release lint, privacy verification, shrinking checks and
+fresh release build pass. The previously verified runtime and database code is unchanged.
+F-Droid clients can cache listing images separately; that is not Daytile task storage.
+
+# Group saves and fitting titles — 6 November 2026
+
+The audit covered all production Kotlin files, SQL, resources, dependencies and release
+shrinking. The remaining substantial repeated work was in group saves and week updates.
+No dependency, database migration, column, index or persistent cache is added.
+
+## Changes
+
+- Group previews find selected tasks in one pass through the day with primitive binary
+  searches, replacing a fresh linear task search for every selected ID. Pending-write
+  identity checks still keep later moves and resizes in charge.
+- Group saves use each task's existing `(day, start, id)` primary key. Previously every
+  selected task's update scanned its day by ID. Cross-day moves share the same query,
+  and publish both completed days before notifying the interface once.
+- Each week column keeps its own tile lookup. Updating a column no longer scans the
+  other six columns' tiles. Day updates allocate a removal list only when a tile leaves.
+- Week navigation compares the arriving month title with the title already displayed.
+  An unchanged title stays stationary throughout dragging, cancellation and landing;
+  changed months and boundary weeks retain their transition. Day swipes and ticks keep
+  their behavior.
+- Day titles use the height left after reserving the measured time label and resize
+  handle, rather than fixed line caps. Five lines display fully when they fit, and
+  shorter tiles can show two lines when both the time and handle still have room. The
+  duration keeps its separate column and fits the tile height even at large font scales.
+  Pinned text stops above the resize handle using its actual height.
+- Both tile views share complete-line fitting, including fallback-font padding. Week
+  titles no longer rebuild their layout once for every rejected line count. The fitted
+  line limit preserves the previous centring of narrow multilingual tiles. Text with
+  insufficient height stays hidden rather than showing clipped glyphs.
+- Rapid moves between days keep the newest preview even when an earlier save finishes
+  on that same destination day. Updated titles and later resizes retain priority. A
+  deterministic worker/main-thread interleaving reproduced the brief old-position flash
+  before the correction.
+
+## Measurements
+
+On the Android 17 emulator, an alternating comparison of complete repository saves for
+504 selected tasks gave medians of **6.98 ms before and 1.76 ms after**, about **4 times
+faster**. Each sample averages ten saves, with five warm-up batches per path and seven
+measured batches; every stored field is checked after each batch. This uses Android's
+in-memory SQLite and includes validation and the transaction, not disk synchronization
+or the complete gesture. `GroupShiftPerformanceTest` retains the previous query as the
+reference implementation.
+
+A separate run using a database file, including transaction commits, measured medians
+of **7.77 ms before and 2.24 ms after**, about **3.5 times faster**, for the same 504
+selected tasks. Timings vary between runs and Android versions; neither benchmark is a
+claim that the entire app runs this many times faster.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Unsigned release APK | 136,801 bytes | 137,325 bytes |
+| Uncompressed `classes.dex` | 124,208 bytes | 124,732 bytes |
+
+The requested fitting and navigation behavior plus the optimizations cost **524 bytes**
+(0.38% of the APK). Dex remains uncompressed, and the release check still rejects any
+remaining Kotlin library class or interface. Per-task storage is unchanged.
+
+A counterbalanced startup comparison used identical 57,456-task files in isolated
+minified copies. Both processes were stopped before every launch, the order reversed
+each pair, and four warm-up pairs were discarded. Fifteen measured launches per copy
+gave medians of **239 ms before and 237 ms after**. The overlapping samples do not
+establish a launch improvement; the measured gain is in group saves. Installed dex
+hashes and every fixture byte were checked after the comparison.
+
+## Verification
+
+- All 77 host unit tests and all 91 Android tests pass on Android 17 and Android 8/API 26.
+  The two requested behavior regressions were first reproduced against the original code.
+  New checks cover stationary month titles in both swipe directions, retained transitions
+  at month/year boundaries, and five complete title lines with safe pinned bounds.
+  The follow-up audit adds fitting shorter titles, exhaustive comparison with the
+  previous week-title fitting/positioning algorithm, actual multilingual ink bounds,
+  four font scales, disk-backed group saves and rapid cross-day save interleavings.
+- Existing multilingual/emoji height sweeps, native gestures, resize/cancellation pixel
+  checks, reminders and database migrations pass. The compositor test now selects a bare
+  paper pixel near the status bar's centre before checking that same pixel under a tile;
+  its former fixed pixel could land on a grid line visible through the translucent bar.
+- Twelve ordinary/crowded day/week snapshots match the original pixel for pixel. The
+  other four differ only where crowded day titles now reveal more text. Both week title
+  size atlases also match. Captures use fixed day/night palettes.
+- Isolated minified copies pass native day/week navigation and pinch checks with ordinary
+  and crowded plans. Native minified week resizes from 30 to 120 minutes and back save
+  the correct times, keep the title visible and preserve held/released text pixels.
+  Updating a 57,456-task copy preserves every database byte, with
+  SQLite integrity checks passing before and after.
+- Unit tests, release lint, privacy verification, R8 and the release build pass. Lint
+  reports no errors; signing and publication are separate from this source change.
+
 # Stable tile text — 1.6.2, 9 October 2026
 
 ## Changes

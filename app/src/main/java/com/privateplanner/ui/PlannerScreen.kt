@@ -321,20 +321,17 @@ internal open class PlannerScreen(
     // The week's heading is its month alone: its dates stand over its columns, and travel
     // with them. A week that runs from one month into the next names both, and one outside
     // this year gives the year.
-    private fun showWeekHeading(date: LocalDate) {
+    private fun weekTitle(date: LocalDate): String {
         val monday = date.weekStart()
         val sunday = monday.plusDays(6)
         val name = dateFormatter(MonthName, locale)
         val dated = dateFormatter(MonthAndYear, locale)
         val last = sunday.format(if (sunday.year == today.year) name else dated)
-        header.show(
-            when {
-                monday.month == sunday.month -> last
-                monday.year == sunday.year -> monday.format(name) + " \u2013 " + last
-                else -> monday.format(dated) + " \u2013 " + sunday.format(dated)
-            },
-            null
-        )
+        return when {
+            monday.month == sunday.month -> last
+            monday.year == sunday.year -> monday.format(name) + " \u2013 " + last
+            else -> monday.format(dated) + " \u2013 " + sunday.format(dated)
+        }
     }
 
     // The dates of the selected day's week, over its columns.
@@ -345,7 +342,7 @@ internal open class PlannerScreen(
 
     // The day's name and, on today, the current time: what stays put while blocks change places.
     private fun showHeading(date: LocalDate) {
-        if (weekHeading) return showWeekHeading(date)
+        if (weekHeading) return header.show(weekTitle(date), null)
         day.showsNow = date == today
         val formatter = dateFormatter(HeadingDate, locale)
         // Relative days show their date underneath; other years (rare) add the year.
@@ -652,6 +649,7 @@ internal open class PlannerScreen(
     // The day has changed: the arriving blocks are the selected day's and the rest is landing.
     private var slideWon = false
     private var headingNext = false
+    private var slideChangesHeading = true
     private var landFrom = 0f
     private var landTo = 0f
     private var landMillis = 0f
@@ -667,6 +665,7 @@ internal open class PlannerScreen(
         slideAt = 0f
         slideWon = false
         headingNext = false
+        slideChangesHeading = !modeWeek || weekTitle(date) != header.title
         if (modeWeek) {
             week.openOther(weekLists(date), todayIn(date))
             weekDays.openOther(date.weekStart(), todayIn(date), locale, dateFormatter(FullDate, locale))
@@ -694,7 +693,7 @@ internal open class PlannerScreen(
         slideDirection = 0
         Choreographer.getInstance().removeFrameCallback(this)
         header.lean = 0f
-        showHeading(viewModel.selectedDate)
+        if (slideChangesHeading) showHeading(viewModel.selectedDate)
         if (modeWeek) {
             week.closeOther()
             weekDays.closeOther()
@@ -715,7 +714,7 @@ internal open class PlannerScreen(
         } else {
             day.slide(selected, other)
         }
-        header.lean = if (headingNext) 0f else {
+        header.lean = if (headingNext || !slideChangesHeading) 0f else {
             -slideDirection * HeadingLean * density * min(slideAt * travel / (DaySwipeThreshold * density), 1f)
         }
     }
@@ -729,7 +728,7 @@ internal open class PlannerScreen(
         val next = slideWon || slideAt * travel >= DaySwipeThreshold * density
         if (next == headingNext) return
         headingNext = next
-        showHeading(if (next) slideDate!! else viewModel.selectedDate)
+        if (slideChangesHeading) showHeading(if (next) slideDate!! else viewModel.selectedDate)
         if (next && finger) haptic(HapticFeedbackConstants.SEGMENT_TICK)
     }
 
@@ -1164,7 +1163,8 @@ internal open class PlannerScreen(
         private val subtitlePaint = context.textPaint(BodySmall)
         private val glaze = Paint()
         private var glazePaper = 0
-        private var title = ""
+        var title = ""
+            private set
         private var subtitle: String? = null
         private var titleBlock: TextBlock? = null
         private var subtitleBlock: TextBlock? = null

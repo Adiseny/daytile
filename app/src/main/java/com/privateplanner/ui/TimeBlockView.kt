@@ -25,7 +25,6 @@ import kotlin.math.max
 import kotlin.math.min
 
 private const val DurationVisibleMinWidthDp = 112f
-private const val DurationTitleRemainderMinDp = 56f
 private const val DurationMaxReserveFraction = 0.34f
 
 // One ink per palette in both views. The wash is lighter by day and deeper at night,
@@ -42,23 +41,12 @@ internal fun tileInkFor(palette: PlannerPalette): Int =
 
 internal fun durationReserveDp(
     tileWidthDp: Float,
-    durationText: String,
-    compact: Boolean,
-    durationFontSizeSp: Float,
     fontScale: Float
 ): Float {
     if (tileWidthDp < DurationVisibleMinWidthDp) return 0f
-    val estimatedTextWidthDp = durationText.length * durationFontSizeSp * fontScale * 0.58f
-    val reserveDp = estimatedTextWidthDp + if (compact) 10f else 12f
-    val maxReserveDp = tileWidthDp * DurationMaxReserveFraction
-    return if (
-        reserveDp <= maxReserveDp &&
-        tileWidthDp - reserveDp >= DurationTitleRemainderMinDp
-    ) {
-        reserveDp
-    } else {
-        0f
-    }
+    // Seven characters cover every duration up to 24h, at the largest label size.
+    // The same bounded column survives hour boundaries and changes of tile style.
+    return min(tileWidthDp * DurationMaxReserveFraction, 7 * 14f * fontScale * 0.58f + 12f)
 }
 
 // How far a long tile's title slides down to stay just below the heading's fade. Lengths in
@@ -198,11 +186,20 @@ internal class TimeBlockView(
 
     fun scrolled() {
         if (visualHeight < LongTitlePinMinHeight) return
-        val offset = titleFollowOffsetPx(density, host.scrollPx, heightForMinutes(displayedStartMinutes), visualHeight, host.headerFadeBottomPx)
+        val offset = titleOffset()
         if (offset != followOffset) {
             followOffset = offset
             invalidate()
         }
+    }
+
+    private fun titleOffset(): Int {
+        val time = meta ?: return 0
+        if (visualHeight < LongTitlePinMinHeight) return 0
+        return min(
+            titleFollowOffsetPx(density, host.scrollPx, heightForMinutes(displayedStartMinutes), visualHeight, host.headerFadeBottomPx),
+            max(visualHeightPx - metaY - time.height - px(8f), 0)
+        )
     }
 
     private fun contentChanged(layout: Boolean) {
@@ -224,15 +221,8 @@ internal class TimeBlockView(
         contentStale = false
         val height = visualHeight
         val compact = height < 48f
-        val durationSize = when {
-            height < 32f -> 11f
-            height < 64f -> 12f
-            height < 128f -> 13f
-            else -> 14f
-        }
-        val durationText = TimeFormatter.duration(displayedDurationMinutes)
-        val reserve = durationReserveDp(tileWidth, durationText, compact, durationSize, resources.configuration.fontScale)
-        val endPadding = px(if (reserve > 0f) reserve else 8f)
+        val reservePx = px(durationReserveDp(tileWidth, resources.configuration.fontScale))
+        val endPadding = if (reservePx > 0) reservePx else px(8f)
         if (compact) {
             val start = px(if (height < 32f) 9f else 10f)
             val text = textBlock(
@@ -254,35 +244,49 @@ internal class TimeBlockView(
             val start = px(12f)
             val top = px(if (small) 5f else 8f)
             val columnWidth = width - start - endPadding
-            val columnHeight = visualHeightPx - top - px(if (small) 4f else 8f)
+            val columnHeight = visualHeightPx - top - px(8f)
+            // Reserve the actual time line before giving the title the remaining height.
+            meta = timeText(columnWidth, columnHeight)
+            val titleHeight = max(columnHeight - meta!!.height, 0)
+            val titleLine = context.sp(if (small) 14f else 18f)
             val text = textBlock(
                 block.title,
                 context.tilePaint(if (small) 12f else 14f, 600),
-                context.sp(if (small) 14f else 18f),
+                titleLine,
                 columnWidth,
-                maxLines = if (height < 80f) 1 else 2,
+                maxLines = max(titleHeight / ceil(titleLine).toInt(), 1),
                 ellipsis = true,
-                maxHeight = columnHeight
+                maxHeight = titleHeight
             )
             title = text
             titleX = start
             titleY = top
             metaY = top + text.height
-            meta = timeText(columnWidth, max(columnHeight - text.height, 0))
         }
-        duration = if (reserve > 0f) {
-            val reservePx = px(reserve)
-            textBlock(
+        duration = if (reservePx > 0) {
+            val size = when {
+                height < 32f -> 11f
+                height < 64f -> 12f
+                height < 128f -> 13f
+                else -> 14f
+            }
+            val durationText = TimeFormatter.duration(displayedDurationMinutes)
+            val paint = context.tilePaint(size, if (height >= 64f) 700 else 600)
+            val textWidth = ceil(paint.measureText(durationText)).toInt()
+            // A readout either fits completely or leaves its column empty. Reclaiming
+            // that space would make the title jump again when the readout reappears.
+            if (textWidth <= reservePx - px(12f)) textBlock(
                 durationText,
-                context.tilePaint(durationSize, if (height >= 64f) 700 else 600),
-                context.sp(durationSize + 2f),
-                reservePx - px(if (compact) 5f else 8f),
+                paint,
+                context.sp(size + 2f),
+                textWidth,
                 maxLines = 1,
+                maxHeight = visualHeightPx,
                 fill = true
             ).also {
-                durationX = width - reservePx
+                durationX = width - px(8f) - it.width
                 durationY = Math.round((visualHeightPx - it.height) / 2f)
-            }
+            } else null
         } else {
             null
         }
@@ -323,11 +327,7 @@ internal class TimeBlockView(
         TilePaint.color = compositedTileBackground(background, host.palette, active)
         canvas.drawRoundRect(0f, 0f, w, h, radius, radius, TilePaint)
 
-        val follow = if (meta != null && visualHeight >= LongTitlePinMinHeight) {
-            titleFollowOffsetPx(density, host.scrollPx, heightForMinutes(displayedStartMinutes), visualHeight, host.headerFadeBottomPx)
-        } else {
-            0
-        }
+        val follow = titleOffset()
         followOffset = follow
         title?.draw(canvas, titleX.toFloat(), (titleY + follow).toFloat(), ink)
         meta?.draw(canvas, titleX.toFloat(), (metaY + follow).toFloat(), ink)

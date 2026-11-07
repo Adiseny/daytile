@@ -8,6 +8,16 @@ Daytile releases must remain offline, private, minified and signed. Never publis
 - Confirm the working tree contains only intended changes.
 - Use JDK 17 or newer with the Android SDK installed.
 
+Catalogue text, icon and screenshots live at `fastlane/metadata/android/en-US/`,
+outside the app's sources and assets. The [F-Droid directory convention](https://f-droid.org/docs/All_About_Descriptions_Graphics_and_Screenshots/)
+needs no Fastlane installation or app dependency. Listing changes must leave the APK
+unchanged; screenshots and catalogue descriptions do not belong in the APK or task database.
+
+For F-Droid distribution, prefer [verification of the original developer-signed APK](https://f-droid.org/docs/Reproducible_Builds/)
+so updates keep the existing package and signing identity. Keep the build recipe,
+signing-certificate allowlist and catalogue index in distribution tooling, outside the
+app. A separate app flavour or an in-app updater is unnecessary.
+
 ## 2. Configure signing
 
 The release build is signed only when all four environment variables are present:
@@ -91,6 +101,8 @@ launch and frame measurements.
 
 ## 5. Publish
 
+- Confirm the APK includes `assets/daytile-licence.txt` and `assets/kotlin-licence.txt`.
+- Ensure the release's source tag includes the applicable licence and all source and build files corresponding to the APK. Link that tag in the release notes. Do not move an existing tag or describe an older APK as rebuilt from a newer source revision.
 - Commit and push the verified source.
 - Create an annotated `v<versionName>` tag on that commit and push it.
 - Rename the signed APK to `daytile-<versionName>.apk`.

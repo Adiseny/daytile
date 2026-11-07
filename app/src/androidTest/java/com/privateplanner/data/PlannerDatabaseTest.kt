@@ -119,10 +119,12 @@ class PlannerDatabaseTest {
             assertEquals(listOf(2L), dao.getBlocksForDays(day, day + 1).map { it.id })
             assertEquals(emptyList<Long>(), dao.getBlocksForDays(day + 2, day + 9).map { it.id })
             // To another day: the block is that day's from then on, with its id and title.
-            assertEquals(1, dao.moveBlock(day, 2, day + 3, 600, 30))
+            val beforeMove = dao.getBlock(day, 2)!!
+            assertEquals(0, dao.moveBlock(beforeMove.copy(startMinutes = 745), day + 3, 600, 30))
+            assertEquals(1, dao.moveBlock(beforeMove, day + 3, 600, 30))
             assertNull(dao.getBlock(day, 2))
             assertEquals(PlannerBlock(2, LocalDate.ofEpochDay(day + 3), "Late lunch", 600, 30), dao.getBlock(day + 3, 2))
-            assertEquals(0, dao.moveBlock(day, 2, day + 4, 600, 30))
+            assertEquals(0, dao.moveBlock(beforeMove, day + 4, 600, 30))
         } finally {
             database.close()
         }

@@ -44,8 +44,8 @@ interface PlannerBlockDao {
 
     fun updateTime(dateEpochDay: Long, id: Long, startMinutes: Int, durationMinutes: Int): Int
 
-    // To another day, where it is named by that day from then on.
-    fun moveBlock(dateEpochDay: Long, id: Long, toEpochDay: Long, startMinutes: Int, durationMinutes: Int): Int
+    // A known block's full stored key avoids scanning its day for each group member.
+    fun moveBlock(block: PlannerBlock, toEpochDay: Long, startMinutes: Int, durationMinutes: Int): Int
 
     fun deleteBlock(dateEpochDay: Long, id: Long): Int
 

@@ -111,7 +111,7 @@ class PlannerRepository(
                 if (!canShift(blocks, selected, deltaMinutes)) return@transaction PlannerWriteResult.RejectedOverlap
                 var rows = 0
                 for (block in blocks) {
-                    if (Arrays.binarySearch(selected, block.id) >= 0) rows += dao.updateTime(day, block.id, block.startMinutes + deltaMinutes, block.durationMinutes)
+                    if (Arrays.binarySearch(selected, block.id) >= 0) rows += dao.moveBlock(block, day, block.startMinutes + deltaMinutes, block.durationMinutes)
                 }
                 // One that has gone since takes none of the others with it.
                 if (rows > 0) PlannerWriteResult.Success else PlannerWriteResult.MissingBlock
@@ -129,7 +129,7 @@ class PlannerRepository(
                 if (!overlapPolicy(toDate, start, start + duration, id).canPlace(start, duration)) {
                     PlannerWriteResult.RejectedOverlap
                 } else {
-                    rowResult(dao.moveBlock(date.toEpochDay(), id, toDate.toEpochDay(), start, duration))
+                    rowResult(dao.moveBlock(block, toDate.toEpochDay(), start, duration))
                 }
             }
         }

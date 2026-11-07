@@ -189,9 +189,9 @@ class PlannerDatabase(private val context: Context, private val name: String? = 
     override fun updateTime(dateEpochDay: Long, id: Long, startMinutes: Int, durationMinutes: Int) =
         write("UPDATE blocks SET start = ?, duration = ?$OneBlock", null, startMinutes.toLong(), durationMinutes.toLong(), dateEpochDay, id)
 
-    override fun moveBlock(dateEpochDay: Long, id: Long, toEpochDay: Long, startMinutes: Int, durationMinutes: Int) = write(
-        "UPDATE blocks SET day = ?, start = ?, duration = ?$OneBlock",
-        null, toEpochDay, startMinutes.toLong(), durationMinutes.toLong(), dateEpochDay, id
+    override fun moveBlock(block: PlannerBlock, toEpochDay: Long, startMinutes: Int, durationMinutes: Int) = write(
+        "UPDATE blocks SET day = ?, start = ?, duration = ? WHERE day = ? AND start = ? AND id = ?",
+        null, toEpochDay, startMinutes.toLong(), durationMinutes.toLong(), block.date.toEpochDay(), block.startMinutes.toLong(), block.id
     )
 
     override fun deleteBlock(dateEpochDay: Long, id: Long) = write("DELETE FROM blocks$OneBlock", null, dateEpochDay, id)

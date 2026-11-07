@@ -198,7 +198,7 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
     }
 
     private fun sync(day: Int, blocks: List<PlannerBlock>, into: Page) {
-        val tiles = into.tiles
+        val tiles = into.tiles[day]
         val layouts = into.layouts[day]
         val dense = blocks.size > 64
         val start = visibleStart()
@@ -225,7 +225,7 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
         for (index in 0 until tiles.size()) {
             val tile = tiles.valueAt(index)
             if (tile.retained) tile.retained = false
-            else if (tile.day == day) (stale ?: ArrayList<WeekTile>().also { stale = it }).add(tile)
+            else (stale ?: ArrayList<WeekTile>().also { stale = it }).add(tile)
         }
         stale?.let {
             for (tile in it) {
@@ -237,7 +237,7 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
 
     // A hold in waiting as well as a move under way.
     fun cancelGesture() {
-        for (index in 0 until page.tiles.size()) page.tiles.valueAt(index).cancelGesture()
+        for (tiles in page.tiles) for (index in 0 until tiles.size()) tiles.valueAt(index).cancelGesture()
     }
 
     // --- A second week beside the one on show, while the week changes ------------------
@@ -359,7 +359,8 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
     // One week: its seven columns of bands, its blocks over them and, where today is in
     // it, the current time's line.
     private inner class Page(context: Context) : ViewGroup(context) {
-        val tiles = LongSparseArray<WeekTile>()
+        // Updating one column never scans the other six columns' tiles.
+        val tiles = Array(7) { LongSparseArray<WeekTile>(0) }
         val shown = arrayOfNulls<List<PlannerBlock>>(7)
         val layouts = Array(7) { BlockLayouts.Empty }
 
@@ -377,12 +378,12 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
 
         fun repaint() {
             invalidate()
-            for (index in 0 until tiles.size()) tiles.valueAt(index).invalidate()
+            for (day in tiles) for (index in 0 until day.size()) day.valueAt(index).invalidate()
         }
 
         fun clear() {
             removeAllViews()
-            tiles.clear()
+            for (day in tiles) day.clear()
             for (day in 0..6) {
                 shown[day] = null
                 layouts[day] = BlockLayouts.Empty
@@ -395,7 +396,7 @@ internal class WeekView(context: Context, private val host: WeekHost) : ViewGrou
         }
 
         override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-            for (index in 0 until tiles.size()) place(tiles.valueAt(index))
+            for (day in tiles) for (index in 0 until day.size()) place(day.valueAt(index))
         }
 
         // The current time's line and the dot it starts from, across today's column and over
@@ -509,24 +510,16 @@ internal class WeekTile(
         val paint = week.titlePaint(height >= 48f * density)
         val line = ceil(paint.textSize * 1.2f).toInt()
         val inset = Math.round(WeekTitleInset * density)
-        var lines = height / line
-        var text: TextBlock? = null
-        if (width - 2 * inset >= paint.textSize * 2.4f) while (lines > 0) {
-            // Fallback fonts can be taller than the line box. Fit complete glyphs,
-            // reducing the line count and ellipsising rather than clipping the title.
-            val candidate = textBlock(
+        val lines = height / line
+        val text = if (lines > 0 && width - 2 * inset >= paint.textSize * 2.4f) {
+            textBlock(
                 block.title, paint, line.toFloat(), width - 2 * inset, maxLines = lines,
-                ellipsis = true, fill = true, hyphenate = true
-            )
-            if (candidate.height <= height) {
-                text = candidate
-                break
-            }
-            lines--
-        }
+                ellipsis = true, maxHeight = height, fill = true, hyphenate = true
+            ).takeIf { it.height > 0 }
+        } else null
         title = text
         // Short tiles centre a line; taller ones leave the title at the top.
-        titleY = if (text != null && lines == 1) (height - text.height) / 2 else min(inset, max((height - (text?.height ?: 0)) / 2, 0))
+        titleY = if (text?.maxLines == 1) (height - text.height) / 2 else min(inset, max((height - (text?.height ?: 0)) / 2, 0))
     }
 
     // In one pass and in this order: fill, title, handle, border, as the day's tiles are

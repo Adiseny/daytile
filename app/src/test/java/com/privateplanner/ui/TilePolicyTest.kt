@@ -1,7 +1,6 @@
 package com.privateplanner.ui
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -48,36 +47,14 @@ class TilePolicyTest {
     }
 
     @Test
-    fun durationDisplayUsesConcreteWidthThresholdsAndReserveCap() {
-        assertFalse(
-            durationReserveDp(
-                tileWidthDp = 111f,
-                durationText = "15m",
-                compact = true,
-                durationFontSizeSp = 11f,
-                fontScale = 1f
-            ) > 0f
-        )
-
-        val compactReserve = durationReserveDp(
-            tileWidthDp = 112f,
-            durationText = "15m",
-            compact = true,
-            durationFontSizeSp = 11f,
-            fontScale = 1f
-        )
-        assertTrue(compactReserve > 0f)
-        assertTrue(compactReserve <= 112f * 0.34f)
-        assertTrue(112f - compactReserve >= 56f)
-
-        assertFalse(
-            durationReserveDp(
-                tileWidthDp = 112f,
-                durationText = "12h 55m",
-                compact = false,
-                durationFontSizeSp = 12f,
-                fontScale = 1f
-            ) > 0f
-        )
+    fun durationColumnUsesConcreteWidthThresholdAndKeepsRoomForTheTitle() {
+        assertEquals(0f, durationReserveDp(111f, 1f), 0f)
+        for (scale in listOf(0.85f, 1f, 1.3f, 2f)) for (width in listOf(112f, 180f, 240f, 320f, 800f)) {
+            val reserve = durationReserveDp(width, scale)
+            assertTrue(reserve > 0f)
+            assertTrue(reserve <= width * 0.34f)
+            assertTrue(width - reserve >= 56f)
+        }
+        assertEquals(durationReserveDp(320f, 1f), durationReserveDp(800f, 1f), 0f)
     }
 }

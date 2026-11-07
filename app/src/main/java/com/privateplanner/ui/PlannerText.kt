@@ -85,7 +85,7 @@ private class CentredLineHeight(private val lineHeight: Float) : LineHeightSpan 
 }
 
 // Laid-out text and where it draws within its own box.
-internal class TextBlock(private val layout: StaticLayout, private val top: Int, val width: Int, val height: Int) {
+internal class TextBlock(private val layout: StaticLayout, private val top: Int, val width: Int, val height: Int, val maxLines: Int) {
     private val clipped = layout.height + top > height
 
     fun draw(canvas: Canvas, x: Float, y: Float, colour: Int) {
@@ -102,7 +102,7 @@ internal class TextBlock(private val layout: StaticLayout, private val top: Int,
 internal const val Unbounded = 1 shl 24
 
 // Text as wide as it needs up to maxWidth (or exactly maxWidth when fill is set), cut to
-// maxLines and to the lines that fit maxHeight, with an ellipsis where asked.
+// complete lines that fit maxHeight, with an ellipsis where asked. Zero height if none fit.
 internal fun textBlock(
     text: String,
     paint: TextPaint,
@@ -132,16 +132,21 @@ internal fun textBlock(
             .setHyphenationFrequency(if (hyphenate) Layout.HYPHENATION_FREQUENCY_NORMAL else Layout.HYPHENATION_FREQUENCY_NONE)
             .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setUseLineSpacingFromFallbacks(true) }
             .build()
-    var layout = build(maxLines)
-    if (ellipsis && maxLines > 1 && layout.height > maxHeight) {
+    var limit = maxLines
+    var layout = build(limit)
+    val above = span?.above ?: 0
+    val below = span?.below ?: 0
+    if (ellipsis && maxLines > 1 && layout.height + above + below > maxHeight) {
         var fitting = 0
-        while (fitting < layout.lineCount && layout.getLineBottom(fitting) <= maxHeight) fitting++
-        if (fitting != maxLines) layout = build(fitting.coerceAtLeast(1))
+        val bodyHeight = maxHeight - above - below
+        while (fitting < layout.lineCount && layout.getLineBottom(fitting) <= bodyHeight) fitting++
+        limit = fitting.coerceAtLeast(1)
+        if (limit != maxLines) layout = build(limit)
     }
     val lines = minOf(layout.lineCount, maxLines)
     val body = if (lines < layout.lineCount) layout.getLineBottom(lines - 1) else layout.height
-    val above = span?.above ?: 0
-    return TextBlock(layout, above, width, minOf(body + above + (span?.below ?: 0), maxHeight))
+    val height = body + above + below
+    return TextBlock(layout, above, width, if (height <= maxHeight) height else 0, limit)
 }
 
 // Text in one style. It is as large as its text unless the parent says otherwise, and

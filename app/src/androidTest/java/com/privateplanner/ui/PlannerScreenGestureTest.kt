@@ -212,6 +212,49 @@ class PlannerScreenGestureTest : PlannerTestHost() {
         await { stored("Short")!!.durationMinutes > 30 }
     }
 
+    @Test fun resizingIsAvailableInTheShortenedPostScrollInterval() {
+        launch { add("Short", 540, 30) }
+        scrollTo(main { screen.context.px(TimelineTopClearance + heightForMinutes(420)) })
+        awaitTile("Short")
+        main {
+            val scroll = screen.descendants().filterIsInstance<ScrollView>().first()
+            val lastScroll = PlannerScreen::class.java.getDeclaredField("lastScrollMillis").apply { isAccessible = true }
+            for (elapsed in longArrayOf(250L, 285L)) {
+                val tile = tile("Short")
+                val area = Rect().also { tile.getDrawingRect(it); screen.offsetDescendantRectToMyCoords(tile, it) }
+                val x = area.exactCenterX()
+                val y = area.exactCenterY()
+                val down = SystemClock.uptimeMillis()
+                val before = scroll.scrollY
+                fun send(action: Int, at: Float) {
+                    MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, at, 0).let {
+                        screen.dispatchTouchEvent(it)
+                        it.recycle()
+                    }
+                }
+                // Backdate the last scroll so this checks the actual touch routing
+                // without relying on a sleeping test thread waking within a 25ms window.
+                lastScroll.setLong(screen, down - elapsed)
+                send(MotionEvent.ACTION_DOWN, y)
+                assertTrue("Touch must start before the former 300ms guard expires",
+                    SystemClock.uptimeMillis() - (down - elapsed) < 300L)
+                try {
+                    send(MotionEvent.ACTION_MOVE, y + activity.dp(20f))
+                    send(MotionEvent.ACTION_MOVE, y + activity.dp(40f))
+                    if (elapsed == 250L) {
+                        assertEquals("A recent scroll retains the stroke", 30, tile.displayedDurationMinutes)
+                        assertTrue("The stroke must continue scrolling", scroll.scrollY < before)
+                    } else {
+                        assertTrue("Resizing must start before the former guard expires", tile.displayedDurationMinutes > 30)
+                        assertEquals("A resize must leave the scroll still", before, scroll.scrollY)
+                    }
+                } finally { send(MotionEvent.ACTION_CANCEL, y) }
+                assertEquals("Cancellation restores the original duration", 30, tile.displayedDurationMinutes)
+            }
+        }
+        assertEquals(30, stored("Short")!!.durationMinutes)
+    }
+
     @Test fun theKeyboardsKeyAddsABlockAndStaysForTheNextWhichStartsWhereItEnded() {
         launch()
         main { model.openCreate(540) }

@@ -313,12 +313,13 @@ internal class DayView(context: Context, private val host: TimelineHost) : ViewG
         // Do not clone both sparse-array buffers or search the clone for every kept
         // tile. Collect removals first: valueAt() compacts after a remove, so deleting
         // during this scan would copy the remaining tiles once per removed child.
-        val stale = ArrayList<TimeBlockView>()
+        var stale: ArrayList<TimeBlockView>? = null
         for (index in 0 until tiles.size()) {
             val tile = tiles.valueAt(index)
-            if (tile.retained) tile.retained = false else stale.add(tile)
+            if (tile.retained) tile.retained = false
+            else (stale ?: ArrayList<TimeBlockView>().also { stale = it }).add(tile)
         }
-        for (tile in stale) {
+        for (tile in stale ?: return windowStart) {
             tiles.remove(tile.block.id)
             removeView(tile)
         }

@@ -9,9 +9,11 @@ import com.privateplanner.domain.PlannerBlock
 import com.privateplanner.domain.PlannerBlockOrder
 import com.privateplanner.domain.TimeSnapper
 import com.privateplanner.domain.isBlankTitle
+import com.privateplanner.domain.sortedIds
 import com.privateplanner.onMain
 import java.time.LocalDate
 import java.util.Collections
+import java.util.Arrays
 import java.util.function.Consumer
 import java.util.function.Supplier
 import kotlin.math.abs
@@ -389,15 +391,17 @@ class PlannerViewModel(
     // on screen at once and saved behind in one write, all of them or none.
     fun shiftBlocks(ids: LongArray, deltaMinutes: Int) {
         val date = selectedDate
-        val pending = arrayOfNulls<PendingTime>(ids.size)
-        for (index in ids.indices) {
-            val block = block(ids[index]) ?: continue
+        val selected = ids.sortedIds()
+        val pending = arrayOfNulls<PendingTime>(selected.size)
+        for (block in blocks) {
+            val index = Arrays.binarySearch(selected, block.id)
+            if (index < 0) continue
             pending[index] = PendingTime(block.startMinutes + deltaMinutes, block.durationMinutes).also { pendingTimes.put(block.id, it) }
         }
         republish(date)
-        write(date, { repository.shiftBlocks(date, ids, deltaMinutes) }) { result ->
+        write(date, { repository.shiftBlocks(date, selected, deltaMinutes) }) { result ->
             // A later change to one of them has taken that one over.
-            for (index in ids.indices) if (pendingTimes[ids[index]] === pending[index]) pendingTimes.remove(ids[index])
+            for (index in selected.indices) if (pendingTimes[selected[index]] === pending[index]) pendingTimes.remove(selected[index])
             if (result == PlannerWriteResult.RejectedOverlap) {
                 showMessage("No space there")
             } else if (result != PlannerWriteResult.Success) {
@@ -433,8 +437,9 @@ class PlannerViewModel(
             onMain {
                 // A later move of the same block has taken over, and its result settles both.
                 if (pendingDays[block.id] === moved) pendingDays.remove(block.id)
-                publish(block.date, from)
-                publish(toDate, to)
+                val fromChanged = publish(block.date, from, quiet = true)
+                val toChanged = publish(toDate, to, quiet = true)
+                if (fromChanged || toChanged) changed()
                 if (result == PlannerWriteResult.RejectedOverlap) {
                     showMessage("No space there")
                 } else if (result != PlannerWriteResult.Success) {
@@ -505,11 +510,15 @@ class PlannerViewModel(
         val blocks = merged ?: read
         for (index in blocks.indices) {
             val block = blocks[index]
-            val pending = pendingTimes[block.id] ?: continue
-            if (pending.startMinutes == block.startMinutes && pending.durationMinutes == block.durationMinutes) continue
+            val pending = pendingTimes[block.id]
+            // Returning to a day can find an earlier move already stored there. Keep
+            // the latest cross-day preview too, without replacing a newly saved title.
+            val start = pending?.startMinutes ?: pendingDays[block.id]?.startMinutes ?: continue
+            val duration = pending?.durationMinutes ?: pendingDays[block.id]!!.durationMinutes
+            if (start == block.startMinutes && duration == block.durationMinutes) continue
             if (merged == null) merged = ArrayList(blocks)
-            if (pending.startMinutes != block.startMinutes) moved = true
-            merged[index] = block.copy(startMinutes = pending.startMinutes, durationMinutes = pending.durationMinutes)
+            if (start != block.startMinutes) moved = true
+            merged[index] = block.copy(startMinutes = start, durationMinutes = duration)
         }
         if (moved) merged?.sortWith(PlannerBlockOrder)
         return merged ?: blocks

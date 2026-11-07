@@ -9,11 +9,6 @@
 -checkdiscard class kotlin.** { <init>(...); }
 -checkdiscard interface kotlin.**
 
-# Move every renamed class into a single package so the dex carries no package names.
-# Nothing finds a renamed class by its package: whatever is looked up by name (the
-# manifest's components) is kept by its own rules and stays where it is.
--repackageclasses
-
 # Kotlin's generated parameter and expression null checks only matter when Java passes
 # null into Kotlin. Every path here is null-safe Kotlin or the framework, so they would
 # only cost bytecode and a call per public function.

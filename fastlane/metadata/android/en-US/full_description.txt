@@ -1,0 +1,5 @@
+Daytile is a free offline Android planner. Tap empty time to add a block, hold and drag to move it, or use its lower edge to resize it. Pinch between the day and week. Reminders are optional and off by default.
+
+No account, ads, analytics or internet permission. Your plans are stored on your device, with system backup and device transfer disabled.
+
+Free software under GPLv3 or later.

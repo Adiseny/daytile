@@ -35,8 +35,8 @@ internal const val ResizeHandleHeldAlpha = 0.6f
 // How much slower the day goes by under an edge held at the screen's edge than under a block
 // carried there: an edge is placed to the step, a block to the hour.
 internal const val ResizeScrollSpeed = 0.25f
-// A touch this soon after the day last scrolled is a scroll's, and resizes nothing.
-internal const val ScrollOwnsTouchMillis = 300L
+// A quick stroke this soon after scrolling continues the scroll instead of resizing.
+internal const val ScrollOwnsTouchMillis = 275L
 
 // The week: seven day columns between a margin for the hours and the screen's edge, each a
 // stack of bands three hours tall in the colour blocks take in those hours.

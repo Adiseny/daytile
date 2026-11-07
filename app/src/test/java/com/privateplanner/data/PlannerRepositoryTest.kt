@@ -673,10 +673,10 @@ class PlannerRepositoryTest {
             blocks.filter { it.date.toEpochDay() >= firstEpochDay && it.date.toEpochDay() < endEpochDay }
                 .sortedWith(compareBy<PlannerBlock> { it.date.toEpochDay() }.thenBy { it.startMinutes }.thenBy { it.id })
 
-        override fun moveBlock(dateEpochDay: Long, id: Long, toEpochDay: Long, startMinutes: Int, durationMinutes: Int): Int {
+        override fun moveBlock(block: PlannerBlock, toEpochDay: Long, startMinutes: Int, durationMinutes: Int): Int {
             var updated = 0
             blocks.replaceAll { existing ->
-                if (existing.date.toEpochDay() == dateEpochDay && existing.id == id) {
+                if (existing.date == block.date && existing.startMinutes == block.startMinutes && existing.id == block.id) {
                     updated = 1
                     existing.copy(date = LocalDate.ofEpochDay(toEpochDay), startMinutes = startMinutes, durationMinutes = durationMinutes)
                 } else {

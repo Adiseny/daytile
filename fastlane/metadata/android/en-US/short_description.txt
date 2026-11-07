@@ -1,0 +1,1 @@
+Offline day and week planner with movable time blocks

@@ -193,9 +193,20 @@ class PlannerRenderingTest : PlannerTestHost() {
         assertTrue(statusHeight > 0)
         val x = main { (activity.resources.displayMetrics.widthPixels * 0.7f).toInt() }
         val paper = main { screen.palette.Paper }
+        var statusY = statusHeight / 2
+        // Grid lines show through this translucent bar too. Pick bare paper near its
+        // centre, then check that same pixel after a tile scrolls underneath it.
         await("The empty planner must reach the compositor") {
             val empty = screenshot()
-            try { empty.getPixel(x, statusHeight / 2) == paper }
+            try {
+                for (y in statusHeight / 3..statusHeight * 2 / 3) {
+                    if (empty.getPixel(x, y) == paper) {
+                        statusY = y
+                        return@await true
+                    }
+                }
+                false
+            }
             finally { empty.recycle() }
         }
         // Added through the planner, which reads a day again after its own writes.
@@ -214,7 +225,7 @@ class PlannerRenderingTest : PlannerTestHost() {
             await("The tile must tint the system bar and heading continuously") {
                 val image = screenshot()
                 try {
-                    val status = image.getPixel(x, statusHeight / 2)
+                    val status = image.getPixel(x, statusY)
                     val heading = image.getPixel(x, statusHeight + 6)
                     val channels = listOf<(Int) -> Int>(Color::red, Color::green, Color::blue)
                     channels.sumOf { kotlin.math.abs(it(status) - it(paper)) } > 20 &&
