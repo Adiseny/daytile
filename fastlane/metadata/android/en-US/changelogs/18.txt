@@ -1,0 +1,6 @@
+Faster saves when moving several tiles.
+The month heading stays still between weeks in the same month.
+Long titles show more complete lines when they fit.
+Resizing keeps the title column stable as duration labels change.
+Resizing becomes available 25 ms sooner after scrolling.
+Rapid cross-day edits keep the latest preview. Task storage is unchanged.

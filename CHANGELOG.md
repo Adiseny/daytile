@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.3 — 7 November 2026
+
+- Faster saves when moving several tiles: updates use each tile's full existing database key instead of scanning its day for every selected tile. A 504-tile comparison measured approximately 3.5–3.7 times faster repository saves; this is not a claim about overall app speed.
+- The month heading stays still when swiping between weeks with the same heading. Weeks crossing month or year boundaries retain their transitions.
+- Day tiles show more complete title lines when they fit, with measured space for the time and resize handle. Long pinned titles remain inside the tile, including at larger font sizes.
+- Resizing keeps the title column stable when duration labels change width. Duration labels remain complete and right-aligned when they fit, without pushing or overlapping the title.
+- Reduced the post-scroll resize guard from 300 to 275 ms. Immediate strokes still continue scrolling; long-press timing and snapping are unchanged.
+- Rapid cross-day moves retain the latest preview while earlier saves finish. Week updates scan only the changed day's visible tiles, and text fitting avoids repeated layout attempts.
+- F-Droid listing text and images remain outside the APK. The upstream GPL and Kotlin licence notices are included as compressed assets. No dependencies, permissions, task fields, database indexes or persistent caches are added; task storage is unchanged.
+- The signed APK is 157,488 bytes, 16,591 bytes larger than v1.6.2: 16,051 bytes for the upstream licence assets and their ZIP entries, plus 540 bytes for the planner changes. Catalogue files add no APK bytes.
+- All 77 unit tests and all 95 Android tests pass on each of Android 8/API 26 and Android 17/API 37. The minified build passes native navigation and resizing checks; an update with 57,456 tasks preserves every database byte. Detailed checks and size measurements are recorded in `docs/optimisation.md`.
+
 ## 1.6.2 — 9 October 2026
 
 - Consistent black tile text in the light palette and white in the dark palette, with dark washes adjusted for at least 4.5:1 contrast at every hour and in held and lifted states. Day and week use the same solid fill, so overlapping blocks retain their colours and contrast.

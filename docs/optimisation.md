@@ -1,3 +1,25 @@
+# Release 1.6.3 — 7 November 2026
+
+Version code 18 is signed with the same certificate as v1.6.2:
+`7e95d4310ce9e34fa1ba8f6299723877452b065c31c4271760948f04e6903a82` (SHA-256).
+The signed APK is 157,488 bytes and its SHA-256 is
+`b4e7b08415c86b31d7adcca6e300766ca7e178b6a09bc2210d270cbb629fe56a`.
+Its packaged entries match the completely audited build, apart from the manifest's
+version metadata. In particular, production dex, resources and licence assets are identical.
+The source tag is `v1.6.3`; the corresponding external catalogue changelog is `18.txt`.
+
+Compared with the public v1.6.2 APK (140,897 bytes), the 16,591-byte increase consists
+of 16,051 bytes for the upstream licence assets and their ZIP entries and 540 bytes for
+the planner changes. No catalogue file is packaged and task storage is unchanged.
+
+The signed build passes unit tests, release lint, privacy verification and shrinking.
+On an isolated Android 8/API 26 emulator, installing the public v1.6.2, then updating
+to this exact signed APK succeeds without uninstalling. All 57,456 tasks and every
+database byte survive, SQLite integrity passes, and native day/week navigation and
+pinch gestures work. The real planner installation is untouched. The complete Android
+17 suite also passes all 95 tests after the version change; the Android 8 and 17 audit
+results below apply to the identical production dex.
+
 # Slightly quicker resizing after scrolling — 7 November 2026
 
 The existing scroll guard is reduced from 300 to 275ms. A touch during that interval
